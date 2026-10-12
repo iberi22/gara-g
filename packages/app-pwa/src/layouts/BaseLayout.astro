@@ -35,7 +35,8 @@ const pageTitle = isStaging() ? STAGING_TITLE_PREFIX + title : title;
   <body>
     {isStaging() && <StagingBanner />}
     <slot />
-    <Toaster client:load />
+    {/* client:only: el SSR de islas Svelte esta roto en workerd (ver bienvenida.astro); con client:load la pagina sale vacia en `astro dev`. */}
+    <Toaster client:only="svelte" />
 
   </body>
 </html>
