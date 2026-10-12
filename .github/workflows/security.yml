@@ -1,10 +1,8 @@
 name: Security Audit
 
 on:
-  push:
-    branches: [ main, develop ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
   schedule:
     - cron: '0 0 * * 1' # Every Monday at midnight
 
@@ -16,13 +14,8 @@ jobs:
       security-events: write
       actions: read
       contents: read
-    # CodeQL es lento; solo tiene sentido en cambios de codigo real.
-    if: >-
-      github.event_name == 'schedule' ||
-      !(
-        contains(github.event.head_commit.message, '.github/workflows/security.yml') ||
-        contains(github.event.head_commit.message, 'REPORT.md')
-      )
+    # Weekly + PR audit only. (The old skip-if read head_commit.message,
+    # which does not exist on pull_request/schedule events.)
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
