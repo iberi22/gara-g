@@ -1,0 +1,17 @@
+# packages/app-pwa/.dev.vars.example — variables del Worker para `pnpm dev` (astro dev).
+#
+#   cp .dev.vars.example .dev.vars     # .dev.vars está en .gitignore
+#
+# `astro dev` corre el SSR en workerd: lee estas vars de `.dev.vars`, NO de la shell.
+# (Alternativa sin fichero: exportarlas y añadir CLOUDFLARE_INCLUDE_PROCESS_ENV=true,
+# que es lo que hace playwright.config.ts para los e2e locales.)
+
+# Entorno local. La sesión de admin de desarrollo solo existe en development/local;
+# staging, preview y production nunca la tienen.
+ENVIRONMENT=development
+
+# Opt-in explícito de la sesión de admin de desarrollo (src/lib/session.ts,
+# devFallbackAllowed): con "true" y ENVIRONMENT development/local, cualquier cookie
+# `session` desconocida (p. ej. session=dev) entra como admin usr_001. Sin esta línea,
+# en local hay que iniciar sesión de verdad. NUNCA ponerla en wrangler.toml.
+DEV_ADMIN_SESSION=true

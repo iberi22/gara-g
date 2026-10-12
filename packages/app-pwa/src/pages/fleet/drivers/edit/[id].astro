@@ -1,0 +1,120 @@
+---
+import FleetLayout from '../../../../layouts/FleetLayout.astro';
+import EntityForm from '../../../../components/EntityForm.astro';
+import UploadWidget from '../../../../components/UploadWidget.astro';
+import PageHeader from '../../../../components/PageHeader.astro';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../../lib/fleetSeed.js';
+import { getEntity, listEntities } from '../../../../lib/domain.js';
+import { instanceIdFor } from '../../../../garage/domain/tenant.js';
+
+// Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
+// La semilla solo se escribe para el tenant demo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData().catch(() => {});
+
+const url = Astro.url;
+const id = url.pathname.split('/').pop()!;
+
+// getEntity returns flat record: { id, instance_id, created_at, updated_at, name, cedula, ... }
+let driver: any = null;
+try {
+  driver = await getEntity('driver', id, instanceId);
+  if (!driver) {
+    const all = await listEntities('driver', instanceId);
+    driver = all.find((d: any) => d.id === id) ?? null;
+  }
+} catch (e: any) {
+  console.error('[driver/edit] getEntity error:', e?.message);
+  driver = null;
+}
+
+if (!driver) {
+  return Astro.redirect('/fleet/drivers?error=not_found');
+}
+
+// Cargar archivos asociados al conductor. El GET de /api/fleet/files aplica
+// este mismo filtro; aqui se lee directo porque un fetch server-side no lleva
+// la cookie de la sesion y siempre caia en 401.
+let driverFiles: any[] = [];
+try {
+  const all = await listEntities('document', instanceId).catch(() => [] as any[]);
+  driverFiles = all
+    .filter((d: any) => {
+      const attached = d.attachedTo ?? d.attached_to;
+      if (!attached) return false;
+      if (typeof attached === 'string') return attached === `driver:${driver.id}`;
+      return attached.entityType === 'driver' && attached.entityId === driver.id;
+    })
+    .map((d: any) => ({
+      id: d.id,
+      key: d.fileKey ?? d.r2Key ?? d.url,
+      name: d.name ?? d.fileName,
+      type: d.fileType ?? d.mimeType,
+      size: d.fileSize ?? d.size,
+      kind: d.kind ?? 'document',
+      uploadedAt: d.uploadedAt ?? d.createdAt ?? d.updated_at,
+    }));
+} catch (e) {
+  console.error('[driver/edit] load files error:', e);
+}
+---
+
+<FleetLayout title={`Editar ${driver.name}`} section="drivers">
+  <PageHeader title={`Editar conductor: ${driver.name}`} icon="drivers" />
+
+  {url.searchParams.get('error') === 'not_found' && (
+    <div class="g-toast g-toast-error">❌ Conductor no encontrado.</div>
+  )}
+
+  <EntityForm
+    entity="driver"
+    instanceId={instanceId}
+    initialData={driver}
+    fields={[
+      { name: 'name', label: 'Nombre completo', type: 'text', required: true },
+      { name: 'cedula', label: 'Cédula', type: 'text', required: true },
+      { name: 'licenseCategory', label: 'Categoría licencia', type: 'select', required: true,
+        options: [
+          { value: 'A1', label: 'A1 — Motos' },
+          { value: 'B1', label: 'B1 — Carros' },
+          { value: 'B2', label: 'B2 — Camionetas' },
+          { value: 'C1', label: 'C1 — Camiones livianos' },
+          { value: 'C2', label: 'C2 — Camiones pesados' },
+          { value: 'C3', label: 'C3 — Tractocamiones' },
+          { value: 'E1', label: 'E1 — Remolques' },
+          { value: 'E2', label: 'E2 — Semirremolques' },
+          { value: 'E3', label: 'E3 —full' },
+        ]
+      },
+      { name: 'licenseExpiry', label: 'Vencimiento licencia', type: 'date', required: true },
+      { name: 'phone', label: 'Teléfono', type: 'tel' },
+      { name: 'status', label: 'Estado', type: 'select', required: true,
+        options: [
+          { value: 'active', label: 'Activo' },
+          { value: 'on_leave', label: 'En permiso' },
+          { value: 'suspended', label: 'Suspendido' },
+          { value: 'inactive', label: 'Inactivo' },
+        ]
+      },
+    ]}
+    cancelUrl="/fleet/drivers"
+  />
+
+    <UploadWidget
+      entityType="driver"
+      entityId={driver.id}
+      kind="license"
+      label="Documentos del conductor"
+      initialFiles={driverFiles}
+      backUrl={`/fleet/drivers/edit/${driver.id}`}
+    />
+</FleetLayout>
+
+<style>
+.g-toast { padding: 0.75rem 1rem; border-radius: 0; margin-bottom: 1rem; font-size: 0.875rem; }
+.g-toast-error {
+  background: var(--swal-danger-bg);
+  border: 1px solid color-mix(in srgb, var(--swal-danger) 40%, transparent);
+  color: var(--swal-danger);
+}
+</style>

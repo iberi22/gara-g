@@ -1,0 +1,58 @@
+---
+/**
+ * components/StagingBanner.astro — Aviso permanente de "esto es el stage".
+ *
+ * Un stage que solo se distingue por el dominio es un stage del que alguien se
+ * olvida: abre la pestaña equivocada y escribe en la base de datos real creyendo
+ * que esta probando. El aviso va por eso en TODAS las paginas de la app, arriba del
+ * todo, y no se puede cerrar.
+ *
+ * No lleva <script>: es HTML y CSS. Un aviso que necesita JavaScript para aparecer es
+ * un aviso que no aparece justo cuando hay algo roto.
+ */
+import { STAGING_HOST } from '../lib/staging';
+
+export const prerender = false;
+---
+
+<div class="staging-banner" role="status">
+  <strong>Entorno de pruebas (staging).</strong>
+  <span>
+    Comparte la base de datos con producción, pero escribe en el tenant
+    <code>gara-staging</code>, separado del de producción. No es
+    <a href="https://gara-g.swal.network">gara-g.swal.network</a>: no borres datos reales aquí.
+  </span>
+</div>
+
+<style>
+  .staging-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.55rem 1rem;
+    /* Tokens del tema, no colores sueltos: el test de contraste
+       (tests/contrast-tokens.test.ts) mide var(--swal-*) y no admite
+       literales sueltos sin respaldo. */
+    background: var(--swal-warning-muted);
+    color: var(--swal-text);
+    border-bottom: 2px solid var(--swal-warning);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+  }
+  .staging-banner strong {
+    color: var(--swal-warning);
+    white-space: nowrap;
+  }
+  .staging-banner code {
+    font-family: var(--g-font-mono);
+    background: var(--swal-surface);
+    border: 1px solid var(--swal-warning);
+    border-radius: 3px;
+    padding: 0 0.25em;
+  }
+  .staging-banner a {
+    color: var(--swal-text);
+    text-decoration: underline;
+  }
+</style>

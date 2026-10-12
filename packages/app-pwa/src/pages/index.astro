@@ -1,0 +1,645 @@
+---
+/**
+ * src/pages/index.astro — Portada pública de GARA-G.
+ *
+ * Explica qué ofrece la app y que es gratis, y dice con honestidad qué requiere cuenta.
+ * Sin JS de cliente: el FAQ usa <details> y el resto es HTML y CSS. El tema lo resuelve el
+ * bootstrap que carga BaseLayout. La redirección de quien ya usa la app la hace el middleware.
+ */
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { FLEET_ONLY_HIDDEN_LANDING_FEATURES, isFleetOnly } from '../lib/features';
+
+export const prerender = false;
+
+type Feature = { id: string; title: string; text: string; account: boolean };
+type Group = { id: string; tag: string; title: string; intro: string; items: Feature[] };
+
+const allGroups: Group[] = [
+  {
+    id: 'vehiculo',
+    tag: '01 · Mi vehículo',
+    title: 'Para quien tiene un carro o una moto',
+    intro: 'Tu vehículo dibujado por piezas, con su salud y su historial a la vista.',
+    items: [
+      {
+        id: 'garage-3d',
+        title: 'Garage 3D',
+        text: 'Tu vehículo por piezas, con el estado de cada una, su historial y la pintura que quieras.',
+        account: false,
+      },
+      {
+        id: 'mantenimiento',
+        title: 'Mantenimiento por kilometraje',
+        text: 'Registra servicios, anota el kilometraje y mira cuáles toca hacer pronto.',
+        account: false,
+      },
+      {
+        id: 'catalogo',
+        title: 'Catálogo de modelos',
+        text: 'Busca marca y modelo y parte de una ficha ya armada.',
+        account: false,
+      },
+      {
+        id: 'expediente',
+        title: 'Expediente del vehículo',
+        text: 'Ficha, mecánica, manuales y un asistente de IA que responde sobre tu modelo.',
+        account: true,
+      },
+      {
+        id: 'documentos',
+        title: 'Documentos y vencimientos',
+        text: 'SOAT, tecnomecánica y otros papeles, con su fecha de vencimiento.',
+        account: true,
+      },
+    ],
+  },
+  {
+    id: 'flota',
+    tag: '02 · Camiones y maquinaria',
+    title: 'Para flotas y maquinaria de obra',
+    intro: 'Camiones, volquetas y maquinaria amarilla, con horómetro cuando el kilometraje no sirve.',
+    items: [
+      {
+        id: 'flotas',
+        title: 'Flotas y conductores',
+        text: 'Agrupa los equipos por flota y asigna conductores.',
+        account: true,
+      },
+      {
+        id: 'horometro',
+        title: 'Mantenimiento por horómetro',
+        text: 'Servicios por horas de trabajo para la maquinaria, con sus próximos mantenimientos.',
+        account: true,
+      },
+      {
+        id: 'combustible',
+        title: 'Combustible',
+        text: 'Registro de tanqueos y de lo que gasta cada equipo.',
+        account: true,
+      },
+      {
+        id: 'rastreo',
+        title: 'Rastreo en vivo y geocercas',
+        text: 'Mira dónde está cada equipo en el mapa y define zonas de trabajo.',
+        account: true,
+      },
+      {
+        id: 'alertas',
+        title: 'Alertas y notificaciones',
+        text: 'Un centro de avisos con lo pendiente, y lo leído aparte.',
+        account: true,
+      },
+      {
+        id: 'analitica',
+        title: 'Analítica',
+        text: 'Gráficas de combustible y de costos por tipo de gasto.',
+        account: true,
+      },
+    ],
+  },
+  {
+    id: 'todos',
+    tag: '03 · Para todos',
+    title: 'Lo que viene con la app',
+    intro: 'Sirve igual para una moto que para treinta volquetas.',
+    items: [
+      {
+        id: 'interfaces',
+        title: 'Tres interfaces',
+        text: 'Consola con tablas, AUI (la que arma vistas con IA) y garage. Sin cuenta usas el garage; la consola y la AUI van con cuenta.',
+        account: true,
+      },
+      {
+        id: 'comunidad',
+        title: 'Wiki y foro por versión',
+        text: 'Especificaciones y consejos de otros dueños de tu misma versión del vehículo.',
+        account: true,
+      },
+      {
+        id: 'mercado',
+        title: 'Mercado de tu ciudad',
+        text: 'Talleres, repuestos y aseguradoras te ofrecen lo que tus vehículos van a necesitar. GARA-G solo te conecta con ellos: no cobra ni procesa pagos.',
+        account: false,
+      },
+      {
+        id: 'pwa',
+        title: 'App instalable',
+        text: 'Instálala desde el navegador y ábrela como una app más del teléfono.',
+        account: false,
+      },
+      {
+        id: 'tema',
+        title: 'Tema claro u oscuro',
+        text: 'Sigue el del sistema o eliges el que prefieras.',
+        account: false,
+      },
+    ],
+  },
+];
+
+const allFaqs: Array<{ q: string; a: string; mercado?: boolean }> = [
+  {
+    q: '¿Es gratis?',
+    a: 'Sí. No hay planes, no pedimos tarjeta y no cobramos por vehículo. Lo único con límite es el asistente de IA, que tiene un cupo diario.',
+  },
+  {
+    mercado: true,
+    q: '¿GARA-G cobra o procesa pagos con los talleres?',
+    a: 'No. GARA-G no es una pasarela de pagos: te conecta con talleres, tiendas y aseguradoras de tu ciudad, y el pago lo acuerdas directamente con ellos o con el token de la red SWAL. Las ofertas se comparan en tu dispositivo, con tus vehículos.',
+  },
+  {
+    q: '¿Necesito una cuenta?',
+    a: 'Para usar el garage 3D, el mantenimiento, el catálogo y los ajustes, no. Para las páginas de flota, el asistente de IA, los manuales, la wiki y el foro, sí. Hoy las cuentas las crea un administrador: no hay registro público.',
+  },
+  {
+    q: '¿Dónde quedan mis datos?',
+    a: 'Sin cuenta, solo en este navegador de este dispositivo. Con cuenta, en la nube. Si activas el respaldo cifrado, en la nube también, pero ilegibles para el servidor.',
+  },
+  {
+    q: '¿Qué pasa si borro el navegador?',
+    a: 'Si no tienes cuenta ni respaldo, pierdes los datos. Les pasa lo mismo si borras los datos del sitio, usas una ventana privada o pierdes el equipo. Con el respaldo cifrado los recuperas con tu código.',
+  },
+  {
+    q: '¿Qué es el respaldo cifrado?',
+    a: 'Una copia opcional de tus datos en la nube. Se cifra en tu dispositivo con un código que solo tú tienes, así que el servidor guarda datos que no puede leer. Si pierdes el código, nadie puede recuperarlos, ni nosotros.',
+  },
+  {
+    q: '¿Funciona sin internet?',
+    a: 'Todavía no. Necesita conexión para abrir las páginas. Lo que sí hace la app instalada es guardar en el equipo sus archivos estáticos (estilos, scripts, íconos) para cargar más rápido.',
+  },
+];
+
+// FLEET_ONLY (src/lib/features.ts): la portada no promete el Mercado (ni su FAQ de pagos)
+// mientras sus rutas respondan 404.
+const fleetOnly = isFleetOnly();
+const hiddenFeatures: readonly string[] = fleetOnly ? FLEET_ONLY_HIDDEN_LANDING_FEATURES : [];
+const groups: Group[] = allGroups.map((g) => ({
+  ...g,
+  items: g.items.filter((item) => !hiddenFeatures.includes(item.id)),
+}));
+const faqs = fleetOnly ? allFaqs.filter((f) => !f.mercado) : allFaqs;
+---
+
+<BaseLayout
+  title="GARA-G · El taller digital de tu vehículo o tu flota, 100 % gratis"
+  description="Garage 3D, mantenimiento, documentos y flotas para carros, motos, camiones y maquinaria. 100 % gratis, sin tarjeta. Empieza sin cuenta."
+>
+  <div class="landing-page swal-blueprint-bg">
+    <a class="skip-link" href="#contenido">Saltar al contenido</a>
+
+    <header class="landing-nav">
+      <div class="nav-brand">
+        <span class="brand-logo swal-chamfer-sm" aria-hidden="true">G</span>
+        <span class="brand-title">GARA-G</span>
+      </div>
+      <nav class="nav-links" aria-label="Secciones">
+        <a href="#features" class="nav-link">Qué ofrece</a>
+        <a href="#gratis" class="nav-link">Gratis</a>
+        <a href="#datos" class="nav-link">Tus datos</a>
+        <a href="#faq" class="nav-link">Preguntas</a>
+      </nav>
+      <a href="/login" class="btn btn-ghost swal-chamfer-sm" data-testid="cta-login-nav">Entrar</a>
+    </header>
+
+    <main id="contenido">
+      <!-- Hero -->
+      <section class="hero" data-testid="hero-section" aria-labelledby="hero-heading">
+        <div class="hero-copy">
+          <p class="swal-kicker hero-kicker"><span class="swal-tick"></span> 100 % gratis · sin tarjeta · sin planes</p>
+          <h1 id="hero-heading" class="hero-title" data-testid="hero-title">
+            El taller digital de tu vehículo o tu flota
+          </h1>
+          <p class="hero-lead">
+            Carros, motos, camiones y maquinaria amarilla en un solo lugar: salud por pieza, mantenimiento,
+            documentos y flotas. Empiezas sin crear cuenta.
+          </p>
+          <div class="cta-row">
+            <a href="/fleet/bienvenida" class="btn btn-primary swal-chamfer-sm" data-testid="cta-start">
+              Empezar gratis, sin cuenta
+            </a>
+            <a href="/login" class="btn btn-secondary swal-chamfer-sm" data-testid="cta-login">
+              Entrar con mi cuenta
+            </a>
+          </div>
+        </div>
+
+        <figure class="hero-plate swal-card-frame" aria-hidden="true">
+          <div class="swal-card-inner plate-inner">
+            <svg class="plate-svg" viewBox="0 0 360 200" role="presentation" focusable="false">
+              <!-- cotas -->
+              <g class="dim-line">
+                <path d="M30 168 H330 M30 160 V176 M330 160 V176" />
+                <path d="M344 40 V150 M336 40 H352 M336 150 H352" />
+              </g>
+              <!-- volqueta en vista lateral -->
+              <g class="body-line">
+                <path d="M40 140 V104 H110 L130 70 H190 V140" />
+                <path d="M196 140 V60 L300 48 L318 140" />
+                <path d="M136 76 H184 V104 H122" />
+                <path d="M40 140 H318" />
+                <circle cx="82" cy="140" r="16" />
+                <circle cx="82" cy="140" r="6" />
+                <circle cx="264" cy="140" r="16" />
+                <circle cx="264" cy="140" r="6" />
+              </g>
+              <g class="dim-text">
+                <text x="180" y="190" text-anchor="middle">LARGO</text>
+                <text x="332" y="98" text-anchor="end" transform="rotate(-90 332 98)">ALTO</text>
+              </g>
+            </svg>
+            <figcaption class="plate-cap swal-kicker">Plano 01 · vehículo por piezas</figcaption>
+          </div>
+        </figure>
+      </section>
+
+      <!-- Qué ofrece -->
+      <section id="features" class="block" data-testid="features-section" aria-labelledby="features-heading">
+        <div class="block-head">
+          <p class="dim-title swal-kicker"><span>Qué ofrece</span></p>
+          <h2 id="features-heading" class="block-title">Todo lo del taller, en un solo sitio</h2>
+          <p class="block-sub">
+            Cada módulo dice si lo puedes usar sin cuenta o si necesita una.
+          </p>
+        </div>
+
+        {groups.map((g) => (
+          <div class="group" data-testid={`group-${g.id}`}>
+            <div class="group-head">
+              <p class="swal-kicker group-tag"><span class="swal-tick"></span> {g.tag}</p>
+              <h3 class="group-title">{g.title}</h3>
+              <p class="group-intro">{g.intro}</p>
+            </div>
+            <ul class="card-grid">
+              {g.items.map((f) => (
+                <li class="swal-card-frame" data-testid={`feature-${f.id}`}>
+                  <div class="swal-card-inner feature">
+                    <h4 class="feature-title">{f.title}</h4>
+                    <p class="feature-text">{f.text}</p>
+                    <span class:list={['badge', f.account ? 'badge-account' : 'badge-free']}>
+                      {f.account ? 'Con cuenta' : 'Sin cuenta'}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </section>
+
+      <!-- Gratis de verdad -->
+      <section id="gratis" class="block" data-testid="free-section" aria-labelledby="free-heading">
+        <div class="block-head">
+          <p class="dim-title swal-kicker"><span>Gratis de verdad</span></p>
+          <h2 id="free-heading" class="block-title">Sin planes, sin tarjeta, sin cobro por vehículo</h2>
+          <p class="block-sub">Registra uno o cien equipos: cuesta lo mismo, nada.</p>
+        </div>
+        <div class="split">
+          <div class="swal-card-frame is-active">
+            <div class="swal-card-inner panel">
+              <h3 class="panel-title">Lo que no cobramos</h3>
+              <ul class="check-list">
+                <li>No hay planes ni niveles de pago.</li>
+                <li>No pedimos tarjeta.</li>
+                <li>No cobramos por vehículo, conductor ni flota.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="swal-card-frame">
+            <div class="swal-card-inner panel">
+              <h3 class="panel-title">Lo que sí tiene límite</h3>
+              <ul class="limit-list">
+                <li>El asistente de IA, los manuales y la wiki o el foro requieren cuenta.</li>
+                <li>La IA tiene un cupo diario: cuando se agota, vuelve al día siguiente.</li>
+                <li>Hoy no hay registro público: las cuentas las crea un administrador.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tus datos -->
+      <section id="datos" class="block" data-testid="data-modes-section" aria-labelledby="data-heading">
+        <div class="block-head">
+          <p class="dim-title swal-kicker"><span>Tus datos, tu decisión</span></p>
+          <h2 id="data-heading" class="block-title">Tú eliges dónde viven tus datos</h2>
+          <p class="block-sub">Tres formas de guardarlos. Puedes empezar por la más simple.</p>
+        </div>
+        <ul class="card-grid modes">
+          <li class="swal-card-frame" data-testid="mode-local">
+            <div class="swal-card-inner mode">
+              <span class="swal-kicker">Modo 1</span>
+              <h3 class="feature-title">Sin cuenta</h3>
+              <p class="feature-text">Los datos se guardan solo en este navegador. No se comparten entre dispositivos.</p>
+              <p class="warn">
+                <strong>Ojo:</strong> si borras los datos del sitio, usas una ventana privada o pierdes el equipo, se pierden.
+              </p>
+            </div>
+          </li>
+          <li class="swal-card-frame is-active" data-testid="mode-e2ee">
+            <div class="swal-card-inner mode">
+              <span class="swal-kicker">Modo 2 · opcional</span>
+              <h3 class="feature-title">Respaldo cifrado de extremo a extremo</h3>
+              <p class="feature-text">
+                Se cifra en tu dispositivo con un código que solo tú tienes. El servidor guarda datos ilegibles.
+              </p>
+              <p class="warn">
+                <strong>Ojo:</strong> si pierdes el código, nadie puede recuperar tus datos.
+              </p>
+            </div>
+          </li>
+          <li class="swal-card-frame" data-testid="mode-cloud">
+            <div class="swal-card-inner mode">
+              <span class="swal-kicker">Modo 3</span>
+              <h3 class="feature-title">Con cuenta</h3>
+              <p class="feature-text">
+                Pensado para flotas y equipos: los datos quedan en la nube y se comparten entre dispositivos. Incluye la IA.
+              </p>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <!-- FAQ -->
+      <section id="faq" class="block" data-testid="faq-section" aria-labelledby="faq-heading">
+        <div class="block-head">
+          <p class="dim-title swal-kicker"><span>Preguntas frecuentes</span></p>
+          <h2 id="faq-heading" class="block-title">Lo que más nos preguntan</h2>
+        </div>
+        <div class="faq-list">
+          {faqs.map((f) => (
+            <details class="faq swal-chamfer-sm">
+              <summary>{f.q}</summary>
+              <p>{f.a}</p>
+            </details>
+          ))}
+        </div>
+      </section>
+    </main>
+
+    <footer class="landing-footer" data-testid="landing-footer">
+      <div class="footer-cta">
+        <h2 class="footer-title">Empieza hoy, es gratis</h2>
+        <div class="cta-row">
+          <a href="/fleet/bienvenida" class="btn btn-primary swal-chamfer-sm" data-testid="cta-start-footer">
+            Empezar gratis, sin cuenta
+          </a>
+          <a href="/login" class="btn btn-secondary swal-chamfer-sm" data-testid="cta-login-footer">
+            Entrar con mi cuenta
+          </a>
+        </div>
+      </div>
+      <p class="footer-note">
+        GARA-G · ¿Ya tienes cuenta? <a href="/login" class="footer-link">Inicia sesión</a>
+      </p>
+    </footer>
+  </div>
+</BaseLayout>
+
+<style>
+  .landing-page {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    color: var(--swal-text);
+    font-family: var(--swal-font);
+    overflow-x: clip;
+  }
+  .landing-page :global(a:focus-visible),
+  .landing-page :global(summary:focus-visible) {
+    outline: 2px solid var(--swal-accent-text);
+    outline-offset: 3px;
+  }
+  .skip-link {
+    position: absolute;
+    left: 0.5rem;
+    top: -4rem;
+    z-index: 100;
+    padding: 0.5rem 0.9rem;
+    background: var(--swal-accent);
+    color: var(--swal-accent-contrast);
+    font-weight: 700;
+  }
+  .skip-link:focus { top: 0.5rem; }
+
+  /* Barra superior */
+  .landing-nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.7rem clamp(1rem, 4vw, 2.5rem);
+    background: var(--swal-bg-surface);
+    border-bottom: 1px solid var(--swal-border);
+  }
+  .nav-brand { display: flex; align-items: center; gap: 0.6rem; }
+  .brand-logo {
+    width: 32px; height: 32px;
+    display: grid; place-items: center;
+    background: var(--swal-accent);
+    color: var(--swal-accent-contrast);
+    font-weight: 800;
+  }
+  .brand-title { font-weight: 800; letter-spacing: 0.04em; }
+  .nav-links { display: flex; gap: 1.4rem; }
+  .nav-link {
+    color: var(--swal-text-secondary);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+  .nav-link:hover { color: var(--swal-accent-text); }
+
+  /* Botones */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0.7rem 1.4rem;
+    font-weight: 700;
+    font-size: 1rem;
+    text-decoration: none;
+    text-align: center;
+    border: 0;
+  }
+  .btn-primary {
+    background: var(--swal-accent);
+    color: var(--swal-accent-contrast);
+  }
+  .btn-primary:hover { background: var(--swal-accent-hover); }
+  .btn-secondary,
+  .btn-ghost {
+    background: var(--swal-surface);
+    color: var(--swal-text);
+    box-shadow: inset 0 0 0 1px var(--swal-border-strong);
+  }
+  .btn-secondary:hover,
+  .btn-ghost:hover { background: var(--swal-surface-hover); }
+  .btn-ghost { min-height: 36px; padding: 0.4rem 1rem; font-size: 0.9rem; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 0.8rem; }
+
+  /* Hero */
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    gap: clamp(1.5rem, 4vw, 3.5rem);
+    align-items: center;
+    max-width: 1180px;
+    width: 100%;
+    margin: 0 auto;
+    padding: clamp(2rem, 6vw, 4.5rem) clamp(1rem, 4vw, 2.5rem);
+  }
+  .hero-kicker { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 1rem; }
+  .hero-title {
+    margin: 0 0 1rem;
+    font-size: clamp(2rem, 5.2vw, 3.6rem);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    font-weight: 800;
+  }
+  .hero-lead {
+    margin: 0 0 1.6rem;
+    max-width: 52ch;
+    font-size: clamp(1rem, 1.6vw, 1.15rem);
+    line-height: 1.55;
+    color: var(--swal-text-secondary);
+  }
+  .plate-inner { display: flex; flex-direction: column; gap: 0.5rem; padding: 1rem; margin: 0; }
+  .hero-plate { margin: 0; }
+  .plate-svg { width: 100%; height: auto; display: block; }
+  .body-line { fill: none; stroke: var(--swal-text); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .dim-line { fill: none; stroke: var(--swal-accent-text); stroke-width: 1.2; }
+  .dim-text text { fill: var(--swal-accent-text); font: 600 10px var(--swal-font-mono); letter-spacing: 0.14em; }
+  .plate-cap { margin: 0; }
+
+  /* Bloques */
+  .block {
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: clamp(2rem, 5vw, 3.5rem) clamp(1rem, 4vw, 2.5rem);
+    scroll-margin-top: 4rem;
+  }
+  .block-head { margin-bottom: 1.8rem; }
+  .block-title {
+    margin: 0.6rem 0 0.4rem;
+    font-size: clamp(1.5rem, 3.4vw, 2.2rem);
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+  }
+  .block-sub { margin: 0; color: var(--swal-text-secondary); max-width: 62ch; line-height: 1.5; }
+
+  /* Cota: línea de dimensión con rótulo al centro */
+  .dim-title {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    margin: 0;
+    color: var(--swal-accent-text);
+  }
+  .dim-title::before,
+  .dim-title::after {
+    content: '';
+    flex: 1;
+    height: 9px;
+    border-left: 1px solid var(--swal-accent-text);
+    border-right: 1px solid var(--swal-accent-text);
+    background: linear-gradient(var(--swal-accent-text), var(--swal-accent-text)) center / 100% 1px no-repeat;
+  }
+  .dim-title::before { flex: 0 0 2.5rem; }
+  .dim-title span { white-space: nowrap; }
+
+  .group { margin-bottom: 2.4rem; }
+  .group-head { margin-bottom: 1rem; }
+  .group-tag { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.3rem; }
+  .group-title { margin: 0 0 0.25rem; font-size: 1.3rem; }
+  .group-intro { margin: 0; color: var(--swal-text-secondary); }
+
+  .card-grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+    gap: 1rem;
+  }
+  .feature, .mode, .panel { display: flex; flex-direction: column; gap: 0.5rem; padding: 1.1rem 1.2rem 1.2rem; }
+  .feature-title { margin: 0; font-size: 1.05rem; line-height: 1.25; }
+  .feature-text { margin: 0; color: var(--swal-text-secondary); line-height: 1.5; font-size: 0.95rem; }
+  .badge {
+    align-self: flex-start;
+    margin-top: auto;
+    padding: 0.15rem 0.55rem;
+    font: 600 0.72rem var(--swal-font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .badge-free { background: var(--swal-success-muted); color: var(--swal-success); }
+  .badge-account { background: var(--swal-warning-muted); color: var(--swal-warning); }
+
+  /* Gratis */
+  .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 1rem; }
+  .panel-title { margin: 0 0 0.3rem; font-size: 1.15rem; }
+  .check-list, .limit-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.6rem; }
+  .check-list li, .limit-list li { position: relative; padding-left: 1.4rem; line-height: 1.5; }
+  .check-list li::before, .limit-list li::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0.55em;
+    width: 10px; height: 7px;
+    transform: skewX(-24deg);
+  }
+  .check-list li::before { background: var(--swal-success); }
+  .limit-list li::before { background: var(--swal-warning); }
+
+  .modes { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+  .warn {
+    margin: 0;
+    padding: 0.55rem 0.7rem;
+    background: var(--swal-warning-muted);
+    border-left: 3px solid var(--swal-warning);
+    font-size: 0.9rem;
+    line-height: 1.45;
+  }
+
+  /* FAQ */
+  .faq-list { display: grid; gap: 0.6rem; max-width: 820px; }
+  .faq { background: var(--swal-surface); box-shadow: inset 0 0 0 1px var(--swal-border); }
+  .faq summary {
+    cursor: pointer;
+    padding: 0.9rem 1.1rem;
+    font-weight: 600;
+    min-height: 44px;
+  }
+  .faq[open] summary { color: var(--swal-accent-text); }
+  .faq p { margin: 0; padding: 0 1.1rem 1rem; color: var(--swal-text-secondary); line-height: 1.55; }
+
+  /* Footer */
+  .landing-footer {
+    margin-top: auto;
+    padding: 2.5rem clamp(1rem, 4vw, 2.5rem) 1.5rem;
+    background: var(--swal-bg-surface);
+    border-top: 1px solid var(--swal-border);
+    text-align: center;
+  }
+  .footer-cta { display: grid; justify-items: center; gap: 1rem; }
+  .footer-cta .cta-row { justify-content: center; }
+  .footer-title { margin: 0; font-size: 1.5rem; }
+  .footer-note { margin: 1.8rem 0 0; color: var(--swal-text-muted); font-size: 0.9rem; }
+  .footer-link { color: var(--swal-accent-text); text-decoration: underline; }
+
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: minmax(0, 1fr); }
+    .nav-links { display: none; }
+  }
+  @media (max-width: 480px) {
+    .cta-row .btn { width: 100%; }
+    .dim-title::before { flex-basis: 1rem; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .btn { transition: background-color 0.15s ease; }
+  }
+</style>

@@ -1,0 +1,16 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import LiveChart from '../../components/telemetry/LiveChart.svelte';
+
+// La sala P2P y su clave las pide el cliente a /api/mesh/room-key (tenant de la sesion, en el
+// servidor): la pagina no pasa ningun instanceId al componente.
+---
+
+<BaseLayout title="Telemetría en vivo — GARA-G">
+  <main class="container mx-auto px-4 py-6 max-w-7xl">
+    <h1 class="text-2xl font-bold mb-4">Telemetría en vivo</h1>
+    <LiveChart client:only="svelte">
+      <div slot="fallback" style="min-height: 36rem" aria-hidden="true"></div>
+    </LiveChart>
+  </main>
+</BaseLayout>

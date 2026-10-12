@@ -1,0 +1,44 @@
+---
+/**
+ * /fleet/bienvenida — Asistente de primer uso (que ofrece, donde guardar los datos, perfil, menu,
+ * paneles). Es publica: la CTA de la landing lleva aqui sin sesion y sin cookie.
+ *
+ * El middleware manda aqui a quien aun no hizo el onboarding en este navegador. Si las
+ * preferencias guardadas (otro equipo) ya dicen onboarded, se recuerda en la cookie y se
+ * vuelve a `next`. `?again=1` (desde Ajustes) salta esa comprobacion.
+ *
+ * Usa Layout (sin la barra lateral de FleetLayout): en el primer uso el menu aun no esta
+ * elegido y el asistente ocupa toda la pantalla. Svelte con client:only (SSR roto en workerd).
+ */
+import Layout from '../../layouts/Layout.astro';
+import OnboardingApp from '../../components/prefs/OnboardingApp.svelte';
+import { instanceIdFor } from '../../garage/domain/tenant';
+import { loadUserPrefs, onboardedCookie } from '../../lib/prefs.server';
+
+const rawNext = Astro.url.searchParams.get('next') ?? '/fleet';
+const next = rawNext.startsWith('/fleet') && !rawNext.startsWith('//') && !rawNext.includes('\\') ? rawNext : '/fleet';
+const again = Astro.url.searchParams.get('again') === '1';
+const user = Astro.locals.user as { userId?: string } | undefined;
+// Sin sesion (modo local o primera visita) esta pagina NO lee D1: ni las preferencias del
+// servidor ni la redireccion de "ya hizo el onboarding". Las preferencias viven en localStorage.
+const hasSession = Boolean(user?.userId);
+
+if (hasSession && !again && user?.userId) {
+  const prefs = await loadUserPrefs(user.userId, instanceIdFor(Astro.request, Astro.locals));
+  if (prefs.onboarded) {
+    // Se arma la Response a mano: Astro.redirect() crea una nueva y descarta las cabeceras
+    // puestas en Astro.response (la cookie no llegaria y /fleet volveria a mandar aqui).
+    return new Response(null, {
+      status: 303,
+      headers: {
+        Location: next,
+        'Set-Cookie': onboardedCookie(user.userId, Astro.url.protocol === 'https:'),
+      },
+    });
+  }
+}
+---
+
+<Layout title="Bienvenida · GARA-G">
+  <OnboardingApp client:only="svelte" next={next} hasSession={hasSession} />
+</Layout>

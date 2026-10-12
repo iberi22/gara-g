@@ -1,0 +1,140 @@
+---
+/**
+ * ThemeModeSwitch.astro — Selector de tema Claro / Oscuro / Sistema.
+ *
+ * Lee \`window.swalTheme.get()\` y llama \`window.swalTheme.set(mode)\`.
+ * Se actualiza en \`swal:themechange\` y \`astro:page-load\`.
+ */
+---
+
+<div
+  class="theme-mode-switch swal-chamfer-sm"
+  data-testid="theme-mode-switch"
+  role="group"
+  aria-label="Selector de Tema"
+>
+  <button
+    type="button"
+    class="theme-btn"
+    data-testid="theme-btn-light"
+    data-mode="light"
+    aria-pressed="false"
+    title="Claro"
+  >
+    <span class="theme-icon">☀️</span>
+    <span class="theme-label swal-kicker">Claro</span>
+  </button>
+  <button
+    type="button"
+    class="theme-btn"
+    data-testid="theme-btn-dark"
+    data-mode="dark"
+    aria-pressed="false"
+    title="Oscuro"
+  >
+    <span class="theme-icon">🌙</span>
+    <span class="theme-label swal-kicker">Oscuro</span>
+  </button>
+  <button
+    type="button"
+    class="theme-btn"
+    data-testid="theme-btn-system"
+    data-mode="system"
+    aria-pressed="false"
+    title="Sistema"
+  >
+    <span class="theme-icon">💻</span>
+    <span class="theme-label swal-kicker">Sistema</span>
+  </button>
+</div>
+
+<script is:inline>
+  function initThemeSwitch() {
+    document.querySelectorAll('.theme-mode-switch:not([data-bound])').forEach(function (root) {
+      root.setAttribute('data-bound', '1');
+      var btns = root.querySelectorAll('.theme-btn');
+
+      function updateActive() {
+        var current = window.swalTheme ? window.swalTheme.get() : 'light';
+        btns.forEach(function (btn) {
+          var mode = btn.getAttribute('data-mode');
+          var isActive = mode === current;
+          if (isActive) {
+            btn.classList.add('active');
+            btn.setAttribute('aria-pressed', 'true');
+          } else {
+            btn.classList.remove('active');
+            btn.setAttribute('aria-pressed', 'false');
+          }
+        });
+      }
+
+      btns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var mode = btn.getAttribute('data-mode');
+          if (mode && window.swalTheme) {
+            window.swalTheme.set(mode);
+          }
+        });
+      });
+
+      updateActive();
+      document.addEventListener('swal:themechange', updateActive);
+    });
+  }
+
+  document.addEventListener('astro:page-load', initThemeSwitch);
+  initThemeSwitch();
+</script>
+
+<style>
+  .theme-mode-switch {
+    display: inline-flex;
+    align-items: center;
+    background: var(--swal-bg-surface);
+    padding: 2px;
+    border: 1px solid var(--swal-border);
+    gap: 2px;
+  }
+
+  .theme-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: transparent;
+    border: none;
+    color: var(--swal-text-muted);
+    cursor: pointer;
+    transition: all 150ms ease;
+  }
+
+  .theme-btn:hover {
+    background: var(--swal-hover-bg);
+    color: var(--swal-text);
+  }
+
+  .theme-btn.active {
+    background: var(--swal-accent);
+    color: var(--swal-accent-contrast);
+  }
+
+  .theme-btn.active .theme-label {
+    color: var(--swal-accent-contrast);
+  }
+
+  .theme-icon {
+    font-size: 0.85rem;
+    line-height: 1;
+  }
+
+  /* Responsive: hide labels on small screens */
+  @media (max-width: 390px) {
+    .theme-label {
+      display: none;
+    }
+    .theme-btn {
+      padding: 4px;
+    }
+  }
+</style>

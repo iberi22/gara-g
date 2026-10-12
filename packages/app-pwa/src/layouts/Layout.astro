@@ -1,0 +1,47 @@
+---
+import { ClientRouter } from 'astro:transitions';
+import '../styles/gara-theme.css';
+import StagingBanner from '../components/StagingBanner.astro';
+import ThemeBootstrap from '../components/theme/ThemeBootstrap.astro';
+import { STAGING_TITLE_PREFIX, isStaging } from '../lib/staging';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const { title = 'Gara-G Gestión de Flotas', description = 'Gara-G Decentralized PWA with Astro, Svelte, @swal/ui, and Cloudflare Pages' } = Astro.props;
+// En el stage el <title> va marcado: la pestaña es donde se distingue este sitio
+// de produccion cuando ya se ha escrito en el (ver src/lib/staging.ts).
+const pageTitle = isStaging() ? STAGING_TITLE_PREFIX + title : title;
+---
+
+<!doctype html>
+<html lang="es" data-theme="taller">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#E9ECEF" />
+    <ThemeBootstrap />
+    <slot name="head" />
+    <meta name="description" content={description} />
+    <meta name="generator" content={Astro.generator} />
+    <title>{pageTitle}</title>
+    <ClientRouter />
+  </head>
+  <body class="min-h-screen">
+    {isStaging() && <StagingBanner />}
+    <slot />
+  </body>
+</html>
+
+<style is:global>
+  /* Colores y fuentes: tema activo de @swal/ui (styles/swal-taller.css) via gara-theme.css. */
+  body {
+    font-family: var(--g-font-sans);
+    background: var(--swal-bg);
+    color: var(--swal-text);
+  }
+</style>

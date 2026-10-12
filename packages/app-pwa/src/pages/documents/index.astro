@@ -1,0 +1,49 @@
+---
+import DocumentVault from '../../components/document/DocumentVault.svelte';
+import { listEntities } from '../../lib/domain.js';
+import ThemeBootstrap from '../../components/theme/ThemeBootstrap.astro';
+import '../../styles/gara-theme.css';
+import { instanceIdFor } from '../../garage/domain/tenant.js';
+import { isFleetOnly } from '../../lib/features';
+
+// Tenant de la sesion validada (fuera de produccion tambien admite ?instanceId=): nunca uno fijo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+const vehicles = (await listEntities('vehicle', instanceId).catch(() => [] as any[])).map((v: any) => ({
+  id: v.id as string,
+  label: `${v.plate || v.name || v.vin || 'Sin placa'}`,
+}));
+// Columns displayed by DocumentVault: vehicleId, driverId, kind, fileHash, r2Key, expiry, status
+---
+
+<html lang="es" data-theme="taller">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{isFleetOnly() ? 'Bóveda de documentos - GARA-G' : 'Bóveda de documentos - SWAL DePIN'}</title>
+    <ThemeBootstrap />
+  </head>
+  <body class="swal-themed-page min-h-screen p-6">
+    <header class="max-w-6xl mx-auto mb-6">
+      <h1 class="text-3xl font-extrabold tracking-tight">Bóveda de documentos cifrados SWAL</h1>
+      <p class="text-sm text-muted-foreground mt-1">
+        Almacenamiento de documentos sellados con AES-GCM de conocimiento cero, sobre Cloudflare R2 y reparto de secretos DEK.
+      </p>
+    </header>
+
+    <main class="max-w-6xl mx-auto">
+      <DocumentVault client:only="svelte" instanceId={instanceId} vehicles={vehicles}>
+        <div slot="fallback" style="min-height: 28rem" aria-hidden="true"></div>
+      </DocumentVault>
+    </main>
+  </body>
+</html>
+
+<style>
+  /* Pagina heredada fuera de FleetLayout: toma fondo y texto del tema TALLER. */
+  .swal-themed-page {
+    background: var(--swal-bg);
+    color: var(--swal-text);
+    font-family: var(--swal-font);
+  }
+</style>

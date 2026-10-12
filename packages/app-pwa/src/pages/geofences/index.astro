@@ -1,0 +1,78 @@
+---
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import GenericTable from '../../components/GenericTableAstro.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import GeofenceMap from '../../components/geofence/GeofenceMap.svelte';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../lib/fleetSeed.js';
+import { listEntities } from '../../lib/domain.js';
+import { formatPolygonString, type Geofence } from '../../lib/geofence.js';
+import { geofenceFromRecord } from '../../components/geofence/geofenceApi.js';
+import { instanceIdFor } from '../../garage/domain/tenant.js';
+import { isFleetOnly } from '../../lib/features';
+
+// Tenant de la sesion (fuera de produccion tambien admite ?instanceId=). El mapa escribe
+// en /api/fleet/geofence, que resuelve el mismo tenant: pagina y API ven la misma flota.
+// La semilla solo se escribe para el tenant demo.
+const url = Astro.url;
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData().catch(() => {});
+const fleetId = url.searchParams.get('fleetId') ?? 'fleet-001';
+
+const records = await listEntities('geofence', instanceId);
+
+const initialGeofences: Geofence[] = records.map((r: any) => geofenceFromRecord(r, fleetId));
+
+const columns = [
+  { key: 'fleetId', label: 'ID de flota' },
+  { key: 'name', label: 'Nombre' },
+  { key: 'type', label: 'Tipo' },
+  { key: 'alertOnEnter', label: 'Alerta Entrada' },
+  { key: 'alertOnExit', label: 'Alerta Salida' },
+  { key: 'vertices', label: 'Vértices' },
+];
+
+const rows = initialGeofences.map((g) => ({
+  id: g.id,
+  fleetId: g.fleetId,
+  name: g.name,
+  type: g.type,
+  alertOnEnter: g.alertOnEnter ? '🔔 Sí' : '❌ No',
+  alertOnExit: g.alertOnExit ? '🚪 Sí' : '❌ No',
+  vertices: formatPolygonString(g.vertices),
+}));
+---
+
+<FleetLayout title={isFleetOnly() ? 'Geocercas — GARA-G' : 'Geocercas — GARA-G DePIN'} section="geofences">
+  <section data-testid="geofences-page" class="space-y-6">
+    <PageHeader
+      title="Geocercas y mapa"
+      subtitle="Zonas delimitadas con alertas de entrada/salida y comprobación de punto dentro del polígono"
+      icon="geofences"
+      count={initialGeofences.length}
+      countLabel="geocercas"
+    />
+
+    <!-- Interactive Leaflet Map & Polygon Form -->
+    <div class="bg-card border rounded-xl p-4 shadow-sm">
+      <h2 class="text-base font-semibold mb-3">Mapa Interactivo & Editor</h2>
+      <GeofenceMap
+        client:only="svelte"
+        instanceId={instanceId}
+        fleetId={fleetId}
+        geofences={initialGeofences}
+      >
+        <div slot="fallback" style="min-height: 450px" aria-hidden="true"></div>
+      </GeofenceMap>
+    </div>
+
+    <!-- Geofence List Table -->
+    <div class="bg-card border rounded-xl p-4 shadow-sm space-y-3">
+      <h2 class="text-base font-semibold">Listado de Geocercas ({instanceId})</h2>
+      <GenericTable
+        columns={columns}
+        rows={rows}
+        testId="geofences-table"
+      />
+    </div>
+  </section>
+</FleetLayout>

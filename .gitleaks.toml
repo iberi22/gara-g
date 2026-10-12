@@ -1,0 +1,21 @@
+# .gitleaks.toml — reglas por defecto de gitleaks + excepciones minimas y justificadas.
+title = "gara-g"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = """Falsos positivos conocidos, cada uno acotado a su forma exacta:
+- slugs de version del garage 3D (`versionKey` / `version: { key: ... }` = marca-modelo-años):
+  solo minusculas, digitos y guiones; generic-api-key los toma por credenciales por el nombre del campo;
+- el marcador `Bearer YOUR_TOKEN` de los ejemplos curl de la documentacion;
+- tokens de prueba `tok_*` de los tests de anuncios (no son credenciales);
+- el NOMBRE de la entrada de FlutterSecureStorage donde se guarda la clave del vault (no la clave)."""
+regexTarget = "line"
+regexes = [
+  '''versionKey['"]?\s*[:=]\s*['"][a-z0-9]+(?:-[a-z0-9]+)*['"]''',
+  '''version:\s*\{\s*key:\s*'[a-z0-9]+(?:-[a-z0-9]+)*',''',
+  '''Authorization: Bearer YOUR_TOKEN''',
+  '''const token = 'tok_[a-z0-9_]+';''',
+  '''const claveKey = 'gara_g\.vault\.key\.v1';''',
+]

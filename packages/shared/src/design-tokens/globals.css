@@ -1,0 +1,357 @@
+/**
+ * Global CSS with Design Tokens
+ * Includes CSS custom properties and base styles
+ */
+
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+/* Design Token CSS Custom Properties */
+:root {
+	/* Color System */
+	--color-primary-50: hsl(214, 100%, 97%);
+	--color-primary-100: hsl(214, 95%, 93%);
+	--color-primary-200: hsl(213, 97%, 87%);
+	--color-primary-300: hsl(212, 96%, 78%);
+	--color-primary-400: hsl(213, 94%, 68%);
+	--color-primary-500: hsl(221, 83%, 53%);
+	--color-primary-600: hsl(221, 83%, 48%);
+	--color-primary-700: hsl(221, 83%, 43%);
+	--color-primary-800: hsl(221, 83%, 38%);
+	--color-primary-900: hsl(221, 83%, 33%);
+	--color-primary-950: hsl(221, 83%, 23%);
+	--color-primary: var(--color-primary-500);
+
+	/* Semantic Colors - Light Theme */
+	--color-background-primary: hsl(0, 0%, 100%);
+	--color-background-secondary: hsl(0, 0%, 98%);
+	--color-background-tertiary: hsl(210, 40%, 96%);
+	--color-background-inverse: hsl(222, 84%, 5%);
+
+	--color-foreground-primary: hsl(222, 84%, 5%);
+	--color-foreground-secondary: hsl(0, 0%, 40%);
+	--color-foreground-tertiary: hsl(0, 0%, 60%);
+	--color-foreground-inverse: hsl(0, 0%, 98%);
+
+	--color-border-primary: hsl(0, 0%, 85%);
+	--color-border-secondary: hsl(0, 0%, 92%);
+	--color-border-focus: hsl(221, 83%, 53%);
+	--color-border-error: hsl(0, 84%, 55%);
+	--color-border-success: hsl(142, 76%, 36%);
+
+	/* Shadows */
+	--shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+	--shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+	--shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+	--shadow-lg:
+		0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+	--shadow-xl:
+		0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+	--shadow-focus: 0 0 0 3px rgb(221 83 53 / 0.3);
+	--shadow-glass: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+
+	/* Gradients */
+	--gradient-primary: linear-gradient(
+		135deg,
+		hsl(221, 83%, 53%) 0%,
+		hsl(221, 83%, 48%) 100%
+	);
+	--gradient-subtle: linear-gradient(
+		135deg,
+		hsl(214, 100%, 97%) 0%,
+		hsl(214, 95%, 93%) 100%
+	);
+	--gradient-glass: linear-gradient(
+		135deg,
+		rgba(255, 255, 255, 0.25) 0%,
+		rgba(255, 255, 255, 0.1) 100%
+	);
+
+	/* Animation Durations */
+	--duration-instant: 0ms;
+	--duration-fast: 150ms;
+	--duration-normal: 300ms;
+	--duration-slow: 500ms;
+	--duration-slower: 750ms;
+	--duration-slowest: 1000ms;
+
+	/* Animation Easing */
+	--ease-linear: linear;
+	--ease-in: cubic-bezier(0.4, 0, 1, 1);
+	--ease-out: cubic-bezier(0, 0, 0.2, 1);
+	--ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+	--ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+	--ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+	/* Touch Targets */
+	--touch-target-minimum: 48px;
+	--touch-target-comfortable: 56px;
+	--touch-target-large: 64px;
+
+	/* Z-Index Scale */
+	--z-hide: -1;
+	--z-auto: auto;
+	--z-base: 0;
+	--z-docked: 10;
+	--z-dropdown: 1000;
+	--z-sticky: 1100;
+	--z-banner: 1200;
+	--z-overlay: 1300;
+	--z-modal: 1400;
+	--z-popover: 1500;
+	--z-skip-link: 1600;
+	--z-toast: 1700;
+	--z-tooltip: 1800;
+}
+
+/* Dark Theme */
+.dark {
+	--color-background-primary: hsl(222, 84%, 5%);
+	--color-background-secondary: hsl(222, 84%, 8%);
+	--color-background-tertiary: hsl(222, 84%, 12%);
+	--color-background-inverse: hsl(0, 0%, 98%);
+
+	--color-foreground-primary: hsl(0, 0%, 98%);
+	--color-foreground-secondary: hsl(0, 0%, 80%);
+	--color-foreground-tertiary: hsl(0, 0%, 60%);
+	--color-foreground-inverse: hsl(222, 84%, 5%);
+
+	--color-border-primary: hsl(0, 0%, 20%);
+	--color-border-secondary: hsl(0, 0%, 15%);
+	--color-border-focus: hsl(221, 83%, 63%);
+
+	--color-primary: hsl(221, 83%, 63%);
+
+	--shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3);
+	--shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+	--shadow-lg:
+		0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+	--shadow-xl:
+		0 20px 25px -5px rgb(0 0 0 / 0.3), 0 8px 10px -6px rgb(0 0 0 / 0.3);
+	--shadow-focus: 0 0 0 3px rgb(221 83 63 / 0.4);
+	--shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+
+	--gradient-primary: linear-gradient(
+		135deg,
+		hsl(221, 83%, 63%) 0%,
+		hsl(221, 83%, 58%) 100%
+	);
+	--gradient-subtle: linear-gradient(
+		135deg,
+		hsl(222, 84%, 8%) 0%,
+		hsl(222, 84%, 12%) 100%
+	);
+	--gradient-glass: linear-gradient(
+		135deg,
+		rgba(0, 0, 0, 0.25) 0%,
+		rgba(0, 0, 0, 0.1) 100%
+	);
+}
+
+/* High Contrast Theme */
+.high-contrast {
+	--color-background-primary: hsl(0, 0%, 0%);
+	--color-background-secondary: hsl(0, 0%, 5%);
+	--color-background-tertiary: hsl(0, 0%, 10%);
+	--color-background-inverse: hsl(0, 0%, 100%);
+
+	--color-foreground-primary: hsl(0, 0%, 100%);
+	--color-foreground-secondary: hsl(0, 0%, 90%);
+	--color-foreground-tertiary: hsl(0, 0%, 80%);
+	--color-foreground-inverse: hsl(0, 0%, 0%);
+
+	--color-border-primary: hsl(0, 0%, 100%);
+	--color-border-secondary: hsl(0, 0%, 80%);
+	--color-border-focus: hsl(60, 100%, 50%);
+
+	--color-primary: hsl(210, 100%, 70%);
+
+	--shadow-focus: 0 0 0 4px hsl(60, 100%, 50%);
+}
+
+/* Base Styles */
+* {
+	box-sizing: border-box;
+}
+
+html {
+	font-family:
+		ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+		"Segoe UI Symbol", "Noto Color Emoji";
+	line-height: 1.5;
+	-webkit-text-size-adjust: 100%;
+	-moz-tab-size: 4;
+	tab-size: 4;
+}
+
+body {
+	margin: 0;
+	background-color: var(--color-background-primary);
+	color: var(--color-foreground-primary);
+	transition:
+		background-color var(--duration-normal) var(--ease-out),
+		color var(--duration-normal) var(--ease-out);
+}
+
+/* Focus Management */
+*:focus {
+	outline: none;
+}
+
+*:focus-visible {
+	outline: 2px solid var(--color-border-focus);
+	outline-offset: 2px;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+	:root {
+		--color-border-focus: hsl(60, 100%, 50%);
+	}
+}
+
+/* Print Styles */
+@media print {
+	*,
+	*::before,
+	*::after {
+		background: transparent !important;
+		color: black !important;
+		box-shadow: none !important;
+		text-shadow: none !important;
+	}
+}
+
+/* Utility Classes */
+.glass-effect {
+	background: var(--gradient-glass);
+	backdrop-filter: blur(10px);
+	-webkit-backdrop-filter: blur(10px);
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	box-shadow: var(--shadow-glass);
+}
+
+.glass-effect-dark {
+	background: linear-gradient(
+		135deg,
+		rgba(0, 0, 0, 0.25) 0%,
+		rgba(0, 0, 0, 0.1) 100%
+	);
+	backdrop-filter: blur(10px);
+	-webkit-backdrop-filter: blur(10px);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	box-shadow: var(--shadow-glass);
+}
+
+.focus-ring {
+	transition: box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.focus-ring:focus-visible {
+	box-shadow: var(--shadow-focus);
+}
+
+.touch-target {
+	min-width: var(--touch-target-minimum);
+	min-height: var(--touch-target-minimum);
+}
+
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* Animation Classes */
+.animate-fade-in {
+	animation: fadeIn var(--duration-normal) var(--ease-out);
+}
+
+.animate-slide-up {
+	animation: slideInUp var(--duration-normal) var(--ease-out);
+}
+
+.animate-scale-in {
+	animation: scaleIn var(--duration-fast) var(--ease-out);
+}
+
+.animate-glow {
+	animation: glow 2s var(--ease-in-out) infinite alternate;
+}
+
+.animate-float {
+	animation: float 3s var(--ease-in-out) infinite;
+}
+
+/* Keyframe Animations */
+@keyframes fadeIn {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes slideInUp {
+	from {
+		opacity: 0;
+		transform: translateY(100%);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@keyframes scaleIn {
+	from {
+		opacity: 0;
+		transform: scale(0.9);
+	}
+	to {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+
+@keyframes glow {
+	0%,
+	100% {
+		box-shadow: 0 0 5px var(--color-primary);
+	}
+	50% {
+		box-shadow:
+			0 0 20px var(--color-primary),
+			0 0 30px var(--color-primary);
+	}
+}
+
+@keyframes float {
+	0%,
+	100% {
+		transform: translateY(0px);
+	}
+	50% {
+		transform: translateY(-10px);
+	}
+}

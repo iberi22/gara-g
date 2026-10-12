@@ -1,0 +1,243 @@
+---
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import GenericTable from '../../components/GenericTableAstro.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../lib/fleetSeed.js';
+import { listEntities } from '../../lib/domain.js';
+import { fleetFuelEfficiency, formatKmPerLiter } from '../../lib/fuelLog.js';
+import { instanceIdFor } from '../../garage/domain/tenant.js';
+import {
+  fuelTimeline,
+  costPorTipo,
+  lineChartSVG,
+  barChartSVG,
+} from '../../lib/fleetCharts.js';
+
+// Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
+// La semilla solo se escribe para el tenant demo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData();
+const fuelLogs = await listEntities('fuelLog', instanceId);
+const maintenance = await listEntities('maintenance', instanceId);
+const vehicles = await listEntities('vehicle', instanceId);
+
+const vehicleMap = new Map<string, any>();
+
+// Aggregate cost per vehicle
+const costByVehicle = new Map<string, { plate: string; fuel: number; maint: number }>();
+for (const v of vehicles as any[]) {
+  costByVehicle.set(v.id as string, { plate: v.plate, fuel: 0, maint: 0 });
+}
+for (const f of fuelLogs as any[]) {
+  const e = costByVehicle.get(f.vehicleId as string);
+  if (e) e.fuel += f.cost || 0;
+}
+for (const m of maintenance as any[]) {
+  const e = costByVehicle.get(m.vehicleId as string);
+  if (e) e.maint += m.cost || 0;
+}
+const cop = (n: number) => '$' + n.toLocaleString('es-CO');
+const costRows = Array.from(costByVehicle.values()).map((c) => ({
+  ...c,
+  total: c.fuel + c.maint,
+})).sort((a, b) => b.total - a.total).map((c) => ({
+  ...c,
+  fuelDisplay: cop(c.fuel),
+  maintDisplay: cop(c.maint),
+  totalDisplay: cop(c.total),
+}));
+
+// GenericTable no formatea moneda por si sola: las columnas apuntan a los *Display ya formateados.
+const columns = [
+  { key: 'plate', label: 'Placa' },
+  { key: 'fuelDisplay', label: 'Combustible', align: 'right' as const },
+  { key: 'maintDisplay', label: 'Mantenimiento', align: 'right' as const },
+  { key: 'totalDisplay', label: 'Total', align: 'right' as const },
+];
+
+// Top maintenance types
+const maintByType = new Map<string, any>();
+for (const m of maintenance as any[]) {
+  const t = (m.type as string) || 'other';
+  if (!maintByType.has(t)) maintByType.set(t, { type: t, count: 0, cost: 0 });
+  const e = maintByType.get(t)!;
+  e.count++;
+  e.cost += m.cost || 0;
+}
+const maintTypes: any[] = Array.from(maintByType.values()).sort((a: any, b: any) => b.cost - a.cost);
+const maxMaintCost: number = maintTypes[0]?.cost || 1;
+
+const totalFuel = fuelLogs.reduce((a: number, b: any) => a + (b.cost || 0), 0);
+const totalMaint = maintenance.reduce((a: number, b: any) => a + (b.cost || 0), 0);
+// Eficiencia real (tanque lleno): distancia entre cargas / combustible consumido; "—" sin al menos
+// dos lecturas de odometro por vehiculo. Ver fleetFuelEfficiency en lib/fuelLog.ts.
+const fuelEff = fleetFuelEfficiency(fuelLogs as any[]);
+const avgKmPerLiter = formatKmPerLiter(fuelEff.kmPerGallon);
+
+// Fuel Timeline Chart
+const fuelData = fuelTimeline(fuelLogs as any[]);
+// Sin registros la serie queda vacia y el grafico dice "Sin datos disponibles": nada de cifras de ejemplo.
+const fuelPoints = fuelData.map((d) => ({ label: d.month, value: d.cost }));
+const fuelChartSvg = lineChartSVG(fuelPoints, {
+  title: 'Evolución de Costo de Combustible (COP)',
+  strokeColor: 'var(--swal-accent)',
+  fillColor: 'var(--swal-accent-muted)',
+  testId: 'fuel-timeline-chart',
+  unit: 'COP',
+  height: 260,
+});
+
+// Cost por Tipo Chart
+const costTypeData = costPorTipo(maintenance as any[]);
+const costTypePoints = costTypeData.map((d) => ({ label: d.type, value: d.cost }));
+const costTypeChartSvg = barChartSVG(costTypePoints, {
+  title: 'Costo por Tipo de Mantenimiento (COP)',
+  color: 'var(--swal-info)',
+  testId: 'cost-type-chart',
+  unit: 'COP',
+  height: 260,
+});
+---
+
+<FleetLayout title="Analítica de Flota" section="analytics">
+  <section data-testid="analytics-page">
+    <PageHeader title="Analítica" subtitle="Costos, eficiencia y mantenimiento" icon="analytics" />
+
+    <div class="kpi-grid" data-testid="analytics-kpis">
+      <article class="kpi swal-card-frame">
+        <div class="swal-card-inner">
+          <div class="kpi-label swal-kicker">Costo combustible total</div>
+          <div class="kpi-value">{`$${(totalFuel / 1_000_000).toFixed(2)}M`}</div>
+          <div class="kpi-sub">COP · {fuelLogs.length} cargas</div>
+        </div>
+      </article>
+      <article class="kpi swal-card-frame">
+        <div class="swal-card-inner">
+          <div class="kpi-label swal-kicker">Costo mantenimiento</div>
+          <div class="kpi-value">{`$${(totalMaint / 1_000_000).toFixed(2)}M`}</div>
+          <div class="kpi-sub">COP · {maintenance.length} servicios</div>
+        </div>
+      </article>
+      <article class="kpi swal-card-frame">
+        <div class="swal-card-inner">
+          <div class="kpi-label swal-kicker">Costo total operativo</div>
+          <div class="kpi-value">{`$${((totalFuel + totalMaint) / 1_000_000).toFixed(2)}M`}</div>
+          <div class="kpi-sub">COP · toda la flota</div>
+        </div>
+      </article>
+      <article class="kpi swal-card-frame">
+        <div class="swal-card-inner">
+          <div class="kpi-label swal-kicker">Eficiencia promedio</div>
+          <div class="kpi-value">{avgKmPerLiter}{avgKmPerLiter === '—' ? '' : ' km/L'}</div>
+          <div class="kpi-sub">{fuelEff.km > 0 ? `Sobre ${fuelEff.km.toLocaleString('es-CO')} km recorridos` : 'Se necesitan 2 cargas por vehículo'}</div>
+        </div>
+      </article>
+    </div>
+
+    <div class="charts-row">
+      <div class="chart-block swal-card-frame">
+        <div class="swal-card-inner">
+          <Fragment set:html={fuelChartSvg} />
+        </div>
+      </div>
+      <div class="chart-block swal-card-frame">
+        <div class="swal-card-inner">
+          <Fragment set:html={costTypeChartSvg} />
+        </div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="block">
+        <h3 class="block-title">Costo por vehículo</h3>
+        <GenericTable columns={columns} rows={costRows} testId="cost-table" />
+      </div>
+
+      <div class="block">
+        <h3 class="block-title">Distribución de mantenimiento por tipo</h3>
+        <div class="maint-distribution swal-card-frame" data-testid="maint-distribution">
+          <div class="swal-card-inner" style="padding: 1rem;">
+            {maintTypes.length === 0 && <p class="dist-empty">Sin servicios de mantenimiento registrados.</p>}
+            {maintTypes.map((t: any) => (
+              <div class="dist-row">
+                <span class="dist-label">{t.type}</span>
+                <span class="dist-bar-wrap">
+                  <span
+                    class="dist-bar"
+                    style={`width: ${(t.cost / maxMaintCost) * 100}%`}
+                  ></span>
+                </span>
+                <span class="dist-value">{t.count} servicios · {`$${(t.cost / 1_000_000).toFixed(2)}M`}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</FleetLayout>
+
+<style>
+  .page-head h2 { margin: 0; font-size: 1.5rem; color: var(--swal-text); }
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .kpi {
+    padding: 0;
+  }
+  .kpi > .swal-card-inner {
+    padding: 1rem 1.25rem;
+  }
+  .kpi-label { margin-bottom: 0.25rem; }
+  .kpi-value { font-size: 1.75rem; font-weight: 800; color: var(--swal-info); margin-top: 0.5rem; }
+  .kpi-sub { font-size: 0.7rem; color: var(--swal-text-muted); margin-top: 0.25rem; }
+  .charts-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .chart-block {
+    padding: 0;
+  }
+  .two-col {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
+    gap: 1.5rem;
+  }
+  .block-title { color: var(--swal-text-secondary); font-size: 1rem; margin: 0 0 0.75rem; }
+  .maint-distribution {
+    padding: 0;
+  }
+  .dist-row {
+    display: grid;
+    grid-template-columns: 100px 1fr 200px;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--swal-border-light);
+  }
+  .dist-empty { margin: 0; color: var(--swal-text-muted); font-size: 0.85rem; }
+  .dist-row:last-child { border-bottom: none; }
+  .dist-label { color: var(--swal-text-secondary); font-size: 0.85rem; text-transform: capitalize; }
+  .dist-bar-wrap {
+    background: var(--swal-border-light);
+    border-radius: var(--swal-radius);
+    height: 8px;
+    overflow: hidden;
+  }
+  .dist-bar {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--swal-info), var(--swal-accent));
+    border-radius: var(--swal-radius);
+  }
+  .dist-value { font-size: 0.7rem; color: var(--swal-text-muted); text-align: right; }
+  @media (max-width: 480px) {
+    .dist-row { grid-template-columns: 5rem 1fr; }
+    .dist-value { grid-column: 1 / -1; text-align: left; }
+  }
+</style>

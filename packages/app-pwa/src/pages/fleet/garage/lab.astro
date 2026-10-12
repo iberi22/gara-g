@@ -1,0 +1,40 @@
+---
+/**
+ * /fleet/garage/lab — Laboratorio de plantillas 3D (ver src/garage/lab/labMain.ts).
+ * Pagina sin layout a proposito: las capturas de verificacion salen limpias.
+ */
+import '../../../styles/swal-taller.css';
+import ThemeBootstrap from '../../../components/theme/ThemeBootstrap.astro';
+
+export const prerender = false;
+---
+
+<html lang="es" data-theme="taller">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <ThemeBootstrap />
+    <title>Laboratorio de plantillas</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: var(--swal-bg); overflow: hidden; }
+      canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+      #lab-error { position: fixed; inset: 1rem auto auto 1rem; color: var(--swal-danger); font: 14px/1.4 system-ui, sans-serif; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <canvas id="lab"></canvas>
+    <pre id="lab-error"></pre>
+    <script>
+      import { startLab } from '../../../garage/lab/labMain';
+
+      const canvas = document.getElementById('lab') as HTMLCanvasElement;
+      startLab(canvas, new URLSearchParams(location.search)).catch((err: unknown) => {
+        const box = document.getElementById('lab-error');
+        if (box) box.textContent = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
+        (window as unknown as { __garageLab: unknown }).__garageLab = { ready: true, error: String(err) };
+        document.body.dataset.ready = '1';
+      });
+    </script>
+  </body>
+</html>

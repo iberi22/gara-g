@@ -1,0 +1,78 @@
+---
+import FleetLayout from '../../../layouts/FleetLayout.astro';
+import GenericTable from '../../../components/GenericTableAstro.astro';
+import EntityForm from '../../../components/EntityForm.astro';
+import PageHeader from '../../../components/PageHeader.astro';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../lib/fleetSeed.js';
+import { listEntities } from '../../../lib/domain.js';
+import { instanceIdFor } from '../../../garage/domain/tenant.js';
+
+// Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
+// La semilla solo se escribe para el tenant demo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData();
+const drivers = await listEntities('driver', instanceId);
+
+const columns = [
+  { key: 'name', label: 'Nombre' },
+  { key: 'cedula', label: 'Cédula' },
+  { key: 'licenseCategory', label: 'Licencia' },
+  { key: 'licenseExpiry', label: 'Vence' },
+  { key: 'phone', label: 'Teléfono' },
+  { key: 'status', label: 'Estado' },
+];
+---
+
+<FleetLayout title="Conductores" section="drivers">
+  <section data-testid="drivers-page">
+    <PageHeader title="Conductores" subtitle={`${drivers.length} conductores`} icon="drivers" />
+
+    <details class="g-create-form">
+      <summary class="g-create-toggle"><span>➕ Agregar conductor</span></summary>
+      <div class="g-create-content">
+        <EntityForm
+          entity="driver"
+          instanceId={instanceId}
+          fields={[
+            { name: 'name', label: 'Nombre completo', type: 'text', required: true },
+            { name: 'cedula', label: 'Cédula', type: 'text', required: true },
+            { name: 'licenseCategory', label: 'Categoría licencia', type: 'select', required: true,
+              options: [
+                { value: 'A1', label: 'A1 — Motos' },
+                { value: 'B1', label: 'B1 — Carros' },
+                { value: 'B2', label: 'B2 — Camionetas' },
+                { value: 'C1', label: 'C1 — Camiones livianos' },
+                { value: 'C2', label: 'C2 — Camiones pesados' },
+                { value: 'C3', label: 'C3 — Tractocamiones' },
+                { value: 'E1', label: 'E1 — Remolques' },
+                { value: 'E2', label: 'E2 — Semirremolques' },
+                { value: 'E3', label: 'E3 —-full' },
+              ]
+            },
+            { name: 'licenseExpiry', label: 'Vencimiento licencia', type: 'date', required: true },
+            { name: 'phone', label: 'Teléfono', type: 'tel' },
+            { name: 'status', label: 'Estado', type: 'select', required: true,
+              options: [
+                { value: 'active', label: 'Activo' },
+                { value: 'on_leave', label: 'En permiso' },
+                { value: 'suspended', label: 'Suspendido' },
+                { value: 'inactive', label: 'Inactivo' },
+              ]
+            },
+          ]}
+          cancelUrl="/fleet/drivers"
+        />
+      </div>
+    </details>
+
+    <GenericTable
+      columns={columns}
+      rows={drivers}
+      testId="drivers-table"
+      showActions={true}
+      editBase="/fleet/drivers/edit"
+      entity="driver"
+      instanceId={instanceId}
+    />
+  </section>
+</FleetLayout>

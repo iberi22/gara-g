@@ -1,0 +1,531 @@
+---
+/**
+ * GenericTableAstro.astro — Tabla server-rendered con acciones CRUD y exportación CSV RFC4180.
+ *
+ * Columnas normales + columna "actions" con Edit/Delete buttons.
+ * Delete usa form HTML con confirmation (no JS cliente necesario).
+ */
+import { DEFAULT_INSTANCE_ID } from '../lib/domain.config';
+
+interface Column {
+  key: string;
+  label: string;
+  align?: 'left' | 'right' | 'center';
+  width?: string;
+  format?: 'date' | 'currency' | 'badge';
+}
+
+interface RowAction {
+  /** Texto del enlace (e.g. 'Ver archivo') */
+  label: string;
+  /** URL de destino para la fila */
+  href: (row: any) => string;
+  testId?: string;
+}
+
+interface Props {
+  columns: Column[];
+  rows: any[];
+  testId?: string;
+  pageSize?: number;
+  /** Mostrar columna de acciones (Edit/Delete) */
+  showActions?: boolean;
+  /** URL base para edit (e.g. '/fleet/vehicles/edit') */
+  editBase?: string;
+  /** Entity name para delete y exportación (e.g. 'vehicle') */
+  entity?: string;
+  instanceId?: string;
+  /** Campo por el cual buscar (default: 'name') */
+  searchKey?: string;
+  /** Habilitar botón de exportar CSV (default: true) */
+  enableExport?: boolean;
+  /** Enlaces de acción por fila, además de Editar/Eliminar (e.g. 'Ver archivo') */
+  actions?: RowAction[];
+  /** Nombre accesible de la tabla (<caption> solo para lectores de pantalla) */
+  caption?: string;
+}
+
+const {
+  columns = [],
+  rows = [],
+  testId = 'generic-table',
+  pageSize = 10,
+  showActions = false,
+  editBase = '',
+  entity = '',
+  instanceId = DEFAULT_INSTANCE_ID,
+  searchKey = 'name',
+  enableExport = true,
+  actions = [],
+  caption = '',
+} = Astro.props;
+
+const hasActions = showActions || actions.length > 0;
+const tableCaption =
+  caption ||
+  `Listado de ${(entity || testId.replace(/-?table$/, '')).replace(/[-_]+/g, ' ').trim() || 'datos'}`;
+const rowLabel = (row: any) => row.name || row.plate || row.title || row.id;
+
+// ── Pagination (URL-based) ─────────────────────────────────────────────────────
+const pageParam = Number(Astro.url.searchParams.get('page') ?? '1');
+const safePage = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
+const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+const currentPage = Math.min(safePage, totalPages);
+const offset = (currentPage - 1) * pageSize;
+const pagedRows = rows.slice(offset, offset + pageSize);
+
+function pageUrl(p: number) {
+  const u = new URL(Astro.url);
+  u.searchParams.set('page', String(p));
+  return u.toString();
+}
+
+function formatValue(value: unknown, format?: string): string {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'boolean') return value ? 'Sí' : 'No';
+  if (format === 'date' && typeof value === 'string') {
+    try {
+      return new Date(value).toLocaleDateString('es');
+    } catch {
+      return String(value);
+    }
+  }
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+---
+
+<div class="g-table-wrap" data-testid={testId}>
+  <div class="g-table-controls">
+    <span class="g-row-count" data-testid={`${testId}-count`} aria-live="polite">
+      {rows.length} resultado{rows.length !== 1 ? 's' : ''}
+      {totalPages > 1 ? ` (página ${currentPage}/${totalPages})` : ''}
+    </span>
+    <div class="g-controls-right">
+      {enableExport && (
+        <button
+          type="button"
+          id={`${testId}-export-btn`}
+          class="g-btn-export"
+          data-testid={`${testId}-export-btn`}
+          title="Exportar a CSV"
+        >
+          📥 Exportar CSV
+        </button>
+      )}
+      <input
+        type="search"
+        id={`${testId}-search`}
+        class="g-table-search"
+        placeholder="Buscar…"
+        aria-label="Buscar en la tabla"
+      />
+    </div>
+  </div>
+
+  <div class="g-table-scroll" role="region" aria-label={tableCaption} tabindex="0">
+    <table class="g-table">
+      <caption class="g-sr-only">{tableCaption}</caption>
+      <thead>
+        <tr>
+          {columns.map((col, i) => (
+            <th
+              scope="col"
+              class:list={[i === 0 ? 'g-sticky' : '']}
+              style={col.width ? `width:${col.width}` : ''}
+              data-align={col.align || 'left'}
+            >
+              {col.label}
+            </th>
+          ))}
+          {hasActions && <th scope="col" class="g-actions-col" data-align="right">Acciones</th>}
+        </tr>
+      </thead>
+      <tbody>
+        {pagedRows.map((row: any) => (
+          <tr data-row-id={row.id}>
+            {columns.map((col, i) => (
+              <td class:list={[i === 0 ? 'g-sticky' : '']} data-align={col.align || 'left'}>
+                {formatValue(row[col.key], col.format)}
+              </td>
+            ))}
+            {hasActions && (
+              <td class="g-actions-cell" data-align="right">
+                <div class="g-actions">
+                  {editBase && (
+                    <a
+                      href={`${editBase}/${row.id}`}
+                      class="g-action-btn g-action-edit"
+                      data-testid={`${testId}-edit-${row.id}`}
+                      title="Editar"
+                      aria-label={`Editar ${rowLabel(row)}`}
+                    >
+                      ✏️
+                    </a>
+                  )}
+                  {actions.map((act) => (
+                    <a
+                      href={act.href(row)}
+                      class="g-action-btn g-action-link"
+                      data-testid={act.testId ?? `${testId}-action-${act.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${row.id}`}
+                      aria-label={`${act.label} ${rowLabel(row)}`}
+                    >
+                      {act.label}
+                    </a>
+                  ))}
+                  {entity && (
+                    <form
+                      method="POST"
+                      action={`/api/fleet/${entity}?id=${row.id}&instanceId=${instanceId}&_method=DELETE`}
+                      class="g-action-form"
+                      onsubmit="return confirm('¿Eliminar este registro? Esta acción no se puede deshacer.')"
+                      data-testid={`${testId}-delete-${row.id}`}
+                    >
+                      <input type="hidden" name="_method" value="DELETE" />
+                      <button type="submit" class="g-action-btn g-action-delete" title="Eliminar" aria-label={`Eliminar ${rowLabel(row)}`}>
+                        🗑️
+                      </button>
+                    </form>
+                  )}
+                </div>
+              </td>
+            )}
+          </tr>
+        ))}
+        {rows.length === 0 && (
+          <tr>
+            <td colspan={columns.length + (hasActions ? 1 : 0)} class="g-empty">
+              <div class="g-empty-msg">Sin datos. {showActions && 'Crea el primer registro con el botón superior.'}</div>
+            </td>
+          </tr>
+        )}
+        {rows.length > 0 && (
+          <tr class="g-no-match" hidden>
+            <td colspan={columns.length + (hasActions ? 1 : 0)} class="g-empty">
+              <div class="g-empty-msg">Sin coincidencias</div>
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  </div>
+
+  {totalPages > 1 && (
+    <nav class="g-pagination" aria-label="Paginación">
+      {currentPage === 1 ? (
+        <span class="g-page-btn g-page-disabled" aria-disabled="true" aria-label="Primera página">«</span>
+      ) : (
+        <a href={pageUrl(1)} class="g-page-btn" aria-label="Primera página">«</a>
+      )}
+      {currentPage === 1 ? (
+        <span class="g-page-btn g-page-disabled" aria-disabled="true" aria-label="Página anterior">‹</span>
+      ) : (
+        <a href={pageUrl(currentPage - 1)} class="g-page-btn" aria-label="Página anterior">‹</a>
+      )}
+      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+        const p = currentPage <= 3
+          ? i + 1
+          : currentPage >= totalPages - 2
+          ? totalPages - 4 + i
+          : currentPage - 2 + i;
+        if (p >= 1 && p <= totalPages) {
+          return (
+            <a
+              href={pageUrl(p)}
+              class={`g-page-btn ${p === currentPage ? 'g-page-active' : ''}`}
+              aria-label={`Página ${p}`}
+              aria-current={p === currentPage ? 'page' : undefined}
+            >{p}</a>
+          );
+        }
+        return null;
+      })}
+      {currentPage === totalPages ? (
+        <span class="g-page-btn g-page-disabled" aria-disabled="true" aria-label="Página siguiente">›</span>
+      ) : (
+        <a href={pageUrl(currentPage + 1)} class="g-page-btn" aria-label="Página siguiente">›</a>
+      )}
+      {currentPage === totalPages ? (
+        <span class="g-page-btn g-page-disabled" aria-disabled="true" aria-label="Última página">»</span>
+      ) : (
+        <a href={pageUrl(totalPages)} class="g-page-btn" aria-label="Última página">»</a>
+      )}
+      <span class="g-page-info">
+        {offset + 1}–{Math.min(offset + pageSize, rows.length)} de {rows.length}
+      </span>
+    </nav>
+  )}
+  {rows.length <= pageSize && (
+    <div class="g-pagination-info">
+      {rows.length} resultado{rows.length !== 1 ? 's' : ''}
+    </div>
+  )}
+</div>
+
+<script lang="ts" define:vars={{ testId, pagedRows: pagedRows.length, columns, rows, entity, instanceId }}>
+  // SPA-safe (ViewTransitions).
+  //
+  // `define:vars` implica `is:inline`: el navegador ejecuta este bloque UNA vez,
+  // en la carga inicial, y no en las navegaciones del ClientRouter. Con
+  // `document` persistente pero nodos sustituidos, el buscador y el botón
+  // Exportar quedaban muertos en cuanto el usuario llegaba a la página por
+  // navegación interna (es decir, casi siempre).
+  //
+  // Los guards `data-bound` evitan que esta función se ejecute dos veces sobre
+  // el mismo DOM, que duplicaría los listeners. Es el patrón de EntityForm.astro.
+  function initTable() {
+    // Filter behavior
+    const input = document.getElementById(`${testId}-search`);
+    if (input && !input.hasAttribute('data-bound')) {
+      input.setAttribute('data-bound', '1');
+      input.addEventListener('input', () => {
+        const q = input.value.toLowerCase().trim();
+        const tbody = document.querySelector(`[data-testid="${testId}"] tbody`);
+        if (!tbody) return;
+        let visible = 0;
+        tbody.querySelectorAll('tr[data-row-id]').forEach((tr) => {
+          // Fila entera, sin la celda de acciones (sus iconos no son datos).
+          const clone = tr.cloneNode(true);
+          clone.querySelectorAll('.g-actions-cell').forEach((c) => c.remove());
+          const val = (clone.textContent || '').toLowerCase();
+          const show = !q || val.includes(q);
+          (tr).style.display = show ? '' : 'none';
+          if (show) visible++;
+        });
+        const noMatch = tbody.querySelector('tr.g-no-match');
+        if (noMatch) noMatch.hidden = !(q && visible === 0);
+        const count = document.querySelector(`[data-testid="${testId}-count"]`);
+        if (count) {
+          count.textContent = q
+            ? `${visible} de ${pagedRows} resultado${pagedRows !== 1 ? 's' : ''} filtrado${visible !== 1 ? 's' : ''}`
+            : `${pagedRows} resultado${pagedRows !== 1 ? 's' : ''}`;
+        }
+      });
+    }
+
+    // Client-side CSV export function
+    function escapeCSVCell(val, delimiter) {
+      if (val === null || val === undefined) return '';
+      let str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+      const needsQuotes = str.includes(delimiter) || str.includes('"') || str.includes('\n') || str.includes('\r');
+      return needsQuotes ? `"${str.replace(/"/g, '""')}"` : str;
+    }
+
+    const exportBtn = document.getElementById(`${testId}-export-btn`);
+    if (exportBtn && !exportBtn.hasAttribute('data-bound')) {
+      exportBtn.setAttribute('data-bound', '1');
+      exportBtn.addEventListener('click', () => {
+        const delimiter = ';';
+        // Filter rows based on active search input across all columns and values
+        // Script con define:vars: va tal cual al navegador, sin TypeScript (un `as` rompia
+        // el script entero y con el la busqueda y el CSV de todas las tablas).
+        const search = document.getElementById(`${testId}-search`);
+        const q = search ? search.value.toLowerCase().trim() : '';
+        const visibleRows = q
+          ? rows.filter((r) =>
+              columns.some((col) => String(r[col.key] ?? '').toLowerCase().includes(q)) ||
+              Object.values(r).some((v) => String(v ?? '').toLowerCase().includes(q))
+            )
+          : rows;
+
+        const header = columns.map((col) => escapeCSVCell(col.label, delimiter)).join(delimiter);
+        const dataLines = visibleRows.map((r) =>
+          columns.map((col) => escapeCSVCell(r[col.key], delimiter)).join(delimiter)
+        );
+
+        const csvContent = '\uFEFF' + [header, ...dataLines].join('\r\n');
+        const filename = `${entity || 'export'}_${instanceId}.csv`;
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', filename);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      });
+    }
+  }
+
+  document.addEventListener('astro:page-load', initTable);
+  initTable();
+</script>
+
+<style>
+  .g-table-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--swal-border);
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .g-controls-right {
+    display: flex;
+    flex-wrap: wrap;
+    min-width: 0;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .g-btn-export {
+    background: transparent;
+    border: 1px solid var(--swal-border);
+    border-radius: var(--swal-radius-md);
+    color: var(--swal-accent-text);
+    font-size: 0.8125rem;
+    padding: 0.375rem 0.625rem;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 120ms ease;
+  }
+  .g-btn-export:hover {
+    background: var(--swal-hover-bg);
+    border-color: var(--swal-border-strong);
+  }
+  .g-row-count { font-size: 0.75rem; color: var(--swal-text-muted); }
+  .g-table-search {
+    background: var(--swal-bg-elevated);
+    border: 1px solid var(--swal-border);
+    border-radius: var(--swal-radius-md);
+    padding: 0.375rem 0.625rem;
+    color: var(--swal-text);
+    font-size: 0.8125rem;
+    font-family: inherit;
+    width: min(180px, 100%);
+    transition: border-color 120ms;
+  }
+  .g-table-search:focus {
+    outline: none;
+    border-color: var(--swal-accent);
+  }
+  .g-table-search::placeholder { color: var(--swal-text-muted); }
+  .g-table-scroll { overflow-x: auto; container-type: inline-size; }
+  .g-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  /* .g-table, sus th/td y la columna fija (.g-sticky) viven en gara-theme.css. */
+  .g-table th[data-align="right"], .g-table td[data-align="right"] { text-align: right; }
+  .g-table th[data-align="center"], .g-table td[data-align="center"] { text-align: center; }
+
+  .g-empty {
+    text-align: center;
+    color: var(--swal-text-muted);
+    padding: 2rem 0;
+  }
+  /* El estado vacio ocupa el ancho VISIBLE: la celda abarca toda la tabla (que puede ser mas
+     ancha que la pantalla y desplazarse), asi que el mensaje queda fijo a la izquierda del
+     visor en vez de centrado en una zona que en 360 px queda recortada. */
+  .g-empty-msg {
+    position: sticky;
+    left: 0;
+    width: 100cqw;
+    box-sizing: border-box;
+    padding: 0 1rem;
+    text-align: center;
+  }
+
+  .g-actions-col { width: 6rem; }
+
+  .g-actions {
+    display: flex;
+    gap: 0.25rem;
+    justify-content: flex-end;
+    align-items: center;
+  }
+  .g-action-form { display: inline; margin: 0; }
+  .g-action-btn.g-action-link {
+    width: auto;
+    padding: 0 0.5rem;
+    white-space: nowrap;
+    color: var(--g-accent-primary);
+    text-decoration: underline;
+  }
+  .g-action-btn.g-action-link:hover { background: var(--swal-hover-bg); }
+  .g-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 0.25rem;
+    background: transparent;
+    border: 1px solid transparent;
+    cursor: pointer;
+    text-decoration: none;
+    font-size: 0.875rem;
+    transition: all 0.1s;
+  }
+  .g-action-edit { color: var(--swal-text-muted); }
+  .g-action-edit:hover {
+    color: var(--swal-accent-text);
+    background: var(--swal-hover-bg);
+  }
+  .g-action-delete:hover {
+    color: var(--swal-danger);
+    background: var(--swal-danger-bg);
+  }
+
+  .g-pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.75rem;
+    border-top: 1px solid var(--swal-border);
+    color: var(--swal-text-muted);
+    font-size: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .g-page-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2rem;
+    height: 2rem;
+    padding: 0 0.5rem;
+    clip-path: polygon(var(--swal-chamfer-sm) 0, 100% 0, 100% calc(100% - var(--swal-chamfer-sm)), calc(100% - var(--swal-chamfer-sm)) 100%, 0 100%, 0 var(--swal-chamfer-sm));
+    background: transparent;
+    border: 1px solid var(--swal-border);
+    color: var(--swal-text-secondary);
+    text-decoration: none;
+    font-size: 0.8125rem;
+    transition: all 0.1s;
+  }
+  .g-page-btn:hover:not(.g-page-disabled) {
+    border-color: var(--swal-border-strong);
+    background: var(--swal-hover-bg);
+    color: var(--swal-text);
+    text-decoration: none;
+  }
+  .g-page-active {
+    background: var(--swal-accent);
+    border-color: var(--swal-accent);
+    color: var(--swal-accent-contrast);
+    font-weight: 600;
+  }
+  .g-page-disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  .g-page-info { margin-left: 0.5rem; color: var(--swal-text-muted); }
+  .g-pagination-info {
+    padding: 0.5rem 1rem;
+    border-top: 1px solid var(--swal-border);
+    color: var(--swal-text-muted);
+    font-size: 0.75rem;
+    text-align: right;
+  }
+</style>

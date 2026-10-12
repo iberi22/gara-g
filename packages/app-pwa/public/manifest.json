@@ -1,0 +1,57 @@
+{
+  "name": "Gara-G Gestión de Flotas",
+  "short_name": "Gara-G",
+  "description": "Control de flota, mantención, combustible y documentos en un solo lugar.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#00e5ff",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "es",
+  "categories": [
+    "automotive",
+    "productivity",
+    "utilities"
+  ],
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Vehículos",
+      "short_name": "Vehículos",
+      "description": "Ver y gestionar los vehículos de la flota",
+      "url": "/fleet/vehicles",
+      "icons": []
+    },
+    {
+      "name": "Conductores",
+      "short_name": "Conductores",
+      "description": "Conductores y documentos",
+      "url": "/fleet/drivers",
+      "icons": []
+    },
+    {
+      "name": "Mantenimiento",
+      "short_name": "Mantención",
+      "description": "Calendario y alertas de mantención",
+      "url": "/fleet/maintenance",
+      "icons": []
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false
+}

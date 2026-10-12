@@ -1,0 +1,19 @@
+---
+/**
+ * /fleet/mercado — Bandeja del dueno: ofertas de talleres, repuestos, aseguradoras,
+ * lubricentros y llanterias emparejadas con SUS vehiculos, mas los controles de
+ * consentimiento y de "mostrar mi demanda".
+ *
+ * Funciona sin sesion (modo local): no lee D1. La red de datos y el garage local viven en
+ * el navegador, por eso el Svelte va con client:only (el SSR de Svelte no corre en workerd
+ * y la pagina no tiene nada que renderizar en el servidor).
+ */
+import FleetLayout from '../../../layouts/FleetLayout.astro';
+import MercadoApp from '../../../components/mercado/MercadoApp.svelte';
+
+export const prerender = false;
+---
+
+<FleetLayout title="Mercado" section="mercado">
+  <MercadoApp client:only="svelte" />
+</FleetLayout>

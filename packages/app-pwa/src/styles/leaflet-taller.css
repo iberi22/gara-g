@@ -1,0 +1,68 @@
+/* Leaflet bajo el tema TALLER: lo comparten el mapa de geocercas (lista y edicion) y
+   GeofenceMap.svelte. Leaflet va empaquetado (leaflet/dist/leaflet.css) y sus colores son fijos (blanco), asi
+   que aqui se llevan a los tokens --swal-*; el prefijo :root[data-theme^="taller"] sube la
+   especificidad para ganarle a leaflet.css sin depender del orden de carga.
+
+   Las geocercas se pintan con la clase .geo-t-<tipo> (opcion `className` de Leaflet) y no
+   con un color en JS: asi el color sale del token y sigue al cambio claro/oscuro. */
+
+:root[data-theme^="taller"] .leaflet-container {
+  background: var(--swal-bg-surface);
+  font-family: var(--swal-font);
+  color: var(--swal-text);
+}
+
+/* Oscuro: los tiles de OSM son casi blancos; se atenuan para que el mapa no deslumbre. */
+:root[data-theme="taller-dark"] .leaflet-tile-pane {
+  filter: brightness(0.62) saturate(0.7) contrast(1.05);
+}
+
+:root[data-theme^="taller"] .leaflet-popup-content-wrapper,
+:root[data-theme^="taller"] .leaflet-popup-tip,
+:root[data-theme^="taller"] .leaflet-tooltip {
+  background: var(--swal-surface);
+  color: var(--swal-text);
+  border: 1px solid var(--swal-border-light);
+  border-radius: 0;
+  box-shadow: var(--swal-shadow);
+}
+:root[data-theme^="taller"] .leaflet-popup-tip { border: 0; }
+:root[data-theme^="taller"] .leaflet-tooltip-top::before { border-top-color: var(--swal-border-light); }
+:root[data-theme^="taller"] .leaflet-tooltip-bottom::before { border-bottom-color: var(--swal-border-light); }
+:root[data-theme^="taller"] .leaflet-tooltip-left::before { border-left-color: var(--swal-border-light); }
+:root[data-theme^="taller"] .leaflet-tooltip-right::before { border-right-color: var(--swal-border-light); }
+:root[data-theme^="taller"] .leaflet-container a.leaflet-popup-close-button { color: var(--swal-text-muted); }
+
+:root[data-theme^="taller"] .leaflet-bar,
+:root[data-theme^="taller"] .leaflet-bar a {
+  background: var(--swal-surface);
+  color: var(--swal-text);
+  border-color: var(--swal-border-light);
+  border-radius: 0;
+}
+:root[data-theme^="taller"] .leaflet-bar a:hover { background: var(--swal-surface-hover); }
+:root[data-theme^="taller"] .leaflet-bar a.leaflet-disabled { background: var(--swal-surface-active); color: var(--swal-text-faint); }
+
+:root[data-theme^="taller"] .leaflet-control-attribution {
+  background: var(--swal-surface);
+  color: var(--swal-text-muted);
+}
+:root[data-theme^="taller"] .leaflet-control-attribution a { color: var(--swal-accent-text); }
+
+/* Colores por tipo de geocerca: --geo = relleno/trazo, --geo-text = rotulo legible. */
+:root[data-theme^="taller"] .geo-t-port       { --geo: var(--swal-info);          --geo-text: var(--swal-info); }
+:root[data-theme^="taller"] .geo-t-service    { --geo: var(--swal-accent);        --geo-text: var(--swal-accent-text); }
+:root[data-theme^="taller"] .geo-t-workzone   { --geo: var(--swal-accent);        --geo-text: var(--swal-accent-text); }
+:root[data-theme^="taller"] .geo-t-client     { --geo: var(--swal-success);       --geo-text: var(--swal-success); }
+:root[data-theme^="taller"] .geo-t-depot      { --geo: var(--swal-warning);       --geo-text: var(--swal-warning); }
+:root[data-theme^="taller"] .geo-t-restricted { --geo: var(--swal-danger);        --geo-text: var(--swal-danger); }
+:root[data-theme^="taller"] .geo-t-custom     { --geo: var(--swal-text-muted);    --geo-text: var(--swal-text-muted); }
+:root[data-theme^="taller"] path.geo-t { stroke: var(--geo); fill: var(--geo); }
+:root[data-theme^="taller"] .geo-type { color: var(--geo-text); font-size: 0.75rem; text-transform: uppercase; }
+
+/* Editor de poligono: trazo naranja de plano; los vertices, huecos con borde naranja. */
+:root[data-theme^="taller"] path.geo-edit { stroke: var(--swal-accent); fill: var(--swal-accent); }
+:root[data-theme^="taller"] path.geo-vertex { stroke: var(--swal-accent); fill: var(--swal-surface); fill-opacity: 1; }
+
+/* El enlace "Editar →" del popup: leaflet.css pinta `.leaflet-container a` y le ganaba. */
+:root[data-theme^="taller"] .leaflet-container a.g-popup-edit { color: var(--swal-accent-text); }

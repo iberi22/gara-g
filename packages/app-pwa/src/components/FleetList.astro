@@ -1,0 +1,226 @@
+---
+/**
+ * FleetList.astro — Client-side rendered dashboard with SSR fallback.
+ * Fetches live stats from /api/fleet/stats on mount.
+ * Falls back to seed data if API unavailable (e.g., build-time pre-render).
+ */
+import { ensureSeedData, DEMO_INSTANCE_ID, getFleetStats } from '../lib/fleetSeed.js';
+
+interface Props {
+  /** Tenant del panel. Lo resuelve la pagina (/fleet) desde la sesion. */
+  instanceId: string;
+}
+
+const { instanceId } = Astro.props;
+
+// Server-side seed fallback (for build-time pre-render in Pages static deploy)
+let serverStats: any = {
+  fleets: 0, vehicles: 0, drivers: 0, alerts: 0, unackAlerts: 0,
+  criticalAlerts: 0, totalMileage: 0, totalFuelCost: 0, totalMaintCost: 0,
+  maintenance: 0, geofences: 0, documents: 0, activeVehicles: 0,
+  maintenanceVehicles: 0,
+};
+let seedOk = false;
+try {
+  // ensureSeedData solo escribe el tenant demo: sembrarlo para un cliente real
+  // es trabajo en balde. Los KPIs se cuentan sobre el tenant de la sesion.
+  if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData();
+  serverStats = await getFleetStats(instanceId);
+  seedOk = true;
+} catch (e) {
+  // eslint-disable-next-line no-console
+  console.error('[FleetList] seed error:', e);
+}
+---
+
+<section class="page" data-testid="fleet-dashboard" id="fleet-dashboard"
+  data-server-fleets={serverStats.fleets}
+  data-server-vehicles={serverStats.vehicles}
+  data-server-drivers={serverStats.drivers}
+  data-server-alerts={serverStats.alerts}
+  data-server-unack={serverStats.unackAlerts}
+  data-server-critical={serverStats.criticalAlerts}
+  data-server-mileage={serverStats.totalMileage}
+  data-server-fuel={serverStats.totalFuelCost}
+  data-server-maint={serverStats.totalMaintCost}
+  data-server-maintenance={serverStats.maintenance}
+  data-server-geofences={serverStats.geofences}
+  data-server-documents={serverStats.documents}
+  data-server-active-vehicles={serverStats.activeVehicles}
+  data-server-maint-vehicles={serverStats.maintenanceVehicles}
+>
+  <div class="g-page-header" data-testid="page-header">
+    <div class="g-page-header-left">
+      <span class="g-page-icon" aria-hidden="true">📊</span>
+      <div class="g-page-titles">
+        <h2 class="g-page-title">Dashboard de Flota</h2>
+        <p class="g-page-subtitle">Vista general de tu parque automotor</p>
+      </div>
+    </div>
+    <span class="g-pill" data-testid="badge-pro-active">PRO NODO ACTIVO · TODO ABIERTO</span>
+  </div>
+
+  <div class="g-grid g-grid-4" data-testid="stats-primary">
+    <div class="swal-card-frame" data-testid="stat-fleets-frame">
+      <article class="swal-card-inner stat-card" data-testid="stat-fleets">
+        <div class="stat-icon">🚚</div>
+        <div class="stat-body">
+          <div class="stat-value" id="stat-fleets">{serverStats.fleets}</div>
+          <div class="stat-label swal-kicker">Flotas</div>
+        </div>
+      </article>
+    </div>
+    <div class="swal-card-frame" data-testid="stat-vehicles-frame">
+      <article class="swal-card-inner stat-card" data-testid="stat-vehicles">
+        <div class="stat-icon">🚗</div>
+        <div class="stat-body">
+          <div class="stat-value" id="stat-vehicles">{serverStats.vehicles}</div>
+          <div class="stat-label swal-kicker">Vehículos</div>
+          <div class="stat-sub"><span id="stat-active">{serverStats.activeVehicles}</span> activos · <span id="stat-maint">{serverStats.maintenanceVehicles}</span> mant.</div>
+        </div>
+      </article>
+    </div>
+    <div class="swal-card-frame" data-testid="stat-drivers-frame">
+      <article class="swal-card-inner stat-card" data-testid="stat-drivers">
+        <div class="stat-icon">👤</div>
+        <div class="stat-body">
+          <div class="stat-value" id="stat-drivers">{serverStats.drivers}</div>
+          <div class="stat-label swal-kicker">Conductores</div>
+        </div>
+      </article>
+    </div>
+    <div class="swal-card-frame" data-testid="stat-alerts-frame">
+      <article class="swal-card-inner stat-card" data-testid="stat-alerts">
+        <div class="stat-icon">🚨</div>
+        <div class="stat-body">
+          <div class="stat-value" id="stat-unack" class:list={[serverStats.criticalAlerts > 0 ? 'text-danger' : '']}>{serverStats.unackAlerts}</div>
+          <div class="stat-label swal-kicker">Alertas sin reconocer</div>
+          <div class="stat-sub"><span id="stat-critical">{serverStats.criticalAlerts}</span> críticas</div>
+        </div>
+      </article>
+    </div>
+  </div>
+
+  <div class="g-grid g-grid-3" data-testid="stats-secondary">
+    <div class="swal-card-frame">
+      <article class="swal-card-inner stat-mini" data-testid="mini-mileage">
+        <div class="mini-value"><span id="mini-mileage">{serverStats.totalMileage.toLocaleString('es-CO')}</span><span class="mini-unit">km</span></div>
+        <div class="mini-label swal-kicker">Kilometraje total</div>
+      </article>
+    </div>
+    <div class="swal-card-frame">
+      <article class="swal-card-inner stat-mini" data-testid="mini-fuel-cost">
+        <div class="mini-value"><span id="mini-fuel-cost">${(serverStats.totalFuelCost / 1_000_000).toFixed(2)}</span><span class="mini-unit">M</span></div>
+        <div class="mini-label swal-kicker">Costo combustible COP</div>
+      </article>
+    </div>
+    <div class="swal-card-frame">
+      <article class="swal-card-inner stat-mini" data-testid="mini-maint-cost">
+        <div class="mini-value"><span id="mini-maint-cost">${(serverStats.totalMaintCost / 1_000_000).toFixed(2)}</span><span class="mini-unit">M</span></div>
+        <div class="mini-label swal-kicker">Costo mantenimiento COP</div>
+      </article>
+    </div>
+    <div class="swal-card-frame">
+      <article class="swal-card-inner stat-mini" data-testid="mini-geofences">
+        <div class="mini-value" id="mini-geofences">{serverStats.geofences}</div>
+        <div class="mini-label swal-kicker">Geocercas activas</div>
+      </article>
+    </div>
+    <div class="swal-card-frame">
+      <article class="swal-card-inner stat-mini" data-testid="mini-documents">
+        <div class="mini-value" id="mini-documents">{serverStats.documents}</div>
+        <div class="mini-label swal-kicker">Documentos</div>
+      </article>
+    </div>
+    <div class="swal-card-frame">
+      <article class="swal-card-inner stat-mini" data-testid="mini-maintenance">
+        <div class="mini-value" id="mini-maintenance">{serverStats.maintenance}</div>
+        <div class="mini-label swal-kicker">Servicios registrados</div>
+      </article>
+    </div>
+  </div>
+
+  <div id="seed-error" class="error-banner" style="display:none">
+    ⚠️ Seed no cargado — datos demo no disponibles en este request.
+  </div>
+</section>
+
+<script is:inline>
+  // Client-side: fetch live stats from API and update DOM
+  async function refreshStats() {
+    try {
+      const res = await fetch('/api/fleet/stats');
+      if (!res.ok) throw new Error('API unavailable');
+      const json = await res.json();
+      const s = json.data;
+
+      // Update stat values
+      const set = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = String(val);
+      };
+
+      set('stat-fleets', s.fleets);
+      set('stat-vehicles', s.vehicles);
+      set('stat-drivers', s.drivers);
+      set('stat-unack', s.unackAlerts);
+      set('stat-critical', s.criticalAlerts);
+      set('stat-active', s.activeVehicles);
+      set('stat-maint', s.maintenanceVehicles);
+      set('mini-mileage', Number(s.totalMileage).toLocaleString('es-CO'));
+      set('mini-fuel-cost', '$' + (s.totalFuelCost / 1_000_000).toFixed(2));
+      set('mini-maint-cost', '$' + (s.totalMaintCost / 1_000_000).toFixed(2));
+      set('mini-geofences', s.geofences);
+      set('mini-documents', s.documents);
+      set('mini-maintenance', s.maintenance);
+
+      // Update alert card text color dynamically
+      const alertValue = document.getElementById('stat-unack');
+      if (alertValue) {
+        if (s.criticalAlerts > 0) {
+          alertValue.classList.add('text-danger');
+        } else {
+          alertValue.classList.remove('text-danger');
+        }
+      }
+
+      // Hide seed error if API succeeded
+      const errBanner = document.getElementById('seed-error');
+      if (errBanner) errBanner.style.display = 'none';
+
+    } catch (e) {
+      // API unavailable — keep server-side seed values (already rendered)
+      const errBanner = document.getElementById('seed-error');
+      if (errBanner) errBanner.style.display = 'flex';
+    }
+  }
+
+  refreshStats();
+</script>
+
+<style>
+  .page { display: flex; flex-direction: column; gap: 1.25rem; }
+  .stat-card { gap: 0.75rem; align-items: center; min-width: 0; padding: var(--swal-chamfer-lg); display: flex; }
+  .stat-icon { font-size: 1.5rem; flex-shrink: 0; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: var(--swal-bg-surface); border-radius: var(--swal-radius-sm); }
+  .stat-body { min-width: 0; flex: 1; }
+  .stat-value { font-size: 1.5rem; font-weight: 800; color: var(--swal-text); line-height: 1; }
+  .text-danger { color: var(--swal-danger) !important; }
+  .stat-label { font-size: 0.75rem; color: var(--swal-text-muted); margin-top: 0.25rem; }
+  .stat-sub { font-size: 0.625rem; color: var(--swal-text-faint); margin-top: 0.25rem; }
+  .stat-mini { padding: 0.625rem 0.75rem; min-width: 0; }
+  .mini-value { font-size: 1.0625rem; font-weight: 700; color: var(--swal-text); }
+  .mini-unit { font-size: 0.625rem; color: var(--swal-text-muted); margin-left: 0.25rem; }
+  .mini-label { margin-top: 0.25rem; }
+  .error-banner {
+    color: var(--swal-accent-text);
+    font-size: 0.8125rem;
+    background: var(--swal-accent-muted);
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--swal-radius-md);
+  }
+
+  /* === Responsive === */
+  @media (max-width: 480px) {
+    .stat-value { font-size: 1.25rem; }
+  }
+</style>

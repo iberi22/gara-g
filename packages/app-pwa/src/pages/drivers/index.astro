@@ -1,0 +1,28 @@
+---
+import { instanceIdFor } from '../../garage/domain/tenant.js';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import DriverTable from '../../components/driver/DriverTable.svelte';
+
+// Tenant de la sesion validada (fuera de produccion tambien admite ?instanceId=): nunca uno fijo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+---
+
+<BaseLayout title="Conductores GARA-G — Gara-G Fleet">
+  <main class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+    <div class="flex items-center justify-between border-b border-[var(--g-border-accent)] pb-4">
+      <div>
+        <h1 class="text-2xl font-bold text-[var(--g-text-primary)]">Conductores GARA-G</h1>
+        <p class="text-sm text-[var(--g-text-muted)] mt-1">Gestión de conductores, licencias, cédulas y asignación de vehículos</p>
+      </div>
+      <div>
+        <a href="/fleet" class="g-btn flex items-center gap-2">
+          ← Volver al Dashboard
+        </a>
+      </div>
+    </div>
+
+    <DriverTable instanceId={instanceId} client:only="svelte">
+      <div slot="fallback" style="min-height: 28rem" aria-hidden="true"></div>
+    </DriverTable>
+  </main>
+</BaseLayout>

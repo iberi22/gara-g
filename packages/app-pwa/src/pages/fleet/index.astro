@@ -1,0 +1,42 @@
+---
+/**
+ * /fleet — Dashboard principal de flota
+ *
+ * Se renderiza por request (no prerenderizado): el panel cuenta los datos del
+ * tenant de la sesion, y una pagina estatica los fijaria en el tenant del build.
+ */
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import FleetList from '../../components/FleetList.astro';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../lib/fleetSeed.js';
+import { listEntities } from '../../lib/domain.js';
+import { instanceIdFor } from '../../garage/domain/tenant.js';
+import { kmPorMes, barChartSVG } from '../../lib/fleetCharts.js';
+
+// Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
+// La semilla solo se escribe para el tenant demo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData();
+const vehicles = await listEntities('vehicle', instanceId);
+const kmData = kmPorMes(vehicles as any[]);
+// Sin kilometraje registrado la serie queda vacia y el grafico dice "Sin datos disponibles".
+const chartDataPoints = kmData.map((d) => ({ label: d.month, value: d.km }));
+
+const kmChartSvg = barChartSVG(chartDataPoints, {
+  title: 'Kilometraje Recorrido por Mes (km)',
+  color: 'var(--swal-accent)',
+  testId: 'km-month-chart',
+  unit: 'km',
+  height: 260,
+});
+---
+
+<FleetLayout title="Panel de flota" section="dashboard">
+  <div class="admin-view" data-testid="interface-admin-view" data-pref-panel="dash-fleets">
+    <FleetList instanceId={instanceId} />
+  </div>
+  <section class="dashboard-charts-section" data-testid="dashboard-charts" data-pref-panel="dash-km-chart">
+    <div class="chart-card">
+      <Fragment set:html={kmChartSvg} />
+    </div>
+  </section>
+</FleetLayout>

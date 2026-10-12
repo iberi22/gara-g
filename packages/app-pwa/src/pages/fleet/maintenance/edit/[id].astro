@@ -1,0 +1,83 @@
+---
+import FleetLayout from '../../../../layouts/FleetLayout.astro';
+import EntityForm from '../../../../components/EntityForm.astro';
+import PageHeader from '../../../../components/PageHeader.astro';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../../lib/fleetSeed.js';
+import { getEntity, listEntities } from '../../../../lib/domain.js';
+import { instanceIdFor } from '../../../../garage/domain/tenant.js';
+
+// Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
+// La semilla solo se escribe para el tenant demo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData().catch(() => {});
+
+const url = Astro.url;
+const id = url.pathname.split('/').pop()!;
+
+const vehicles = await listEntities('vehicle', instanceId).catch(() => []);
+const vehicleOptions = vehicles.map((v: any) => ({
+  value: v.id, label: `${v.plate || v.name || v.vin || "Sin placa"} — ${v.make} ${v.model}`,
+}));
+
+let record: any = null;
+try {
+  record = await getEntity('maintenance', id, instanceId);
+  if (!record) {
+    const all = await listEntities('maintenance', instanceId);
+    record = all.find((r: any) => r.id === id) ?? null;
+  }
+} catch (e: any) {
+  console.error('[maintenance/edit] error:', e?.message);
+  record = null;
+}
+
+if (!record) return Astro.redirect('/fleet/maintenance?error=not_found');
+---
+
+<FleetLayout title={`Editar mantenimiento`} section="maintenance">
+  <PageHeader title="Editar mantenimiento" icon="maintenance" />
+
+  {url.searchParams.get('error') === 'not_found' && (
+    <div class="g-toast g-toast-error">❌ Registro no encontrado.</div>
+  )}
+
+  <EntityForm
+    entity="maintenance"
+    instanceId={instanceId}
+    initialData={record}
+    fields={[
+      { name: 'vehicleId', label: 'Vehículo', type: 'select', required: true, options: vehicleOptions },
+      { name: 'type', label: 'Tipo', type: 'select', required: true,
+        options: [
+          { value: 'preventivo', label: 'Preventivo' },
+          { value: 'correctivo', label: 'Correctivo' },
+          { value: 'predictivo', label: 'Predictivo' },
+          { value: 'inspeccion', label: 'Inspección' },
+          { value: 'reparacion', label: 'Reparación' },
+          { value: 'llantas', label: 'Llantas' },
+          { value: 'aceite', label: 'Cambio de aceite' },
+        ]
+      },
+      { name: 'date', label: 'Fecha', type: 'date', required: true },
+      { name: 'km', label: 'Kilometraje (km)', type: 'number', step: '1' },
+      { name: 'hours', label: 'Horómetro (horas, maquinaria)', type: 'number', step: '1' },
+      { name: 'cost', label: 'Costo (COP)', type: 'number', step: '1000' },
+      { name: 'workshop', label: 'Taller', type: 'text' },
+      { name: 'description', label: 'Descripción', type: 'textarea' },
+      { name: 'status', label: 'Estado', type: 'select', required: true,
+        options: [
+          { value: 'scheduled', label: 'Programado' },
+          { value: 'in_progress', label: 'En curso' },
+          { value: 'completed', label: 'Completado' },
+          { value: 'cancelled', label: 'Cancelado' },
+        ]
+      },
+    ]}
+    cancelUrl="/fleet/maintenance"
+  />
+</FleetLayout>
+
+<style>
+.g-toast { padding: 0.75rem 1rem; border-radius: 0.375rem; margin-bottom: 1rem; font-size: 0.875rem; }
+.g-toast-error { background: var(--swal-danger-muted); border: 1px solid var(--swal-danger); color: var(--swal-danger); }
+</style>

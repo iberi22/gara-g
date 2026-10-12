@@ -1,0 +1,98 @@
+---
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import GenericTable from '../../components/GenericTableAstro.astro';
+import EntityForm from '../../components/EntityForm.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../lib/fleetSeed.js';
+import { listEntities } from '../../lib/domain.js';
+import { instanceIdFor } from '../../garage/domain/tenant.js';
+
+// Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
+// La semilla solo se escribe para el tenant demo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData();
+const records = await listEntities('fuelLog', instanceId);
+const vehicles = await listEntities('vehicle', instanceId);
+const drivers = await listEntities('driver', instanceId);
+
+const vehicleOptions = vehicles.map((v: any) => ({ value: v.id, label: `${v.plate || v.name || v.vin || "Sin placa"} — ${v.make} ${v.model}` }));
+const driverOptions = drivers.map((d: any) => ({ value: d.id, label: d.name }));
+
+const rows = records.map((r: any) => ({
+  ...r,
+  gallonsDisplay: (r.gallons || 0).toFixed(1) + ' gal',
+  costDisplay: '$' + (r.cost || 0).toLocaleString('es-CO'),
+  kmPerGal: (r.kmPerGallon || 0).toFixed(1),
+  vehicleLabel: vehicles.find((v: any) => v.id === r.vehicleId)?.plate ?? r.vehicleId?.slice(0, 8) ?? '',
+  driverLabel: drivers.find((d: any) => d.id === r.driverId)?.name ?? r.driverId?.slice(0, 8) ?? '',
+}));
+
+const columns = [
+  { key: 'vehicleLabel', label: 'Vehículo', width: '8rem' },
+  { key: 'driverLabel', label: 'Conductor', width: '10rem' },
+  { key: 'date', label: 'Fecha' },
+  { key: 'gallonsDisplay', label: 'Galones', align: 'right' as const },
+  { key: 'costDisplay', label: 'Costo', align: 'right' as const },
+  { key: 'station', label: 'Estación' },
+  { key: 'kmPerGal', label: 'Km/Gal', align: 'right' as const },
+];
+---
+
+<FleetLayout title="Combustible" section="fuel">
+  <section data-testid="fuel-page">
+    <PageHeader title="Combustible" subtitle={`${records.length} registros de carga`} icon="fuel" />
+
+    {Astro.url.searchParams.get('deleted') && (
+      <div class="g-toast g-toast-success">✅ Registro eliminado.</div>
+    )}
+
+    <details class="g-create-form">
+      <summary class="g-create-toggle"><span>➕ Registrar carga de combustible</span></summary>
+      <div class="g-create-content">
+        <EntityForm
+          entity="fuelLog"
+          instanceId={instanceId}
+          fields={[
+            { name: 'vehicleId', label: 'Vehículo', type: 'select', required: true, options: vehicleOptions },
+            { name: 'driverId', label: 'Conductor', type: 'select', required: false, options: driverOptions },
+            { name: 'date', label: 'Fecha', type: 'date', required: true },
+            { name: 'fuelType', label: 'Tipo combustible', type: 'select', required: true,
+              options: [
+                { value: 'diesel', label: 'Diésel' },
+                { value: 'gasoline', label: 'Gasolina' },
+                { value: 'electric', label: 'Eléctrico' },
+                { value: 'hybrid', label: 'Híbrido' },
+              ]
+            },
+            { name: 'gallons', label: 'Galones', type: 'number', required: true, step: '0.01' },
+            { name: 'cost', label: 'Costo total (COP)', type: 'number', required: true, step: '100' },
+            { name: 'km', label: 'Odómetro (km)', type: 'number', step: '1' },
+            { name: 'hours', label: 'Horómetro (horas, maquinaria)', type: 'number', step: '1' },
+            { name: 'station', label: 'Estación', type: 'text', placeholder: 'Terpel Av. El Dorado' },
+            { name: 'invoiceNumber', label: 'No. Factura', type: 'text' },
+          ]}
+          cancelUrl="/fleet/fuel-logs"
+        />
+      </div>
+    </details>
+
+    <GenericTable
+      columns={columns}
+      rows={rows}
+      testId="fuel-table"
+      showActions={true}
+      caption="Listado de cargas de combustible"
+      entity="fuelLog"
+      instanceId={instanceId}
+    />
+  </section>
+</FleetLayout>
+
+<style>
+.page-head h2 { margin: 0; font-size: 1.5rem; color: var(--swal-text); }
+.g-toast { padding: 0.75rem 1rem; border-radius: 0.375rem; margin-bottom: 1rem; font-size: 0.875rem; }
+.g-toast-success { background: var(--swal-success-muted); border: 1px solid var(--swal-success); color: var(--swal-success); }
+.g-create-form { margin-bottom: 1rem; background: var(--g-bg-elevated); border: 1px solid var(--g-border-accent); border-radius: 0.5rem; }
+.g-create-toggle { padding: 0.75rem 1rem; cursor: pointer; font-size: 0.875rem; font-weight: 600; color: var(--g-accent-primary); user-select: none; list-style: none; }
+.g-create-content { padding: 1rem 1rem 1.5rem; }
+</style>

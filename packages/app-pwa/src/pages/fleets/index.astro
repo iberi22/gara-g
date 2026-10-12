@@ -1,0 +1,92 @@
+---
+import { instanceIdFor } from '../../garage/domain/tenant.js';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { isFleetOnly } from '../../lib/features';
+import FleetTable from '../../components/fleet/FleetTable.svelte';
+
+// Tenant de la sesion validada (fuera de produccion tambien admite ?instanceId=): nunca uno fijo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+---
+
+<BaseLayout title={isFleetOnly() ? 'Flotas - Gara-G' : 'Flotas - Gara-G DePIN Console'} description="Tabla de gestión de flotas de Gara-G con sincronización CRDT (Yjs) en tiempo real">
+  <main class="fleets-page-container">
+    <header class="fleets-page-header">
+      <div class="title-group">
+        <h1>Flotas</h1>
+        <p class="subtitle">Gestión de flotas en tiempo real con Yjs, IndexedDB y Cloudflare Vault</p>
+      </div>
+      <div class="badge-group">
+        <span class="status-pill">
+          <span class="status-dot"></span>
+          Sincronización Yjs activa
+        </span>
+      </div>
+    </header>
+
+    <section class="table-section">
+      <FleetTable client:only="svelte" instanceId={instanceId}>
+        <div slot="fallback" style="min-height: 22rem" aria-hidden="true"></div>
+      </FleetTable>
+    </section>
+  </main>
+</BaseLayout>
+
+<style>
+  .fleets-page-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .fleets-page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--swal-line-hairline);
+  }
+
+  .title-group h1 {
+    font-size: 1.875rem;
+    font-weight: 800;
+    margin: 0;
+    color: var(--swal-text);
+    letter-spacing: -0.02em;
+  }
+
+  .title-group .subtitle {
+    margin: 0.375rem 0 0 0;
+    font-size: 0.875rem;
+    color: var(--swal-text-muted);
+  }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    border-radius: 9999px;
+    background: var(--swal-hover-bg);
+    color: var(--swal-text-secondary);
+    border: 1px solid var(--swal-border-light);
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-family: var(--swal-font-mono);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--swal-success);
+  }
+
+  .table-section {
+    width: 100%;
+  }
+</style>

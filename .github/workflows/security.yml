@@ -1,0 +1,94 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 0 * * 1' # Every Monday at midnight
+
+jobs:
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    # CodeQL es lento; solo tiene sentido en cambios de codigo real.
+    if: >-
+      github.event_name == 'schedule' ||
+      !(
+        contains(github.event.head_commit.message, '.github/workflows/security.yml') ||
+        contains(github.event.head_commit.message, 'REPORT.md')
+      )
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript, python
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  snyk:
+    name: Snyk Security Scan
+    runs-on: ubuntu-latest
+    # El contexto `secrets` NO esta disponible en `jobs.<id>.if` (ver GitHub
+    # Docs > Contexts > Context availability: `jobs..if` solo admite
+    # github, needs, vars, inputs). Comprobamos el secreto en el propio job
+    # exponiendolo como env y gateando el paso de Snyk.
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # SNYK_TOKEN no esta configurado en este repo. Se avisa y se omite el
+      # escaneo en vez de dejar un rojo permanente por un secreto ausente.
+      - name: Comprobar SNYK_TOKEN
+        id: gate
+        run: |
+          if [ -z "${SNYK_TOKEN}" ]; then
+            echo "::notice::SNYK_TOKEN no configurado: se omite Snyk Security Scan."
+            echo "::notice::Configuralo en Settings > Secrets and variables > Actions para activarlo."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Snyk to check for vulnerabilities
+        if: steps.gate.outputs.skip != 'true'
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+
+  secret-scanning:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: TruffleHog OSS
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD

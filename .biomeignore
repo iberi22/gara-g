@@ -1,0 +1,55 @@
+# Build directories
+**/.next/
+**/dist/
+**/build/
+**/out/
+
+# Dependencies
+**/node_modules/
+
+# Cache directories
+**/.turbo/
+**/.cache/
+
+# Coverage reports
+**/coverage/
+
+# Minified files
+**/*.min.js
+**/*.bundle.js
+
+# Generated files
+**/*.generated.js
+**/*.generated.ts
+
+# Declarations
+**/*.d.ts
+
+# Logs
+**/*.log
+
+# Environment files
+.env*
+!.env.example
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Test reports
+**/test-reports/
+**/audit-reports/
+**/health-reports/
+
+# Service account keys
+service?account*.json

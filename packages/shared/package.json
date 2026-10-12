@@ -1,0 +1,25 @@
+{
+	"name": "@gara-g/shared",
+	"version": "0.0.0",
+	"private": true,
+	"license": "AGPL-3.0-only",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "tsc && node scripts/build-tokens.js",
+		"build:tokens": "node scripts/build-tokens.js",
+		"validate:tokens": "node -e \"import('./dist/design-tokens/validate.js').then(m => console.log(m.formatValidationResults(m.validateDesignTokens())))\"",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write --unsafe .",
+		"format": "biome format --write .",
+		"format:check": "biome format .",
+		"test": "vitest run --coverage",
+		"type-check": "tsc --noEmit"
+	},
+	"dependencies": {
+		"zod": "^4.6.5"
+	},
+	"devDependencies": {
+		"vitest": "^4.1.11"
+	}
+}

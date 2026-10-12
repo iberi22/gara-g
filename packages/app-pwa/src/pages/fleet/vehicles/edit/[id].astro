@@ -1,0 +1,118 @@
+---
+/**
+ * pages/fleet/vehicles/edit/[id].astro — Editar un vehículo existente.
+ */
+import { vehicleFormFields } from '../../../../lib/vehicleForm';
+import { normalizeVehicleType } from '../../../../lib/vehicleCatalog';
+import FleetLayout from '../../../../layouts/FleetLayout.astro';
+import EntityForm from '../../../../components/EntityForm.astro';
+import UploadWidget from '../../../../components/UploadWidget.astro';
+import PageHeader from '../../../../components/PageHeader.astro';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../../lib/fleetSeed.js';
+import { getEntity, listEntities } from '../../../../lib/domain.js';
+import { instanceIdFor } from '../../../../garage/domain/tenant.js';
+
+// Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
+// La semilla solo se escribe para el tenant demo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData().catch(() => {});
+
+const url = Astro.url;
+const id = url.pathname.split('/').pop()!;
+
+let vehicle: any = null;
+try {
+  vehicle = await getEntity('vehicle', id, instanceId);
+  if (!vehicle) {
+    const all = await listEntities('vehicle', instanceId);
+    vehicle = all.find((v: any) => v.id === id) ?? null;
+  }
+} catch (e: any) {
+  console.error('[vehicle/edit] getEntity error:', e?.message);
+  vehicle = null;
+}
+
+if (!vehicle) {
+  return Astro.redirect('/fleet/vehicles?error=not_found');
+}
+
+const fleets = await listEntities('fleet', instanceId);
+const fleetOptions = (fleets as any[]).map((f: any) => ({
+  value: f.id,
+  label: f.name ?? f.id,
+}));
+
+// Cargar archivos asociados al vehículo. Se lee el dominio en vez de pedir
+// /api/fleet/files por HTTP: un fetch desde el servidor no lleva la cookie de la
+// sesion, asi que la API contestaba 401 y la lista salia siempre vacia. El
+// filtro es el mismo que aplica el GET de esa ruta (src/pages/api/fleet/files.ts).
+let initialFiles: any[] = [];
+try {
+  const all = await listEntities('document', instanceId).catch(() => [] as any[]);
+  initialFiles = all
+    .filter((d: any) => {
+      const attached = d.attachedTo ?? d.attached_to;
+      if (!attached) return false;
+      if (typeof attached === 'string') return attached === `vehicle:${vehicle.id}`;
+      return attached.entityType === 'vehicle' && attached.entityId === vehicle.id;
+    })
+    .map((d: any) => ({
+      id: d.id,
+      key: d.fileKey ?? d.r2Key ?? d.url,
+      name: d.name ?? d.fileName,
+      type: d.fileType ?? d.mimeType,
+      size: d.fileSize ?? d.size,
+      kind: d.kind ?? 'document',
+      uploadedAt: d.uploadedAt ?? d.createdAt ?? d.updated_at,
+    }));
+} catch (e) {
+  console.error('[vehicle/edit] load files error:', e);
+}
+
+const vehicleFields = vehicleFormFields(fleetOptions);
+---
+
+<FleetLayout title={`Editar ${vehicle.plate}`} section="vehicles">
+  <section data-testid="vehicle-edit-page">
+    <PageHeader
+      title={`Editar vehículo: ${vehicle.plate}`}
+      subtitle="Actualiza los datos del vehículo"
+      icon="vehicles"
+    />
+
+    {url.searchParams.get('error') === 'not_found' && (
+      <div class="g-toast g-toast-error">❌ Vehículo no encontrado.</div>
+    )}
+
+    <EntityForm
+      entity="vehicle"
+      instanceId={instanceId}
+      initialData={{ ...vehicle, type: normalizeVehicleType(vehicle.type) ?? vehicle.type }}
+      fields={vehicleFields}
+      cancelUrl="/fleet/vehicles"
+    />
+
+    <UploadWidget
+      entityType="vehicle"
+      entityId={vehicle.id}
+      kind="photo"
+      label="Fotos del vehículo"
+      initialFiles={initialFiles}
+      backUrl={`/fleet/vehicles/edit/${vehicle.id}`}
+    />
+  </section>
+</FleetLayout>
+
+<style>
+  .g-toast {
+    padding: 0.75rem 1rem;
+    border-radius: 0.375rem;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+  }
+  .g-toast-error {
+    background: var(--swal-danger-muted);
+    border: 1px solid var(--swal-danger);
+    color: var(--swal-danger);
+  }
+</style>

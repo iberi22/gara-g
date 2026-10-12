@@ -1,0 +1,22 @@
+---
+/**
+ * /fleet/game — Need for Speed Video Game Garage Interface
+ */
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import GameGarage from '../../components/GameGarage.svelte';
+---
+
+<FleetLayout title="Garaje clásico" section="game-classic">
+  <div class="game-page-wrapper" data-testid="interface-game-view">
+    <GameGarage client:only="svelte" />
+  </div>
+</FleetLayout>
+
+<style>
+  .game-page-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    width: 100%;
+  }
+</style>

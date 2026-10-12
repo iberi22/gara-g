@@ -1,0 +1,17 @@
+---
+/**
+ * /fleet/ajustes — Ajustes de interfaz: tema, perfiles, modulos del menu y paneles.
+ * Svelte va con client:only: el SSR de Svelte no funciona en workerd.
+ *
+ * Funciona sin sesion (modo local): no lee D1; las preferencias viven en localStorage y
+ * SettingsApp las lee del navegador. En modo local anade "Salir del modo local".
+ */
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import SettingsApp from '../../components/prefs/SettingsApp.svelte';
+
+const isGuest = Astro.locals.mode === 'guest' && !Astro.locals.user;
+---
+
+<FleetLayout title="Ajustes" section="settings">
+  <SettingsApp client:only="svelte" guest={isGuest} />
+</FleetLayout>

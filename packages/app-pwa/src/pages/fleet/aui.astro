@@ -1,0 +1,24 @@
+---
+/**
+ * /fleet/aui — AUI Copilot: Interfaz Agentica Generativa SWAL
+ */
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import AuiInterface from '../../components/AuiInterface.svelte';
+---
+
+<FleetLayout title="AUI Agentic Copilot" section="aui">
+  <div class="aui-page-wrapper" data-testid="interface-aui-view">
+    <AuiInterface client:only="svelte">
+      <div slot="fallback" style="min-height: 32rem" aria-hidden="true"></div>
+    </AuiInterface>
+  </div>
+</FleetLayout>
+
+<style>
+  .aui-page-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    width: 100%;
+  }
+</style>

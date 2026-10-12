@@ -1,0 +1,199 @@
+---
+/**
+ * /fleet/garage/flota-demo-chile — Vista de SOLO LECTURA de la flota demo chilena
+ * (tenant fijo `flota-demo-chile`, datos ficticios).
+ *
+ * Vive bajo /fleet/garage a proposito: ese prefijo ya esta en GUEST_ALLOWED_PATHS, asi que el
+ * visitante en modo local la abre sin cuenta y sin tocar el middleware. El tenant NO sale de
+ * la peticion (ver src/lib/demoChileView.ts): con o sin sesion se ve la misma flota demo.
+ * Sin formularios ni acciones: no hay nada que escribir.
+ */
+import FleetLayout from '../../../layouts/FleetLayout.astro';
+import { APP_HOME } from '../../../lib/appMode';
+import { loadChileDemo } from '../../../lib/demoChileView';
+
+export const prerender = false;
+
+const view = await loadChileDemo();
+const clp = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 });
+const num = new Intl.NumberFormat('es-CL');
+const fecha = (iso: unknown) =>
+  typeof iso === 'string' && iso ? new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '—';
+const plateOf = new Map(view.vehicles.map((v) => [v.id, String(v.plate ?? '—')]));
+const driverOf = new Map(view.drivers.map((d) => [d.id, String(d.name ?? '—')]));
+const ESTADO: Record<string, string> = { active: 'Operativo', maintenance: 'En taller', inactive: 'Fuera de servicio' };
+const DOC_ESTADO: Record<string, string> = { valid: 'Vigente', expiring: 'Por vencer', expired: 'Vencido' };
+const MANT_ESTADO: Record<string, string> = { completed: 'Realizada', scheduled: 'Programada', in_progress: 'En curso' };
+const SEVERIDAD: Record<string, string> = { critical: 'Crítica', high: 'Alta', warning: 'Advertencia', medium: 'Media', low: 'Baja' };
+
+const docsAtencion = view.documents
+  .filter((d) => d.status === 'expiring' || d.status === 'expired')
+  .sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
+const ultimosMant = [...view.maintenance].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 12);
+const ultimasCargas = [...view.fuelLogs].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 12);
+const operativos = view.vehicles.filter((v) => v.status === 'active').length;
+---
+
+<FleetLayout title="Flota demo Chile" section="game">
+  <div class="fd" data-testid="demo-fleet-chile" data-source={view.source}>
+    <header class="fd-head">
+      <p class="fd-kicker">Flota demo · solo lectura</p>
+      <h1 class="fd-title">{String(view.fleet?.name ?? 'Camiones tolva · Región de Antofagasta')}</h1>
+      <p class="fd-note" data-testid="demo-fleet-readonly">
+        Datos ficticios de ejemplo (patentes, conductores y RUT inventados). Esta vista no permite editar:
+        con una cuenta tu empresa carga su propia flota.
+      </p>
+      <div class="fd-actions">
+        <a class="fd-btn" href={APP_HOME.guest} data-testid="demo-fleet-back">Volver al garage</a>
+      </div>
+    </header>
+
+    <section class="fd-kpis" aria-label="Resumen">
+      <div class="fd-kpi"><span class="fd-kpi-n" data-testid="demo-kpi-vehicles">{view.vehicles.length}</span><span>camiones tolva</span></div>
+      <div class="fd-kpi"><span class="fd-kpi-n">{operativos}</span><span>operativos</span></div>
+      <div class="fd-kpi"><span class="fd-kpi-n" data-testid="demo-kpi-drivers">{view.drivers.length}</span><span>conductores</span></div>
+      <div class="fd-kpi"><span class="fd-kpi-n">{docsAtencion.length}</span><span>documentos por revisar</span></div>
+      <div class="fd-kpi"><span class="fd-kpi-n">{view.alerts.length}</span><span>alertas</span></div>
+    </section>
+
+    <section class="fd-sec" aria-labelledby="fd-veh">
+      <h2 id="fd-veh">Camiones</h2>
+      <div class="fd-scroll">
+        <table data-testid="demo-vehicles">
+          <thead><tr><th scope="col">Patente</th><th scope="col">Marca y modelo</th><th scope="col">Año</th><th scope="col">Tolva</th><th scope="col">Kilometraje</th><th scope="col">Estado</th><th scope="col">Rev. técnica</th></tr></thead>
+          <tbody>
+            {view.vehicles.map((v) => (
+              <tr>
+                <th scope="row" class="fd-mono">{String(v.plate ?? '—')}</th>
+                <td>{String(v.make ?? '')} {String(v.model ?? '')}</td>
+                <td>{String(v.year ?? '—')}</td>
+                <td>{String(v.capacity ?? '—')}</td>
+                <td class="fd-num">{typeof v.mileage === 'number' ? `${num.format(v.mileage)} km` : '—'}</td>
+                <td>{ESTADO[String(v.status)] ?? String(v.status ?? '—')}</td>
+                <td>{fecha(v.tecnoExpiry)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="fd-sec" aria-labelledby="fd-docs">
+      <h2 id="fd-docs">Documentos por vencer o vencidos</h2>
+      <div class="fd-scroll">
+        <table data-testid="demo-documents">
+          <thead><tr><th scope="col">Documento</th><th scope="col">Camión / conductor</th><th scope="col">Vence</th><th scope="col">Estado</th></tr></thead>
+          <tbody>
+            {docsAtencion.map((d) => (
+              <tr>
+                <td>{String(d.kind ?? '—')}</td>
+                <td>{d.vehicleId ? plateOf.get(String(d.vehicleId)) : driverOf.get(String(d.driverId)) ?? '—'}</td>
+                <td>{fecha(d.expiry)}</td>
+                <td class={`fd-st fd-st-${String(d.status)}`}>{DOC_ESTADO[String(d.status)] ?? String(d.status)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="fd-sec" aria-labelledby="fd-drv">
+      <h2 id="fd-drv">Conductores</h2>
+      <div class="fd-scroll">
+        <table data-testid="demo-drivers">
+          <thead><tr><th scope="col">Nombre</th><th scope="col">RUT</th><th scope="col">Licencia</th><th scope="col">Vence</th><th scope="col">Camión</th></tr></thead>
+          <tbody>
+            {view.drivers.map((d) => (
+              <tr>
+                <th scope="row">{String(d.name ?? '—')}</th>
+                <td class="fd-mono">{String(d.rut ?? d.cedula ?? '—')}</td>
+                <td>Clase {String(d.licenseCategory ?? '—')}</td>
+                <td>{fecha(d.licenseExpiry)}</td>
+                <td class="fd-mono">{d.vehicleId ? plateOf.get(String(d.vehicleId)) : 'Sin asignar'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="fd-sec" aria-labelledby="fd-mnt">
+      <h2 id="fd-mnt">Mantenciones recientes y programadas</h2>
+      <div class="fd-scroll">
+        <table data-testid="demo-maintenance">
+          <thead><tr><th scope="col">Fecha</th><th scope="col">Camión</th><th scope="col">Trabajo</th><th scope="col">Taller</th><th scope="col">Costo</th><th scope="col">Estado</th></tr></thead>
+          <tbody>
+            {ultimosMant.map((m) => (
+              <tr>
+                <td>{fecha(m.date)}</td>
+                <td class="fd-mono">{plateOf.get(String(m.vehicleId)) ?? '—'}</td>
+                <td>{String(m.type ?? '—')}</td>
+                <td>{String(m.workshop ?? '—')}</td>
+                <td class="fd-num">{typeof m.cost === 'number' ? clp.format(m.cost) : '—'}</td>
+                <td>{MANT_ESTADO[String(m.status)] ?? String(m.status ?? '—')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="fd-sec" aria-labelledby="fd-fuel">
+      <h2 id="fd-fuel">Últimas cargas de combustible</h2>
+      <div class="fd-scroll">
+        <table data-testid="demo-fuel">
+          <thead><tr><th scope="col">Fecha</th><th scope="col">Camión</th><th scope="col">Litros</th><th scope="col">Costo</th><th scope="col">Estación</th></tr></thead>
+          <tbody>
+            {ultimasCargas.map((f) => (
+              <tr>
+                <td>{fecha(f.date)}</td>
+                <td class="fd-mono">{plateOf.get(String(f.vehicleId)) ?? '—'}</td>
+                <td class="fd-num">{typeof f.liters === 'number' ? num.format(f.liters) : '—'}</td>
+                <td class="fd-num">{typeof f.cost === 'number' ? clp.format(f.cost) : '—'}</td>
+                <td>{String(f.station ?? '—')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="fd-sec" aria-labelledby="fd-geo">
+      <h2 id="fd-geo">Geocercas</h2>
+      <ul class="fd-list" data-testid="demo-geofences">
+        {view.geofences.map((g) => <li>{String(g.name ?? '—')}</li>)}
+      </ul>
+    </section>
+
+    <section class="fd-sec" aria-labelledby="fd-alr">
+      <h2 id="fd-alr">Alertas</h2>
+      <ul class="fd-list" data-testid="demo-alerts">
+        {view.alerts.map((a) => <li><strong>{SEVERIDAD[String(a.severity)] ?? String(a.severity)}:</strong> {String(a.message ?? '')}</li>)}
+      </ul>
+    </section>
+  </div>
+</FleetLayout>
+
+<style>
+  .fd { display: flex; flex-direction: column; gap: 1.25rem; max-width: 1100px; color: var(--swal-text); }
+  .fd-kicker { margin: 0; font-family: var(--swal-font-mono, monospace); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--swal-text-secondary); }
+  .fd-title { margin: 0.25rem 0; font-size: 1.4rem; }
+  .fd-note { margin: 0; color: var(--swal-text-secondary); max-width: 70ch; line-height: 1.5; }
+  .fd-actions { margin-top: 0.75rem; }
+  .fd-btn { min-height: 44px; padding: 0 1.1rem; display: inline-flex; align-items: center; font-weight: 600; text-decoration: none; color: var(--swal-accent-contrast); background: var(--swal-accent); border: 1px solid var(--swal-accent); }
+  .fd-btn:focus-visible { outline: 2px solid var(--swal-text); outline-offset: 2px; }
+  .fd-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.5rem; }
+  .fd-kpi { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.75rem; background: var(--swal-surface); border: 1px solid var(--swal-border-strong); color: var(--swal-text-secondary); font-size: 0.85rem; }
+  .fd-kpi-n { font-size: 1.5rem; font-weight: 700; color: var(--swal-text); }
+  .fd-sec h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+  .fd-scroll { overflow-x: auto; border: 1px solid var(--swal-border-strong); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--swal-border-strong); white-space: nowrap; }
+  thead th { background: var(--swal-surface); font-weight: 600; }
+  tbody th { font-weight: 600; }
+  .fd-mono { font-family: var(--swal-font-mono, monospace); }
+  .fd-num { text-align: right; font-variant-numeric: tabular-nums; }
+  .fd-st-expired { color: var(--swal-danger); font-weight: 600; }
+  .fd-st-expiring { font-weight: 600; }
+  .fd-list { margin: 0; padding-left: 1.2rem; line-height: 1.6; }
+</style>

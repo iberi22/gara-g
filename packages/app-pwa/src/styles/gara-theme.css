@@ -1,0 +1,437 @@
+/* gara-theme.css — Sistema de diseño GARA-G compartido (landing + fleet).
+ * Extraído de BaseLayout.astro: TODAS las páginas deben cargar estos tokens
+ * y utilidades (antes solo la landing los tenía; FleetLayout→Layout no
+ * incluía BaseLayout y las páginas fleet quedaban sin g-grid/g-table/tokens).
+ * Fuentes locales offline-first (sin CDN): Inter = UI, JetBrains Mono = datos.
+ */
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/600.css';
+
+/* Tailwind v4. El plugin `@tailwindcss/vite` estaba registrado en
+ * astro.config.mjs, pero sin esta directiva NUNCA se generaba CSS: el
+ * pipeline no tiene nada que escanear. Doce componentes Svelte (FuelLogTable,
+ * DocumentVault, LiveChart, LiveMap, VehicleForm, GeofenceMap, DriverTable,
+ * AlertFeed y cuatro mas) usan utilidades de Tailwind en su marcado, asi que
+ * salian sin ninguna de ellas: tablas sin flex, badges sin padding, mapas sin
+ * dimension. Verificado sobre el bundle: cero ocurrencias de `.flex`,
+ * `.grid`, `.gap-2`, `.p-3`, `.rounded-lg` o `.text-xs`.
+ *
+ * `preflight` se deja APAGADO a proposito: sobreescribe los resets de los
+ * componentes que ya funcionan (el `border-collapse:separate` de `.g-table`, los
+ * estilos de Leaflet, los inputs nativos) y cambiaria el aspecto de las 49
+ * paginas que hoy se ven bien. Las utilidades se generan; los resets, no.
+ */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css';
+@import 'tailwindcss/utilities.css';
+
+      @import '@swal/ui/tokens';
+      @import './swal-taller.css';
+
+      /* Sin preflight, la utilidad `border` de Tailwind deja el color por defecto del
+       * navegador (currentColor): en oscuro, un marco blanco alrededor de cada tarjeta
+       * (tracking, LiveMap y siete componentes mas). Este es el unico reset que se toma
+       * de preflight. Va en la capa base, por debajo de utilities, asi que
+       * `border-red-500` y similares siguen mandando, y los estilos con alcance de los
+       * componentes (sin capa) tambien. */
+      @layer base {
+        *, ::before, ::after { border-color: var(--swal-border); }
+      }
+
+      /* ============================================================
+       * GARA-G Theme — Antigravity-inspired tokens
+       * Shared by ALL pages (sidebar, dashboard, lists, catalog)
+       * ============================================================ */
+
+      :root {
+        /* Backgrounds */
+        /* Alias de los tokens de GARA-G sobre los del tema activo de @swal/ui
+           (swal-taller.css: data-theme="taller" | "taller-dark"). Las paginas
+           siguen usando --g-*; el valor lo decide el tema. */
+        --g-bg-base: var(--swal-bg);
+        --g-bg-surface: var(--swal-bg-surface);
+        --g-bg-elevated: var(--swal-surface);
+        --g-bg-overlay: var(--swal-overlay);
+
+        /* Borders */
+        --g-border-subtle: var(--swal-border);
+        --g-border-accent: var(--swal-border-light);
+        --g-border-accent-strong: var(--swal-border-strong);
+        /* Borde de CONTROL (inputs, selects, botones): 3:1 contra la hoja (WCAG 1.4.11).
+           Los de arriba son hairlines decorativos y no llegan a 3:1 a proposito. */
+        --g-border-input: var(--swal-border-input);
+        /* Anillo de foco: el naranja de relleno (#FF6A13) da 2.5:1 sobre la hoja clara;
+           el naranja de texto cumple 3:1 en las dos variantes. */
+        --g-focus-ring: var(--swal-accent-text);
+
+        /* Text */
+        --g-text-primary: var(--swal-text);
+        --g-text-secondary: var(--swal-text-secondary);
+        --g-text-muted: var(--swal-text-muted);
+        --g-text-faint: var(--swal-text-muted);
+        --g-text-disabled: var(--swal-text-faint);
+
+        /* Accents */
+        /* "cyan" era el acento de datos del tema viejo; en el taller el acento es
+           uno solo (naranja senal) y el texto acentuado va en --swal-accent-text. */
+        --g-accent-cyan: var(--swal-accent-text);
+        --g-accent-orange: var(--swal-accent-text);
+        --g-accent-yellow: var(--swal-warning);
+        --g-accent-red: var(--swal-danger);
+        --g-accent-green: var(--swal-success);
+        --g-accent-fill: var(--swal-accent);
+        /* Acento como COLOR DE TEXTO (titulos de <summary>, enlaces de accion). */
+        --g-accent-primary: var(--swal-accent-text);
+        --g-bg-input: var(--swal-bg-elevated);
+
+        /* Type — Offline-first system font tokens */
+        --g-font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        --g-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+        /* Radii */
+        --g-radius-sm: var(--swal-radius-sm, 4px);
+        --g-radius-md: var(--swal-radius, 6px);
+        --g-radius-lg: var(--swal-radius, 8px);
+        --g-radius-xl: var(--swal-radius-lg, 12px);
+        --g-radius-full: 999px;
+
+        /* Spacing */
+        --g-space-1: 0.25rem;
+        --g-space-2: 0.5rem;
+        --g-space-3: 0.75rem;
+        --g-space-4: 1rem;
+        --g-space-5: 1.25rem;
+        --g-space-6: 1.5rem;
+
+        /* --swal-* que el codigo usa pero el tema no define (el bundle @swal/ui es un
+           stub): alias de los que si existen. Sin esto, var(--swal-radius-md) etc. no
+           resolvian a nada. */
+        --swal-radius-md: var(--swal-radius);
+        --swal-font-sans: var(--swal-font);
+        --swal-font-size-xs: 0.75rem;
+        --swal-font-size-sm: 0.8125rem;
+      }
+
+      /* Base & Accessibility */
+      html { background: var(--g-bg-base); color: var(--g-text-primary); }
+      body {
+        margin: 0;
+        font-family: var(--g-font-sans);
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      * { box-sizing: border-box; }
+      a { color: var(--g-accent-cyan); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+
+      /* Keyboard focus visible for WCAG 2.1 AA */
+      :focus-visible {
+        outline: 2px solid var(--g-focus-ring) !important;
+        outline-offset: 2px !important;
+      }
+
+      /* Skip-link for screen readers & keyboard navigation */
+      .skip-link {
+        position: absolute;
+        top: -9999px;
+        left: -9999px;
+        background: var(--swal-accent);
+        color: var(--swal-accent-contrast);
+        font-weight: 700;
+        padding: 0.625rem 1.25rem;
+        z-index: 9999;
+        border-radius: 4px;
+        text-decoration: none;
+      }
+      .skip-link:focus {
+        top: 0.5rem;
+        left: 0.5rem;
+      }
+
+      /* === Reusable page surface (cards, panels) === */
+      .g-card {
+        background: var(--swal-surface);
+        border: 1px solid var(--g-border-accent);
+        border-radius: var(--g-radius-xl);
+        padding: var(--g-space-4);
+      }
+      .g-card-elevated {
+        background: var(--g-bg-surface);
+        border: 1px solid var(--g-border-subtle);
+        border-radius: var(--g-radius-lg);
+      }
+
+      /* === Reusable page-header (h1, subtitle) === */
+      .g-page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        gap: var(--g-space-3);
+        margin-bottom: var(--g-space-5);
+      }
+      .g-page-title {
+        font-size: 1.625rem;
+        font-weight: 700;
+        color: var(--g-text-primary);
+        margin: 0;
+        letter-spacing: -0.01em;
+      }
+      .g-page-subtitle {
+        color: var(--g-text-muted);
+        font-size: 0.8125rem;
+        margin-top: 0.25rem;
+      }
+
+      /* === Reusable grid === */
+      .g-grid {
+        display: grid;
+        gap: var(--g-space-3);
+      }
+      .g-grid-4 { grid-template-columns: repeat(4, 1fr); }
+      .g-grid-3 { grid-template-columns: repeat(3, 1fr); }
+      .g-grid-2 { grid-template-columns: repeat(2, 1fr); }
+      .g-grid-1 { grid-template-columns: 1fr; }
+
+      /* === Reusable text variants === */
+      .g-mono { font-family: var(--g-font-mono); }
+      .g-muted { color: var(--g-text-muted); }
+      .g-faint { color: var(--g-text-faint); }
+      .g-truncate {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* === Reusable form controls (alineado con theme) === */
+      .g-input,
+      .g-select,
+      .g-textarea {
+        background: var(--g-bg-elevated);
+        border: 1px solid var(--g-border-input);
+        border-radius: var(--g-radius-md);
+        padding: 0.5rem 0.625rem;
+        color: var(--g-text-primary);
+        font-size: 0.875rem;
+        font-family: inherit;
+        transition: border-color 120ms ease;
+        min-width: 0;
+        width: 100%;
+      }
+      .g-input:focus,
+      .g-select:focus,
+      .g-textarea:focus {
+        outline: none;
+        border-color: var(--g-focus-ring);
+      }
+      .g-label {
+        display: flex;
+        flex-direction: column;
+        gap: var(--g-space-2);
+        font-size: 0.75rem;
+        color: var(--g-text-muted);
+        font-weight: 500;
+      }
+
+      /* === Reusable buttons === */
+      .g-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.5rem 0.875rem;
+        background: var(--g-bg-elevated);
+        border: 1px solid var(--g-border-subtle);
+        border-radius: var(--g-radius-md);
+        color: var(--g-text-primary);
+        font-size: 0.8125rem;
+        font-family: inherit;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 120ms ease;
+        text-decoration: none;
+      }
+      .g-btn:hover {
+        background: var(--swal-hover-bg);
+        border-color: var(--swal-border-strong);
+      }
+      .g-btn-primary {
+        background: var(--swal-accent);
+        border-color: var(--swal-accent);
+        color: var(--swal-accent-contrast);
+        font-weight: 600;
+      }
+      .g-btn-primary:hover {
+        background: var(--swal-accent-hover);
+      }
+
+      /* === Reusable pill / chip === */
+      .g-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        font-size: 0.6875rem;
+        padding: 0.375rem 0.625rem;
+        border-radius: var(--g-radius-full);
+        background: var(--swal-success-muted);
+        color: var(--g-accent-green);
+        border: 1px solid color-mix(in srgb, var(--swal-success) 35%, transparent);
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        font-family: var(--g-font-mono);
+        white-space: nowrap;
+      }
+      .g-pill-cyan {
+        background: var(--swal-info-muted);
+        color: var(--swal-text-secondary);
+        border-color: var(--swal-border-light);
+      }
+      .g-pill-orange {
+        background: var(--swal-accent-muted);
+        color: var(--g-accent-orange);
+        border-color: color-mix(in srgb, var(--swal-accent) 40%, transparent);
+      }
+      .g-pill-red {
+        background: var(--swal-danger-muted);
+        color: var(--g-accent-red);
+        border-color: color-mix(in srgb, var(--swal-danger) 35%, transparent);
+      }
+      .g-pill-yellow {
+        background: var(--swal-warning-muted);
+        color: var(--g-accent-yellow);
+        border-color: color-mix(in srgb, var(--swal-warning) 35%, transparent);
+      }
+      .g-pill-muted {
+        background: var(--swal-hover-bg);
+        color: var(--g-text-muted);
+        border-color: var(--g-border-subtle);
+      }
+
+      /* === Reusable status dot === */
+      .g-status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--g-accent-green);
+        box-shadow: 0 0 6px color-mix(in srgb, var(--swal-success) 60%, transparent);
+        animation: g-pulse 2s ease-in-out infinite;
+        display: inline-block;
+      }
+      @keyframes g-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+
+      /* === Tables (usado por GenericTableAstro) === */
+      .g-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 0.875rem;
+        min-width: 500px;
+      }
+      .g-table th,
+      .g-table td {
+        padding: 0.75rem 1rem;
+        text-align: left;
+        border-bottom: 1px solid var(--g-border-subtle);
+        white-space: nowrap;
+      }
+      .g-table th {
+        color: var(--g-text-faint);
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-size: 0.6875rem;
+        background: var(--swal-bg-surface);
+        font-family: var(--g-font-mono);
+        position: sticky;
+        top: 0;
+        z-index: 2;
+      }
+      .g-table tr:hover td {
+        background: var(--swal-hover-bg);
+      }
+      .g-table .g-sticky {
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        background: var(--g-bg-base);
+        border-right: 1px solid var(--g-border-accent);
+        font-weight: 600;
+        color: var(--g-text-primary);
+      }
+      .g-table th.g-sticky {
+        z-index: 3;
+        background: var(--g-bg-elevated);
+      }
+      .g-table-wrap {
+        background: var(--swal-surface);
+        border: 1px solid var(--g-border-accent);
+        border-radius: var(--g-radius-xl);
+        overflow: hidden;
+      }
+      .g-table-scroll {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      /* === Responsive helpers === */
+      @media (max-width: 1023px) {
+        .g-grid-4 { grid-template-columns: repeat(2, 1fr); }
+        .g-grid-3 { grid-template-columns: repeat(2, 1fr); }
+      }
+      @media (max-width: 767px) {
+        .g-grid-4, .g-grid-3, .g-grid-2 { grid-template-columns: 1fr; }
+        .g-page-title { font-size: 1.25rem; }
+        .g-page-subtitle { font-size: 0.75rem; }
+        .g-table { font-size: 0.8125rem; }
+        .g-table th, .g-table td { padding: 0.625rem 0.75rem; }
+      }
+
+      /* === Accesibilidad global === */
+      /* Sin animaciones infinitas ni transiciones para quien pide menos movimiento.
+         Nombra lo que neutraliza: .g-status-dot (g-pulse), el punto de estado de
+         FleetLayout (.status-dot / pulse), el toast (toast-in), el parpadeo (blink) y
+         el esqueleto (skeleton-pulse). El !important va SOLO en animation/transition:
+         los <style> con alcance de los componentes pesan mas que este selector. */
+      @media (prefers-reduced-motion: reduce) {
+        .g-status-dot,
+        .status-dot,
+        .status-connecting,
+        .skeleton,
+        .toast {
+          animation: none !important;
+        }
+        *, ::before, ::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
+
+      /* Puntero tosco (dedo): area tactil minima de 44x44 (WCAG 2.5.8 / 2.5.5). Solo
+         controles, no enlaces dentro de un parrafo (exentos). Los controles con
+         <style> propio que fijan un tamano menor se corrigen en su componente. */
+      @media (pointer: coarse) {
+        button,
+        [role="button"],
+        a.g-btn,
+        .g-btn,
+        .g-page-btn,
+        summary {
+          min-height: 44px;
+          min-width: 44px;
+        }
+        input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]),
+        select,
+        .g-input,
+        .g-select {
+          min-height: 44px;
+        }
+      }

@@ -1,0 +1,200 @@
+---
+/**
+ * ToastContainer.astro — Contenedor de toasts vanilla (sin islas Svelte).
+ * Reemplaza ToastContainer.svelte: misma UI/testids, suscrito al toast manager.
+ */
+---
+
+<div class="toast-container" data-testid="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+<script>
+  // Vanilla sin imports (ver InterfaceSwitcher.astro #952): escucha el evento
+  // 'gara-toast' que lib/toast.ts ya despacha en cada show(), más el dispatch
+  // directo del switcher. Mismo markup/testids que ToastContainer.svelte.
+  // La región viva está SIEMPRE en el DOM y vacía: una región que nace con el primer
+  // toast no la anuncian muchos lectores de pantalla.
+  var ICONS = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+  // WCAG 2.2.1: un toast con tiempo dura 6 s como mínimo; duration 0 = permanente.
+  var MIN_DURATION = 6000;
+
+  function renderToast(container, t) {
+    var el = document.createElement('div');
+    el.className = 'toast-item toast-' + (t.type || 'info');
+    el.setAttribute('data-testid', 'toast-' + (t.type || 'info'));
+    // Un error se anuncia como alerta (asertivo); el resto como estado (cortés).
+    el.setAttribute('role', t.type === 'error' ? 'alert' : 'status');
+    var titleHtml = t.title ? '<div class="toast-title"></div>' : '';
+    el.innerHTML =
+      '<div class="toast-icon" aria-hidden="true"><span>' + (ICONS[t.type] || 'ℹ') + '</span></div>' +
+      '<div class="toast-content">' + titleHtml + '<div class="toast-body"></div></div>' +
+      '<button type="button" class="toast-close" aria-label="Cerrar notificación"><span aria-hidden="true">✕</span></button>';
+    if (t.title) el.querySelector('.toast-title').textContent = t.title;
+    el.querySelector('.toast-body').textContent = t.message;
+
+    var duration = typeof t.duration === 'number' ? t.duration : MIN_DURATION;
+    if (duration > 0 && duration < MIN_DURATION) duration = MIN_DURATION;
+    var remaining = duration;
+    var startedAt = 0;
+    var timer = null;
+
+    function dismiss() {
+      clearTimeout(timer);
+      el.remove();
+    }
+    function arm() {
+      if (!(remaining > 0)) return;
+      startedAt = Date.now();
+      timer = setTimeout(dismiss, remaining);
+    }
+    // Pausa al apuntar o enfocar el toast; conserva el tiempo que le quedaba.
+    function pause() {
+      if (timer === null) return;
+      clearTimeout(timer);
+      timer = null;
+      remaining = Math.max(0, remaining - (Date.now() - startedAt));
+    }
+    function resume() {
+      if (timer !== null || duration <= 0) return;
+      // Si el foco sigue dentro (p. ej. el cursor sale pero el botón sigue enfocado), no rearmar.
+      if (el.matches(':hover') || el.contains(document.activeElement)) return;
+      arm();
+    }
+    el.addEventListener('mouseenter', pause);
+    el.addEventListener('focusin', pause);
+    el.addEventListener('mouseleave', resume);
+    el.addEventListener('focusout', function () { setTimeout(resume, 0); });
+    el.querySelector('.toast-close').addEventListener('click', dismiss);
+
+    container.appendChild(el);
+    if (duration > 0) arm();
+  }
+
+  function initToasts() {
+    var container = document.querySelector('.toast-container');
+    if (!container || container.dataset.bound) return;
+    container.dataset.bound = '1';
+    window.addEventListener('gara-toast', function (e) {
+      var detail = e && e.detail;
+      if (detail && detail.message) renderToast(container, detail);
+    });
+  }
+
+  document.addEventListener('astro:page-load', initToasts);
+  initToasts();
+</script>
+
+<style>
+  /* Los toasts se crean con createElement: no llevan el atributo de alcance de Astro, asi
+   * que sus reglas van con :global() bajo el contenedor (que si esta en la plantilla).
+   * Con selectores con alcance salian como texto suelto sobre la pagina. */
+    .toast-container {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 360px;
+    width: calc(100vw - 3rem);
+    pointer-events: none;
+  }
+
+  .toast-container :global(.toast-item) {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: var(--swal-surface);
+    border: 1px solid var(--swal-border);
+    border-radius: 0;
+    clip-path: polygon(var(--swal-chamfer-sm) 0, 100% 0, 100% calc(100% - var(--swal-chamfer-sm)), calc(100% - var(--swal-chamfer-sm)) 100%, 0 100%, 0 var(--swal-chamfer-sm));
+    box-shadow: var(--swal-shadow);
+    font-family: var(--swal-font);
+    color: var(--swal-text);
+    animation: toast-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .toast-container :global(.toast-success) {
+    border-color: var(--swal-border);
+    border-left: 3px solid var(--swal-success);
+  }
+
+  .toast-container :global(.toast-error) {
+    border-color: var(--swal-border);
+    border-left: 3px solid var(--swal-danger);
+  }
+
+  .toast-container :global(.toast-warning) {
+    border-color: var(--swal-border);
+    border-left: 3px solid var(--swal-warning);
+  }
+
+  .toast-container :global(.toast-info) {
+    border-color: var(--swal-border);
+    border-left: 3px solid var(--swal-info);
+  }
+
+  .toast-container :global(.toast-icon) {
+    font-size: 0.95rem;
+    line-height: 1.2;
+    font-weight: bold;
+  }
+
+  .toast-container :global(.toast-success .toast-icon) { color: var(--swal-success); }
+  .toast-container :global(.toast-error .toast-icon) { color: var(--swal-danger); }
+  .toast-container :global(.toast-warning .toast-icon) { color: var(--swal-warning); }
+  .toast-container :global(.toast-info .toast-icon) { color: var(--swal-info); }
+
+  .toast-container :global(.toast-content) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .toast-container :global(.toast-title) {
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-bottom: 0.15rem;
+    color: var(--swal-text);
+  }
+
+  .toast-container :global(.toast-body) {
+    font-size: 0.8rem;
+    color: var(--swal-text-secondary);
+    line-height: 1.35;
+    word-break: break-word;
+  }
+
+  .toast-container :global(.toast-close) {
+    background: transparent;
+    border: none;
+    color: var(--swal-text-muted);
+    cursor: pointer;
+    font-size: 0.75rem;
+    /* Area tactil minima de 44x44 (WCAG 2.5.8); el glifo queda centrado. */
+    display: grid;
+    place-items: center;
+    min-width: 44px;
+    min-height: 44px;
+    margin: -0.5rem -0.75rem -0.5rem 0;
+    border-radius: 0;
+    line-height: 1;
+  }
+
+  .toast-container :global(.toast-close:hover) {
+    color: var(--swal-text);
+    background: var(--swal-hover-bg);
+  }
+
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+</style>

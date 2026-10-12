@@ -1,0 +1,278 @@
+---
+/**
+ * pages/login.astro — Login page.
+ *
+ * GET  → render form
+ * POST → authenticate against /api/auth/login, set session cookie, redirect
+ */
+import Layout from '../layouts/Layout.astro';
+import { authenticate } from '../lib/authenticate';
+import { GUEST_COOKIE } from '../lib/appMode';
+
+let error = '';
+
+/**
+ * Cuenta (tenant) contra la que se valida el usuario. Los usuarios viven por cuenta y el
+ * formulario solo buscaba en la cuenta por defecto: nadie de otra cuenta (por ejemplo la
+ * demo `demo-obras`) podia entrar por aqui, aunque /api/auth/login ya aceptaba
+ * `?instanceId=`. Elegir la cuenta no da acceso a nada: la contrasena se valida contra los
+ * usuarios de ESA cuenta. Vacio = la cuenta por defecto.
+ */
+const ACCOUNT_RE = /^[a-z0-9][a-z0-9-]{1,62}$/;
+let account = (Astro.url.searchParams.get('instanceId') ?? '').trim().toLowerCase();
+
+if (Astro.request.method === 'POST') {
+  const formData = await Astro.request.formData();
+  const email = formData.get('email')?.toString() ?? '';
+  const password = formData.get('password')?.toString() ?? '';
+  account = (formData.get('account')?.toString() ?? account).trim().toLowerCase();
+
+  if (!email || !password) {
+    error = 'Email y contraseña son requeridos.';
+  } else if (account && !ACCOUNT_RE.test(account)) {
+    error = 'La cuenta solo lleva letras minúsculas, números y guiones.';
+  } else {
+    try {
+      // Se llama a la función directamente. Antes esta página hacía fetch a
+      // `${Astro.url.origin}/api/auth/login`: el Worker se llamaba a sí mismo
+      // por su dominio público y Cloudflare lo cortaba con 522, que esta misma
+      // línea traducía a `Credenciales inválidas (522)`. Nadie podía entrar por
+      // el formulario y el mensaje señalaba a la contraseña equivocada.
+      const result = await authenticate(email, password, account || undefined);
+
+      if (result.ok && result.token) {
+        Astro.cookies.set('session', result.token, {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'lax',
+          maxAge: 60 * 60 * 24 * 7, // 7 días
+          secure: true,
+        });
+
+        // Con cuenta ya no es modo local: sin esto, al cerrar sesion la cookie de invitado
+        // dejaria al usuario dentro del garage local en vez de llevarlo al login.
+        Astro.cookies.delete(GUEST_COOKIE, { path: '/' });
+
+        // Solo rutas internas: un `redirect` de la query a un dominio externo
+        // convertía un login legitimo en phishing.
+        const raw = Astro.url.searchParams.get('redirect') ?? '/fleet';
+        const redirectTo = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/fleet';
+        return Astro.redirect(redirectTo, 303);
+      }
+
+      error = result.error ?? 'Credenciales inválidas';
+      console.warn('[login] auth failed:', error, `(${result.status})`);
+    } catch (e: unknown) {
+      error = 'Error de conexión. Intenta de nuevo.';
+      console.error('[login] auth error:', e instanceof Error ? e.message : e);
+    }
+  }
+}
+---
+
+<Layout title="Iniciar sesión — GARA-G">
+  <div class="login-shell swal-blueprint-bg">
+    <div class="swal-card-frame login-card-wrap">
+      <div class="swal-card-inner login-card">
+        <div class="brand">
+          <span class="brand-mark">G</span>
+          <span class="brand-name">GARA-G</span>
+        </div>
+
+        <h1 class="title">Consola de flota</h1>
+        <p class="subtitle swal-kicker">Ingresa tus credenciales para continuar</p>
+
+        {error && (
+          <div class="error-banner" role="alert">
+            {error}
+          </div>
+        )}
+
+        <form method="POST" class="login-form" autocomplete="on">
+          <div class="field">
+            <label for="email">Correo electrónico</label>
+            <input
+              type="email"
+              id="email"
+              name="email"
+              class="g-input"
+              placeholder="tu@correo.com"
+              autocomplete="email"
+              required
+              autofocus
+            />
+          </div>
+
+          <div class="field">
+            <label for="password">Contraseña</label>
+            <input
+              type="password"
+              id="password"
+              name="password"
+              class="g-input"
+              placeholder="••••••••"
+              autocomplete="current-password"
+              required
+            />
+          </div>
+
+          <div class="field">
+            <label for="account">Cuenta <span class="optional">(opcional)</span></label>
+            <input
+              type="text"
+              id="account"
+              name="account"
+              class="g-input"
+              placeholder="la de tu empresa, si te la dieron"
+              autocomplete="organization"
+              autocapitalize="none"
+              spellcheck="false"
+              value={account}
+            />
+          </div>
+
+          <button type="submit" class="btn-submit swal-chamfer-sm">
+            Iniciar sesión
+          </button>
+        </form>
+
+        <p class="guest-link">
+          <a href="/fleet/bienvenida" data-testid="login-guest-link">Usar sin cuenta</a>
+          <span>Tus datos quedan solo en este navegador.</span>
+        </p>
+
+      </div>
+    </div>
+  </div>
+</Layout>
+
+<style>
+.login-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--g-space-4);
+}
+
+.login-card-wrap {
+  width: 100%;
+  max-width: 400px;
+}
+
+.login-card {
+  padding: 2.5rem 2rem;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--g-space-2);
+  margin-bottom: var(--g-space-6);
+}
+
+.brand-mark {
+  width: 2.25rem;
+  height: 2.25rem;
+  background: var(--swal-ink-graphite);
+  border-radius: var(--g-radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--swal-bg-surface);
+  font-family: var(--g-font-mono);
+}
+
+.brand-name {
+  font-family: var(--g-font-mono);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--swal-text);
+  letter-spacing: 0.08em;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--swal-text);
+  margin: 0 0 var(--g-space-1);
+}
+
+.subtitle {
+  margin: 0 0 var(--g-space-6);
+}
+
+.error-banner {
+  background: var(--swal-danger-bg);
+  border-left: 4px solid var(--swal-danger);
+  color: var(--swal-text);
+  border-radius: var(--g-radius-sm);
+  padding: var(--g-space-2) var(--g-space-3);
+  font-size: 0.875rem;
+  margin-bottom: var(--g-space-5);
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-space-5);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-space-1);
+}
+
+.field label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--swal-text-muted);
+  font-family: var(--g-font-mono);
+  letter-spacing: 0.04em;
+}
+
+.btn-submit {
+  margin-top: var(--g-space-2);
+  background: var(--swal-accent);
+  color: var(--swal-accent-contrast);
+  border: none;
+  padding: 0.75rem 1rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  width: 100%;
+}
+
+.btn-submit:hover { background: var(--swal-accent-hover); }
+.btn-submit:active { transform: scale(0.99); }
+
+.guest-link {
+  margin: var(--g-space-5) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: center;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--swal-text-muted);
+}
+.guest-link a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--swal-text);
+  font-weight: 600;
+  text-decoration: underline;
+}
+.guest-link a:focus-visible { outline: 2px solid var(--swal-text); outline-offset: 2px; }
+  /* Texto secundario: el color del token (no una opacidad, que baja el contraste a 2.5:1). */
+  .optional {
+    font-weight: 400;
+    color: var(--swal-text-muted);
+  }
+</style>

@@ -1,0 +1,53 @@
+---
+/**
+ * /fleet/cuenta-requerida — Explica que una seccion guarda datos en la nube y necesita
+ * cuenta. A ella llevan el middleware (paginas fuera de GUEST_ALLOWED_PATHS en modo local) y
+ * los candados del menu. No lee D1: funciona sin sesion.
+ *
+ * `from` es la seccion pedida. Viene de la URL, asi que se sanea: solo rutas /fleet...
+ * (nada de //host, barras invertidas ni caracteres de control).
+ */
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import { APP_HOME, BACKUP_PATH } from '../../lib/appMode';
+
+const raw = Astro.url.searchParams.get('from') ?? '';
+const safe =
+  /^\/fleet(\/[A-Za-z0-9._~\-\/]*)?$/.test(raw) && !raw.includes('//') && raw.length <= 120 ? raw : '';
+const loginHref = `/login?redirect=${encodeURIComponent(safe || '/fleet')}`;
+---
+
+<FleetLayout title="Necesitas una cuenta" section="cuenta">
+  <section class="cr swal-card-frame" data-testid="cuenta-requerida">
+    <div class="swal-card-inner cr-inner">
+      <h2 class="cr-title">Esta sección necesita una cuenta</h2>
+      {safe && <p class="cr-from">Pediste: <code data-testid="cuenta-from">{safe}</code></p>}
+      <p>
+        Esta sección guarda tus datos en la nube y sirve a varias personas de una misma empresa, así
+        que necesita una cuenta. La crea el administrador de tu empresa.
+      </p>
+      <p>
+        Sin cuenta puedes usar el garage, el catálogo y los ajustes, con tus datos guardados en este
+        navegador, y activar un respaldo cifrado de extremo a extremo.
+      </p>
+      <div class="cr-actions">
+        <a class="cr-btn cr-primary" href={APP_HOME.guest} data-testid="cr-garage">Volver al garage</a>
+        <a class="cr-btn" href={loginHref} data-astro-reload data-testid="cr-login">Entrar con cuenta</a>
+        <a class="cr-btn" href={BACKUP_PATH} data-testid="cr-backup">Activar respaldo</a>
+      </div>
+    </div>
+  </section>
+</FleetLayout>
+
+<style>
+  .cr { max-width: 640px; }
+  .cr-inner { padding: 1.25rem 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 0.75rem; color: var(--swal-text); line-height: 1.5; }
+  .cr-inner p { margin: 0; color: var(--swal-text-secondary); }
+  .cr-title { margin: 0; font-size: 1.25rem; font-weight: 700; color: var(--swal-text); }
+  .cr-from code { font-family: var(--swal-font-mono, monospace); color: var(--swal-text); overflow-wrap: anywhere; }
+  .cr-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; padding-top: 0.5rem; }
+  .cr-btn { min-height: 44px; padding: 0 1.25rem; display: inline-flex; align-items: center; font-weight: 600; text-decoration: none; color: var(--swal-text); background: var(--swal-surface); border: 1px solid var(--swal-border-strong); }
+  .cr-btn:hover { background: var(--swal-surface-hover); }
+  .cr-btn:focus-visible { outline: 2px solid var(--swal-text); outline-offset: 2px; }
+  .cr-primary { background: var(--swal-accent); border-color: var(--swal-accent); color: var(--swal-accent-contrast); }
+  .cr-primary:hover { background: var(--swal-accent-hover); }
+</style>

@@ -1,0 +1,41 @@
+---
+// @ts-ignore — @swal/ui svelte export map handled by Vite, TS check false positive after Astro 7 upgrade
+import { Toaster } from '@swal/ui';
+// Tema compartido (tokens + fuentes locales + utilidades g-*): ver src/styles/gara-theme.css
+import '../styles/gara-theme.css';
+import StagingBanner from '../components/StagingBanner.astro';
+import ThemeBootstrap from '../components/theme/ThemeBootstrap.astro';
+import { STAGING_TITLE_PREFIX, isStaging } from '../lib/staging';
+import { isFleetOnly } from '../lib/features';
+interface Props { title?: string; description?: string; }
+// FLEET_ONLY: la descripcion por defecto no habla de DePIN (src/lib/features.ts).
+const defaultDescription = isFleetOnly()
+  ? 'Gara-G: gestión de flotas, conductores, mantenimiento, combustible y documentos'
+  : 'Gara-G DePIN con Astro + Svelte 5 + @swal/ui + Xavier + edge-mesh';
+const { title = 'Gara-G Gestión de Flotas', description = defaultDescription } = Astro.props;
+// El prefijo va en el titulo de la portada tambien: es la primera pagina que ve
+// quien abre el stage (ver src/lib/staging.ts).
+const pageTitle = isStaging() ? STAGING_TITLE_PREFIX + title : title;
+---
+<!doctype html>
+<html lang="es" data-theme="taller">
+  <head>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" /><link rel="manifest" href="/manifest.json" /><meta name="theme-color" content="#E9ECEF" />
+    <ThemeBootstrap />
+    <meta name="description" content={description} /><meta name="generator" content={Astro.generator} /><title>{pageTitle}</title>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+    </script>
+  </head>
+  <body>
+    {isStaging() && <StagingBanner />}
+    <slot />
+    <Toaster client:load />
+
+  </body>
+</html>

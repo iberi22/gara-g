@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+# SWAL Security & Anti-Leak Pre-Commit Guard (maintainers' machines only).
+# The guard lives outside this repository; when it is not installed the hook does nothing.
+GUARD="${SWAL_ROOT:-$HOME/proyectosSWAL}/scripts/swal-husky-guard.mjs"
+if command -v node >/dev/null 2>&1 && [ -f "$GUARD" ]; then
+  node "$GUARD" --staged || exit 1
+fi

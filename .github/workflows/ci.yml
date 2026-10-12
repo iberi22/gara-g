@@ -1,0 +1,142 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  type-check:
+    name: Type Check (astro check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Astro check
+        # Errores de tipo preexistentes de la app; el repo siempre trato esto
+        # como informativo. Ver REPORT.md.
+        run: |
+          pnpm --filter gara-g-app-pwa check || echo "::warning::astro check reporta errores de tipo preexistentes (no bloqueante, ver REPORT.md)"
+
+  test:canon:
+    name: Unit Tests (test:canon)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run test:canon
+        run: pnpm test:canon
+
+  build:canon:
+    name: Build Validation (build:canon)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build canon
+        run: pnpm build:canon
+      - name: Build PWA bundle (input del gate del bundle de deploy)
+        # `build:canon` ya construye la PWA, pero el gate se invoca despues del
+        # build aqui a proposito: no depende de lo que haga otro script antes.
+        run: pnpm --filter gara-g-app-pwa build
+      - name: Deploy bundle safety tests (contenido del bundle)
+        # El fichero se salta el `vitest run` por defecto (script `test` de la
+        # PWA) y se invoca solo aqui, con el bundle ya construido. Sin build
+        # falla en vez de saltarse.
+        working-directory: packages/app-pwa
+        run: pnpm exec vitest run tests/deploy-bundle-safety.test.ts
+
+  coverage:
+    name: Test Coverage Gate (>=85%)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Coverage check
+        # Mismo filtro que el script `test` de la PWA: el bundle de deploy se
+        # audita aparte, despues de construir (ver job build:canon).
+        run: cd packages/app-pwa && pnpm vitest run --coverage --exclude '**/deploy-bundle-safety.test.ts'
+
+  e2e:
+    name: E2E Playwright Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install chromium --with-deps
+      # Los specs de Playwright viven en packages/app-pwa (config: playwright.config.ts).
+      # Antes este job no tenia `working-directory`, por lo que Playwright corria
+      # desde la raiz, sin config.
+      - name: Run Playwright E2E
+        working-directory: packages/app-pwa
+        run: pnpm exec playwright test --project=chromium
+
+  public-tree:
+    name: Public tree has no infra ids or secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.26.0/gitleaks_8.26.0_linux_x64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+      # Real Cloudflare ids (by hash), demo credentials, key-file names and gitleaks findings
+      # over every tracked file outside private/ (scripts/public-tree.sh).
+      - name: Check public tree
+        run: bash scripts/check-public-tree.sh

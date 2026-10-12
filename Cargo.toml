@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = [
+    "packages/mobile-app-native",
+    "packages/mobile-app/native",
+]

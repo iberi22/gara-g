@@ -1,0 +1,54 @@
+---
+/**
+ * /fleet/mercado/vender — Publicar ofertas como vendedor. Exige cuenta: la oferta se ata a
+ * una identidad verificable. En modo local (sin cuenta) se muestra la invitacion a crearla en
+ * vez del formulario.
+ *
+ * Importante: GUEST_ALLOWED_PATHS es por prefijo, asi que al permitir '/fleet/mercado' esta
+ * pagina tambien llega a un invitado; la decision de mostrar o no el formulario se toma aqui.
+ */
+import FleetLayout from '../../../layouts/FleetLayout.astro';
+import VenderApp from '../../../components/mercado/VenderApp.svelte';
+import { BACKUP_PATH } from '../../../lib/appMode';
+import { PAYMENTS_NOTICE } from '../../../mesh/datos/offer';
+
+export const prerender = false;
+
+const hasSession = Boolean(Astro.locals.user);
+const loginHref = `/login?redirect=${encodeURIComponent('/fleet/mercado/vender')}`;
+---
+
+<FleetLayout title="Vender en el mercado" section="mercado">
+  {hasSession ? (
+    <VenderApp client:only="svelte" />
+  ) : (
+    <section class="vd swal-card-frame" data-testid="vender-cuenta">
+      <div class="swal-card-inner vd-inner">
+        <h2 class="vd-title">Para vender necesitas una cuenta</h2>
+        <p class="vd-notice" role="note" data-testid="payments-notice">{PAYMENTS_NOTICE}</p>
+        <p>
+          Cada oferta se firma con la identidad de tu negocio, para que los dueños sepan que viene del mismo
+          nodo que la publicó. Sin cuenta puedes ver las ofertas de tu ciudad y recibirlas según tus vehículos.
+        </p>
+        <div class="vd-actions">
+          <a class="vd-btn vd-primary" href={loginHref} data-astro-reload data-testid="vender-login">Entrar con cuenta</a>
+          <a class="vd-btn" href="/fleet/mercado" data-testid="vender-volver">Volver al mercado</a>
+          <a class="vd-btn" href={BACKUP_PATH}>Activar respaldo</a>
+        </div>
+      </div>
+    </section>
+  )}
+</FleetLayout>
+
+<style>
+  .vd { max-width: 640px; }
+  .vd-inner { padding: 1.25rem 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 0.75rem; color: var(--swal-text); line-height: 1.5; }
+  .vd-inner p { margin: 0; color: var(--swal-text-secondary); }
+  .vd-inner .vd-notice { border: 1px solid var(--swal-border-strong); border-left: 3px solid var(--swal-accent); padding: 0.75rem 1rem; color: var(--swal-text); font-size: 0.9rem; }
+  .vd-title { margin: 0; font-size: 1.25rem; font-weight: 700; }
+  .vd-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; padding-top: 0.5rem; }
+  .vd-btn { min-height: 44px; padding: 0 1.25rem; display: inline-flex; align-items: center; font-weight: 600; text-decoration: none; color: var(--swal-text); background: var(--swal-surface); border: 1px solid var(--swal-border-strong); }
+  .vd-btn:hover { background: var(--swal-surface-hover); }
+  .vd-btn:focus-visible { outline: 2px solid var(--swal-text); outline-offset: 2px; }
+  .vd-primary { background: var(--swal-accent); border-color: var(--swal-accent); color: var(--swal-accent-contrast); }
+</style>

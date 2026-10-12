@@ -1,0 +1,58 @@
+# wrangler.example.toml — TEMPLATE. Copy to `wrangler.toml` and fill in your own resources.
+#
+#   cp wrangler.example.toml wrangler.toml
+#   npx wrangler d1 create <your-d1-name>        # -> database_id
+#   npx wrangler r2 bucket create <your-bucket>  # -> bucket_name
+#   npx wrangler kv namespace create SESSION     # -> id
+#   npx wrangler kv namespace create SWAL_KV     # -> id
+#
+# `wrangler.toml` is gitignored: real account and resource ids never go in this repository.
+# Without a `wrangler.toml` the build uses this template (scripts/infra-config.mjs), so a
+# fresh clone builds and tests, but the bundle is NOT deployable: every id below is a
+# placeholder. Cloud features are optional; the app runs fully on-device without them.
+name = "gara-g"
+compatibility_date = "2026-08-31"
+compatibility_flags = ["nodejs_compat"]
+# The deploy reads packages/app-pwa/dist/server/wrangler.json (see scripts/build-workers.js).
+main = "packages/app-pwa/dist/server/entry.mjs"
+# Astro splits static assets (dist/client) from the server (dist/server).
+assets = { directory = "packages/app-pwa/dist/client", binding = "ASSETS" }
+
+# D1 — relational data (users, fleet entities, sealed document metadata).
+[[d1_databases]]
+binding = "SWAL_D1"
+database_name = "gara-g"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+# R2 — encrypted document vault.
+[[r2_buckets]]
+binding = "SWAL_R2"
+bucket_name = "your-gara-vault-bucket"
+
+# KV — SESSION: session tokens; SWAL_KV: flags and catalog cache.
+[[kv_namespaces]]
+binding = "SESSION"
+id = "00000000000000000000000000000001"
+
+[[kv_namespaces]]
+binding = "SWAL_KV"
+id = "00000000000000000000000000000002"
+
+# Workers AI: left commented on purpose (with [ai] active, @cloudflare/vite-plugin goes into
+# remote-proxy mode during `astro build`). The normalizer adds it to the deploy bundle.
+# [ai]
+# binding = "AI"
+
+[vars]
+ENVIRONMENT = "production"
+APP_ID = "gara-g"
+APP_NAME = "Gara-G Fleet Management"
+DOMAIN = "gara-g.swal.network"
+PUBLIC_DEMO = "false"
+# Fleet-only delivery (src/lib/features.ts): hides Mercado, Wallet, DePIN and V2V.
+FLEET_ONLY = "true"
+# Server-side agent memory proxy (src/pages/api/xavier/_proxy.ts). Optional.
+XAVIER_URL = "https://xavier.swal.network"
+
+[observability]
+enabled = true

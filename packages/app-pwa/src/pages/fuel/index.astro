@@ -1,0 +1,16 @@
+---
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import FuelLogTable from '../../components/fuel/FuelLogTable.svelte';
+import { instanceIdFor } from '../../garage/domain/tenant.js';
+
+// Tenant de la sesion validada (fuera de produccion tambien admite ?instanceId=): nunca uno fijo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+---
+
+<FleetLayout title="Control de Combustible" section="fuel">
+  <!-- client:only: el SSR de Svelte 5 revienta en workerd (con client:load la pagina se quedaba
+       en el esqueleto, sin tabla). Misma decision que el resto de las islas Svelte. -->
+  <FuelLogTable client:only="svelte" instanceId={instanceId}>
+    <div slot="fallback" style="min-height: 40rem" aria-hidden="true"></div>
+  </FuelLogTable>
+</FleetLayout>

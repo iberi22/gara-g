@@ -1,0 +1,330 @@
+---
+/**
+ * /fleet/garage/engine-lab — Pagina de prueba y benchmarking del motor 3D.
+ *
+ * Pagina de laboratorio para verificacion visual y capturas (scripts/garage-shot.mjs).
+ * Parametros URL:
+ *   ?theme=studio|garage (por defecto studio)
+ *   ?anchors=1 (dibuja los 8 puntos y las 3 cotas en un SVG sobrepuesto)
+ *   ?mode=beauty|health|xray
+ *   ?focus=<slot>
+ *   ?gl=1 (fuerza backend WebGL2)
+ *   ?quality=low|medium|high
+ */
+import '../../../styles/swal-taller.css';
+import ThemeBootstrap from '../../../components/theme/ThemeBootstrap.astro';
+
+export const prerender = false;
+---
+
+<html lang="es" data-theme="taller">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <ThemeBootstrap />
+    <title>GARA-G Engine Lab</title>
+    <style is:global>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        position: relative;
+        user-select: none;
+      }
+      /* El tema del escenario (?theme=studio|garage) fija el tema del taller del documento
+         (claro / oscuro) desde el script; el fondo y la tinta salen de los tokens. */
+      body.theme-studio,
+      body.theme-garage {
+        background-color: var(--swal-bg-surface);
+        color: var(--swal-text);
+      }
+      .drafting-sheet {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        pointer-events: none;
+        z-index: 0;
+      }
+      canvas {
+        display: block;
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        touch-action: none;
+        z-index: 1;
+      }
+      .anchors-overlay {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        pointer-events: none;
+        z-index: 10;
+      }
+      .drafting-sheet .grid-minor { fill: none; stroke: var(--swal-line-grid); stroke-width: 0.65; }
+      .drafting-sheet .grid-major { fill: none; stroke: var(--swal-line-blueprint); stroke-width: 1; }
+      .drafting-sheet .sheet-rule { stroke: var(--swal-border-light); stroke-width: 1; }
+
+      /* Cotas y anclas (?anchors=1): se dibujan desde el script con estas clases. Cada cota
+         define su color en --cota; los tres tonos salen de los semanticos del tema. */
+      .anchors-overlay .cota-largo { --cota: var(--swal-text); }
+      .anchors-overlay .cota-alto { --cota: var(--swal-warning); }
+      .anchors-overlay .cota-ejes { --cota: var(--swal-success); }
+      .anchors-overlay .leader { stroke: var(--swal-border-strong); }
+      .anchors-overlay .cota-line { stroke: var(--cota); }
+      .anchors-overlay .cota-box { fill: var(--swal-surface); stroke: var(--cota); }
+      .anchors-overlay .cota-text { fill: var(--cota); }
+      .anchors-overlay .pt-ring { fill: var(--swal-surface); stroke: var(--swal-accent); }
+      .anchors-overlay .pt-core { fill: var(--swal-accent); }
+      .anchors-overlay .pt-name { fill: var(--swal-text-secondary); }
+      #engine-error:empty { display: none; }
+      #engine-error {
+        position: fixed;
+        inset: 1rem auto auto 1rem;
+        color: var(--swal-danger);
+        font: 14px/1.4 system-ui, sans-serif;
+        white-space: pre-wrap;
+        background: var(--swal-surface);
+        border: 1px solid var(--swal-danger);
+        padding: 1rem;
+        border-radius: 0;
+        max-width: 90vw;
+        z-index: 99;
+      }
+    </style>
+  </head>
+  <body class="theme-studio">
+    <!-- Plano tecnico / drafting sheet sutil para tema studio -->
+    <svg id="drafting-sheet" class="drafting-sheet" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <pattern id="minorGrid" width="36" height="36" patternUnits="userSpaceOnUse">
+          <path d="M 36 0 L 0 0 0 36" class="grid-minor" />
+        </pattern>
+        <pattern id="majorGrid" width="180" height="180" patternUnits="userSpaceOnUse">
+          <rect width="180" height="180" fill="url(#minorGrid)" />
+          <path d="M 180 0 L 0 0 0 180" class="grid-major" />
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#majorGrid)" opacity="0.85" />
+      <line x1="0" y1="52" x2="100%" y2="52" class="sheet-rule" />
+      <line x1="0" y1="92%" x2="100%" y2="92%" class="sheet-rule" />
+    </svg>
+
+    <canvas id="garage-canvas"></canvas>
+    <svg id="anchors-overlay" class="anchors-overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+    <pre id="engine-error"></pre>
+
+    <script>
+      import type { QualityTier, PartState, StageTheme, ViewMode, VehicleSpec, DimensionAnchors } from '../../../garage/contracts';
+      import { createGarageEngine } from '../../../garage/engine';
+      import { DEBUG_TEMPLATE } from '../../../garage/templates/common/debugTemplate';
+
+      async function main() {
+        const canvas = document.getElementById('garage-canvas') as HTMLCanvasElement;
+        const anchorsSvg = document.getElementById('anchors-overlay') as SVGSVGElement | null;
+        const draftingSheet = document.getElementById('drafting-sheet');
+        const params = new URLSearchParams(window.location.search);
+
+        const themeParam = params.get('theme');
+        const theme: StageTheme = themeParam === 'garage' ? 'garage' : 'studio';
+
+        // Aplicar clase CSS al body segun el tema
+        document.body.className = `theme-${theme}`;
+        // El tema del escenario manda sobre el modo guardado: estudio = taller claro, garaje = taller oscuro.
+        document.documentElement.setAttribute('data-theme', theme === 'garage' ? 'taller-dark' : 'taller');
+        document.documentElement.style.colorScheme = theme === 'garage' ? 'dark' : 'light';
+        // Color de un token del tema como hex (el motor 3D recibe colores, no variables CSS).
+        const token = (name: string): string => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        if (draftingSheet) {
+          draftingSheet.style.display = theme === 'studio' ? 'block' : 'none';
+        }
+
+        const showAnchors = params.get('anchors') === '1';
+
+        const qualityParam = params.get('quality');
+        const quality = (qualityParam === 'low' || qualityParam === 'medium' || qualityParam === 'high')
+          ? (qualityParam as QualityTier)
+          : undefined;
+
+        const forceWebGL = params.get('gl') === '1';
+        const mode = (params.get('mode') as ViewMode) || 'beauty';
+        const focusSlot = params.get('focus');
+
+        const engine = createGarageEngine({
+          quality,
+          forceWebGL,
+        });
+
+        engine.setTheme(theme);
+        await engine.mount(canvas);
+
+        const spec: VehicleSpec = {
+          ...DEBUG_TEMPLATE.defaults,
+          paint: {
+            baseColor: token('--swal-accent'),
+            finish: 'metallic',
+            accentColor: token('--swal-info'),
+          },
+        };
+
+        const isSwitchTest = params.get('switch') === '2';
+
+        if (mode === 'health') {
+          const sampleStates: PartState[] = [
+            { slotId: 'engine', label: 'Motor', category: 'motor', healthPct: 92, status: 'ok' },
+            { slotId: 'brake_front', label: 'Freno delantero', category: 'frenos', healthPct: 65, status: 'warn' },
+            { slotId: 'brake_rear', label: 'Freno trasero', category: 'frenos', healthPct: 35, status: 'critical' },
+            { slotId: 'tire_front', label: 'Llanta delantera', category: 'llantas', healthPct: 80, status: 'ok' },
+            { slotId: 'tire_rear', label: 'Llanta trasera', category: 'llantas', healthPct: 15, status: 'overdue' },
+            { slotId: 'rim_front', label: 'Rin delantero', category: 'llantas', healthPct: 95, status: 'ok' },
+            { slotId: 'rim_rear', label: 'Rin trasero', category: 'llantas', healthPct: 90, status: 'ok' },
+          ];
+          engine.setPartStates(sampleStates);
+        }
+
+        engine.setViewMode(mode);
+
+        if (isSwitchTest) {
+          await engine.showVehicle(spec);
+
+          const specA: VehicleSpec = {
+            ...spec,
+            paint: { baseColor: token('--swal-warning'), finish: 'matte', accentColor: token('--swal-text') },
+          };
+          const specB: VehicleSpec = {
+            ...spec,
+            paint: { baseColor: token('--swal-danger'), finish: 'gloss', accentColor: token('--swal-bg-elevated') },
+          };
+
+          const p1 = engine.showVehicle(specA, { direction: 1 });
+          const p2 = engine.showVehicle(specB, { direction: -1 });
+          await Promise.all([p1, p2]);
+
+          while ((engine as { isTransitioning?: () => boolean }).isTransitioning?.()) {
+            await new Promise((resolve) => setTimeout(resolve, 30));
+          }
+          await new Promise((resolve) => setTimeout(resolve, 80));
+        } else {
+          await engine.showVehicle(spec);
+        }
+
+        if (focusSlot) {
+          engine.focusPart(focusSlot);
+        }
+
+        // Renderizado de cotas tecnicas y anclas
+        function renderAnchors() {
+          if (!anchorsSvg || !showAnchors) return;
+          const anchors = engine.projectAnchors();
+          if (!anchors) {
+            anchorsSvg.replaceChildren();
+            return;
+          }
+
+          const { frontTop, rearTop, frontGround, rearGround, top, topGround, axleFront, axleRear } = anchors;
+
+          // Construccion con la API del DOM (sin cadenas HTML): la guardia del repo prohibe
+          // interpolar en innerHTML aunque los valores sean internos.
+          const NS = 'http://www.w3.org/2000/svg';
+          const el = (tag: string, attrs: Record<string, string | number>, text?: string): SVGElement => {
+            const node = document.createElementNS(NS, tag);
+            for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+            if (text !== undefined) node.textContent = text;
+            return node;
+          };
+          const nodes: SVGElement[] = [];
+
+          // 1. Lineas de extension auxiliares (leaders)
+          for (const [a, b] of [[frontGround, frontTop], [rearGround, rearTop]] as const) {
+            if (a.visible && b.visible) {
+              nodes.push(el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'leader', 'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: 0.6 }));
+            }
+          }
+
+          // 2-4. Cotas: largo arriba, alto a la izquierda, entre ejes abajo.
+          const cota = (cls: string, a: typeof frontTop, b: typeof frontTop, label: string, tick: 'v' | 'h', box: { dx: number; dy: number; w: number; tx: number; ty: number }) => {
+            if (!a.visible || !b.visible) return;
+            const g = el('g', { class: cls });
+            g.append(el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'cota-line', 'stroke-width': 2 }));
+            for (const p of [a, b]) {
+              g.append(tick === 'v'
+                ? el('line', { x1: p.x, y1: p.y - 8, x2: p.x, y2: p.y + 8, class: 'cota-line', 'stroke-width': 2 })
+                : el('line', { x1: p.x - 8, y1: p.y, x2: p.x + 8, y2: p.y, class: 'cota-line', 'stroke-width': 2 }));
+            }
+            const mx = (a.x + b.x) / 2;
+            const my = (a.y + b.y) / 2;
+            g.append(el('rect', { x: mx + box.dx, y: my + box.dy, width: box.w, height: 18, class: 'cota-box', opacity: 0.95, 'stroke-width': 0.75 }));
+            g.append(el('text', { x: mx + box.tx, y: my + box.ty, 'font-family': 'monospace', 'font-size': 11, 'font-weight': 'bold', class: 'cota-text', 'text-anchor': 'middle' }, label));
+            nodes.push(g);
+          };
+          cota('cota-largo', rearTop, frontTop, `${spec.dims.lengthMm} mm (LARGO)`, 'v', { dx: -60, dy: -28, w: 120, tx: 0, ty: -15 });
+          cota('cota-alto', topGround, top, `${spec.dims.heightMm} mm (ALTO)`, 'h', { dx: -110, dy: -9, w: 100, tx: -60, ty: 4 });
+          cota('cota-ejes', axleRear, axleFront, `${spec.dims.wheelbaseMm} mm (ENTRE EJES)`, 'v', { dx: -75, dy: 10, w: 150, tx: 0, ty: 23 });
+
+          // 5. Los 8 puntos con sus etiquetas
+          const pointsList: [string, typeof frontTop][] = [
+            ['frontTop', frontTop],
+            ['rearTop', rearTop],
+            ['frontGround', frontGround],
+            ['rearGround', rearGround],
+            ['top', top],
+            ['topGround', topGround],
+            ['axleFront', axleFront],
+            ['axleRear', axleRear],
+          ];
+          for (const [name, p] of pointsList) {
+            if (!p.visible) continue;
+            const g = el('g', { class: 'anchor-point' });
+            g.append(el('circle', { cx: p.x, cy: p.y, r: 4, class: 'pt-ring', 'stroke-width': 1.5 }));
+            g.append(el('circle', { cx: p.x, cy: p.y, r: 1.5, class: 'pt-core' }));
+            g.append(el('text', { x: p.x + 6, y: p.y - 5, 'font-family': 'monospace', 'font-size': 9, 'font-weight': 'bold', class: 'pt-name' }, name));
+            nodes.push(g);
+          }
+
+          anchorsSvg.replaceChildren(...nodes);
+        }
+
+        if (showAnchors) {
+          engine.onViewChange(renderAnchors);
+          renderAnchors();
+        }
+
+        // Publicar __garage y marcar body dataset ready tras el primer frame
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            renderAnchors();
+            const stats = engine.getStats();
+            const vehiclesInScene = typeof (engine as { getVehiclesInScene?: () => number }).getVehiclesInScene === 'function'
+              ? (engine as { getVehiclesInScene: () => number }).getVehiclesInScene()
+              : 1;
+
+            (window as unknown as { __garage: unknown }).__garage = {
+              ready: true,
+              theme,
+              stats,
+              vehiclesInScene,
+              anchors: engine.projectAnchors(),
+            };
+            document.body.dataset.ready = '1';
+          });
+        });
+      }
+
+      main().catch((err: unknown) => {
+        const box = document.getElementById('engine-error');
+        if (box) {
+          box.textContent = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
+        }
+        (window as unknown as { __garage: unknown }).__garage = {
+          ready: true,
+          error: String(err),
+        };
+        document.body.dataset.ready = '1';
+      });
+    </script>
+  </body>
+</html>

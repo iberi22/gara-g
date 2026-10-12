@@ -1,0 +1,120 @@
+---
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import GenericTable from '../../components/GenericTableAstro.astro';
+import EntityForm from '../../components/EntityForm.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../lib/fleetSeed.js';
+import { listEntities } from '../../lib/domain.js';
+import { instanceIdFor } from '../../garage/domain/tenant.js';
+import { alertKindLabel, severityLabel } from '../../lib/alertLabels';
+
+// Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
+// La semilla solo se escribe para el tenant demo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData();
+const records = await listEntities('alert', instanceId);
+const vehicles = await listEntities('vehicle', instanceId);
+const vehicleOptions = vehicles.map((v: any) => ({ value: v.id, label: `${v.plate || v.name || v.vin || "Sin placa"} — ${v.make} ${v.model}` }));
+
+const rows = records.map((r: any) => ({
+  ...r,
+  vehicleLabel: vehicles.find((v: any) => v.id === r.vehicleId)?.plate ?? r.vehicleId?.slice(0, 8) ?? '',
+  severityLabel: severityLabel(r.severity),
+  kindLabel: alertKindLabel(r.kind),
+  severityClass: r.severity === 'critical' ? 'severity-critical' : r.severity === 'warning' ? 'severity-warning' : 'severity-info',
+}));
+
+const columns = [
+  { key: 'severityLabel', label: 'Severidad', width: '6rem' },
+  { key: 'kindLabel', label: 'Tipo' },
+  { key: 'message', label: 'Mensaje' },
+  { key: 'vehicleLabel', label: 'Vehículo', width: '8rem' },
+  { key: 'triggeredAt', label: 'Fecha' },
+];
+---
+
+<FleetLayout title="Alertas" section="alerts">
+  <section data-testid="alerts-page">
+    <PageHeader title="Alertas" subtitle={`${records.length} eventos recientes`} icon="alerts" />
+
+    {Astro.url.searchParams.get('deleted') && (
+      <div class="g-toast g-toast-success">✅ Alerta eliminada.</div>
+    )}
+
+    <details class="g-create-form">
+      <summary class="g-create-toggle"><span>➕ Crear alerta manual</span></summary>
+      <div class="g-create-content">
+        <EntityForm
+          entity="alert"
+          instanceId={instanceId}
+          fields={[
+            { name: 'vehicleId', label: 'Vehículo', type: 'select', required: true, options: vehicleOptions },
+            { name: 'kind', label: 'Tipo', type: 'select', required: true,
+              options: [
+                { value: 'speed', label: 'Exceso de velocidad' },
+                { value: 'geofence', label: 'Salida de geocerca' },
+                { value: 'maintenance', label: 'Mantenimiento pendiente' },
+                { value: 'fuel', label: 'Bajo combustible' },
+                { value: 'idle', label: 'Ralentí excesivo' },
+                { value: 'harsh_braking', label: 'Frenado brusco' },
+                { value: 'sos', label: 'S.O.S.' },
+                { value: 'system', label: 'Sistema' },
+              ]
+            },
+            { name: 'severity', label: 'Severidad', type: 'select', required: true,
+              options: [
+                { value: 'info', label: 'Informativa' },
+                { value: 'warning', label: 'Advertencia' },
+                { value: 'critical', label: 'Crítica' },
+              ]
+            },
+            { name: 'message', label: 'Mensaje', type: 'textarea', required: true, placeholder: 'Descripción de la alerta...' },
+          ]}
+          cancelUrl="/fleet/alerts"
+        />
+      </div>
+    </details>
+
+    <GenericTable
+      columns={columns}
+      rows={rows}
+      testId="alerts-table"
+      showActions={true}
+      caption="Listado de alertas"
+      entity="alert"
+      instanceId={instanceId}
+    />
+  </section>
+</FleetLayout>
+
+<style>
+.page-head h2 { margin: 0; font-size: 1.5rem; color: var(--swal-text); }
+.g-toast { padding: 0.75rem 1rem; border-radius: 0.375rem; margin-bottom: 1rem; font-size: 0.875rem; }
+.g-toast-success { background: var(--swal-success-muted); border: 1px solid color-mix(in srgb, var(--swal-success) 40%, transparent); color: var(--swal-success); }
+.g-create-form { margin-bottom: 1rem; background: var(--swal-bg-elevated); border: 1px solid var(--swal-border); border-radius: 0.5rem; }
+.g-create-toggle { padding: 0.75rem 1rem; cursor: pointer; font-size: 0.875rem; font-weight: 600; color: var(--swal-accent-text); user-select: none; list-style: none; }
+.g-create-content { padding: 1rem 1rem 1.5rem; }
+.severity-critical {
+  color: var(--swal-danger);
+  font-weight: 700;
+  border-left: 3px solid var(--swal-danger);
+  padding-left: 0.5rem;
+  background: var(--swal-danger-bg);
+  border-radius: 2px;
+}
+.severity-warning {
+  color: var(--swal-warning);
+  font-weight: 600;
+  border-left: 3px solid var(--swal-warning);
+  padding-left: 0.5rem;
+  background: var(--swal-warning-muted);
+  border-radius: 2px;
+}
+.severity-info {
+  color: var(--swal-info);
+  border-left: 3px solid var(--swal-info);
+  padding-left: 0.5rem;
+  background: var(--swal-info-muted);
+  border-radius: 2px;
+}
+</style>

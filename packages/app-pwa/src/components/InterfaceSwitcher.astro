@@ -1,0 +1,329 @@
+---
+/**
+ * InterfaceSwitcher.astro — Selector de interfaz admin/aui/game (vanilla, sin islas Svelte).
+ *
+ * Reemplaza InterfaceSwitcher.svelte: el motor workerd-dev fallaba de forma
+ * intermitente resolviendo islas Svelte en FleetLayout (500 aleatorios, 952).
+ * Mismo UI, mismos testids, misma lógica (interfaceManager.ts + toast.ts).
+ * SSR: estado activo desde la URL; cliente: sync con stored + query ?ui=.
+ */
+import {
+  INTERFACE_MODES,
+  getStoredInterface,
+  type InterfaceMode,
+} from '../lib/interfaceManager.js';
+
+interface Props {
+  currentMode?: InterfaceMode;
+  gameEnabled?: boolean;
+  compact?: boolean;
+}
+
+const {
+  currentMode: propMode,
+  gameEnabled: propGame,
+  compact = false,
+} = Astro.props;
+
+const pathname = Astro.url.pathname;
+const queryUi = Astro.url.searchParams.get('ui') as InterfaceMode | null;
+const queryGame = Astro.url.searchParams.get('game_enabled');
+let pathMode: InterfaceMode | null = null;
+if (pathname.includes('/fleet/aui')) pathMode = 'aui';
+else if (pathname.includes('/fleet/game') || pathname.includes('/fleet/garage')) pathMode = 'game';
+else if (pathname === '/fleet' || pathname === '/fleet/') pathMode = 'admin';
+
+const envGame = import.meta.env.GAME_UI_ENABLED as string | undefined;
+const activeMode: InterfaceMode =
+  propMode
+  ?? (queryUi && (INTERFACE_MODES as readonly string[]).includes(queryUi) ? queryUi : null)
+  ?? pathMode
+  ?? getStoredInterface()
+  ?? 'admin';
+// SSR-safe (workerd): sin isGameUiEnabled aquí — su acceso dinámico a
+// import.meta.env revienta el stream SSR. Prioridad SSR: prop > query > env estático.
+const qGame = (queryGame ?? '').toLowerCase().trim();
+const gameAllowed =
+  propGame
+  ?? (qGame === 'false' || qGame === '0'
+    ? false
+    : qGame === 'true' || qGame === '1'
+      ? true
+      : envGame === 'false' || envGame === '0'
+        ? false
+        : true);
+---
+
+<div
+  class="interface-switcher swal-chamfer-sm"
+  class:list={[{ compact }]}
+  data-testid="interface-switcher"
+  data-active-mode={activeMode}
+  role="group"
+  aria-label="Selector de Interfaz de Usuario"
+>
+  <button
+    type="button"
+    class="mode-btn"
+    class:list={[{ active: activeMode === 'admin' }]}
+    data-testid="switch-btn-admin"
+    data-mode="admin"
+    aria-label="Consola Administrativa"
+    aria-pressed={String(activeMode === 'admin')}
+    title="Consola Administrativa de Flotas (Estándar)"
+  >
+    <span class="mode-icon" aria-hidden="true">🏢</span>
+    <span class="mode-label">Admin</span>
+  </button>
+
+  <button
+    type="button"
+    class="mode-btn"
+    class:list={[{ active: activeMode === 'aui' }]}
+    data-testid="switch-btn-aui"
+    data-mode="aui"
+    data-pref-module="aui"
+    aria-label="AUI Copilot Inteligente"
+    aria-pressed={String(activeMode === 'aui')}
+    title="AUI Copilot Inteligente (Gated para cuenta Socio)"
+  >
+    <span class="mode-icon" aria-hidden="true">🤖</span>
+    <span class="mode-label">AUI</span>
+    <span class="badge-mini swal-kicker" data-testid="socio-badge" aria-hidden="true">AI</span>
+  </button>
+
+  <button
+    type="button"
+    class="mode-btn"
+    class:list={[{ active: activeMode === 'game' }, { disabled: !gameAllowed }]}
+    data-testid="switch-btn-game"
+    data-mode="game"
+    data-pref-module="game"
+    data-game-allowed={String(gameAllowed)}
+    aria-label={gameAllowed ? 'Garaje NFS' : 'Garaje NFS, no disponible'}
+    aria-pressed={String(activeMode === 'game')}
+    aria-disabled={gameAllowed ? undefined : 'true'}
+    title={gameAllowed ? 'Garaje NFS (Modo Videojuego 3D-ish)' : 'Garaje NFS Deshabilitado'}
+  >
+    <span class="mode-icon" aria-hidden="true">🏎️</span>
+    <span class="mode-label">Garaje</span>
+    {!gameAllowed && <span class="badge-off swal-kicker" aria-hidden="true">OFF</span>}
+  </button>
+</div>
+
+<script is:inline>
+  // Vanilla sin imports: Astro inlinea este script en el HTML (sin submódulo
+  // `?astro&type=script`), que es lo que workerd-dev falla en resolver
+  // intermitentemente (952). Lógica espejo de lib/interfaceManager.ts:
+  // MODES, localStorage 'gara_interface_mode' + cookie, gate ?game_enabled,
+  // badge socio (tier default 'payg' → true salvo demo flag 'false').
+  var INTERFACE_MODES = ['admin', 'aui', 'game'];
+  var STORAGE_KEY = 'gara_interface_mode';
+  var DEMO_SOCIO_KEY = 'gara_demo_socio';
+
+  function isSocioInline() {
+    try {
+      var demoVal = window.localStorage.getItem(DEMO_SOCIO_KEY);
+      if (demoVal === 'false') return false;
+    } catch (e) {}
+    return true; // tier default 'payg' → socio
+  }
+
+  function gameAllowedFromQuery() {
+    try {
+      var q = new URLSearchParams(window.location.search).get('game_enabled');
+      if (q === null || q === '') return null;
+      q = q.toLowerCase().trim();
+      if (q === 'false' || q === '0') return false;
+      if (q === 'true' || q === '1') return true;
+    } catch (e) {}
+    return null;
+  }
+
+  function dispatchToast(message, title, type) {
+    window.dispatchEvent(
+      new CustomEvent('gara-toast', {
+        detail: { id: 'toast-' + Date.now(), message: message, title: title, type: type || 'info', duration: 4000 },
+      })
+    );
+  }
+
+  function initSwitcher() {
+    document
+      .querySelectorAll('.interface-switcher:not([data-bound])')
+      .forEach(function (root) {
+        root.dataset.bound = '1';
+        var gameBtn = root.querySelector('[data-testid="switch-btn-game"]');
+        var attrAllowed = gameBtn ? gameBtn.getAttribute('data-game-allowed') : null;
+        var queryAllowed = gameAllowedFromQuery();
+        var gameAllowed =
+          attrAllowed !== null ? attrAllowed === 'true' : queryAllowed !== null ? queryAllowed : true;
+
+        // Sync badge socio (solo cliente)
+        var badge = root.querySelector('[data-testid="socio-badge"]');
+        if (badge && isSocioInline()) {
+          badge.textContent = 'SOCIO';
+          badge.classList.add('socio');
+        }
+
+        root.querySelectorAll('[data-mode]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var mode = btn.getAttribute('data-mode');
+            if (!mode || INTERFACE_MODES.indexOf(mode) === -1) return;
+            if (mode === 'game' && !gameAllowed) {
+              dispatchToast(
+                'El modo Videojuego (Garaje NFS) está desactivado por configuración (GAME_UI_ENABLED=false).',
+                'Modo no disponible',
+                'warning'
+              );
+              return;
+            }
+            try {
+              window.localStorage.setItem(STORAGE_KEY, mode);
+            } catch (e) {}
+            document.cookie = STORAGE_KEY + '=' + encodeURIComponent(mode) + '; path=/; max-age=31536000; SameSite=Lax';
+            if (mode === 'admin') window.location.href = '/fleet';
+            else if (mode === 'aui') window.location.href = '/fleet/aui';
+            else if (mode === 'game') window.location.href = '/fleet/garage';
+          });
+        });
+      });
+  }
+
+  document.addEventListener('astro:page-load', initSwitcher);
+  initSwitcher();
+</script>
+
+<style>
+  .interface-switcher {
+    display: inline-flex;
+    align-items: center;
+    background: var(--swal-bg-surface);
+    padding: 3px;
+    border-radius: 8px;
+    border: 1px solid var(--swal-border);
+    box-shadow: inset 0 1px 3px var(--swal-shadow-sm);
+    font-family: var(--g-font-mono, monospace);
+  }
+
+  .mode-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--swal-text-muted);
+    font-size: 0.78rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1);
+    white-space: nowrap;
+    text-decoration: none;
+  }
+
+  .mode-btn:hover:not(.disabled) {
+    color: var(--swal-text);
+    background: var(--swal-hover-bg);
+  }
+
+  .mode-btn.active {
+    background: var(--swal-active-bg);
+    border-color: var(--swal-accent);
+    color: var(--swal-accent-cyan);
+    box-shadow: 0 0 10px var(--swal-active-bg);
+  }
+
+  /* Sin opacity del padre: bajaba el contraste del texto y de la insignia OFF por debajo
+   * de 3:1. El estado se marca con color atenuado + trazo discontinuo, y aria-disabled. */
+  .mode-btn.disabled {
+    color: var(--swal-text-muted);
+    border-style: dashed;
+    border-color: var(--swal-border);
+    cursor: not-allowed;
+  }
+
+  .mode-icon {
+    font-size: 0.85rem;
+    line-height: 1;
+  }
+
+  .mode-label {
+    letter-spacing: 0.02em;
+  }
+
+  /* `.mode-btn` delante: la clase global .swal-kicker (que lleva la insignia) fija el color a
+   * texto atenuado con la misma especificidad y, cargada despues, ganaba a este bloque. */
+  .mode-btn .badge-mini {
+    font-size: 0.6rem;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--swal-border);
+    /* Tinta plena: sobre el gris del borde, el texto secundario daba 4.4:1 mientras el script
+     * no había marcado la insignia como "socio". */
+    color: var(--swal-text);
+    font-weight: 700;
+  }
+
+  .mode-btn .badge-mini.socio {
+    background: var(--swal-success-muted);
+    color: var(--swal-success);
+    border: 1px solid var(--swal-success);
+  }
+
+  .badge-off {
+    font-size: 0.58rem;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--swal-danger-bg);
+    color: var(--swal-danger);
+    font-weight: 700;
+  }
+
+  /* Etiqueta oculta solo a la vista: el nombre accesible lo da el aria-label del boton,
+   * y el texto sigue en el arbol para lectores (no display:none). */
+  .interface-switcher.compact .mode-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* Pantallas tactiles: area minima de 44px */
+  @media (pointer: coarse) {
+    .mode-btn {
+      min-height: 44px;
+      min-width: 44px;
+      justify-content: center;
+    }
+  }
+
+  /* === Responsive ≤480px: solo iconos (el topbar a 375px no da para labels) === */
+  @media (max-width: 480px) {
+    .interface-switcher .mode-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .interface-switcher .mode-btn {
+      padding: 4px 7px;
+      gap: 0;
+    }
+    .interface-switcher {
+      gap: 2px;
+    }
+  }
+</style>

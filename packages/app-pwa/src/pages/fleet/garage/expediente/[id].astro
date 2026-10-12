@@ -1,0 +1,91 @@
+---
+/**
+ * /fleet/garage/expediente/:id — Expediente de un vehiculo: ficha tecnica, mecanica,
+ * manuales y asistente de IA (ver components/garage-dossier/VehicleDossier.svelte).
+ *
+ * Todo sale del tenant de la sesion: un id de otro tenant responde 404, igual que la API
+ * del garage, para no confirmar que existe.
+ *
+ * `client:only` y no `client:load`: el render SSR de Svelte 5 revienta en workerd
+ * (node:async_hooks desde svelte/internal/server), igual que en anunciantes.astro. Los
+ * datos ya llegan resueltos como props, asi que no se pierde nada.
+ */
+import FleetLayout from '../../../../layouts/FleetLayout.astro';
+import VehicleDossier from '../../../../components/garage-dossier/VehicleDossier.svelte';
+import { manualsOf, notesOf } from '../../../../garage/assistant/store';
+import { buildVehicleDetail } from '../../../../garage/domain/snapshot';
+import { instanceIdFor } from '../../../../garage/domain/tenant';
+import { getEntity } from '../../../../lib/domain';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../../lib/fleetSeed.js';
+import { can } from '../../../../lib/rbac';
+import { findModel, normalizeVehicleType, VEHICLE_TYPE_LABELS } from '../../../../lib/vehicleCatalog';
+import { getAuthUser } from '../../../api/fleetApi/auth';
+import '../../../../styles/gara-theme.css';
+
+export const prerender = false;
+
+const id = Astro.params.id ?? '';
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData();
+
+const detail = id ? await buildVehicleDetail(instanceId, id) : null;
+if (!detail) {
+  Astro.response.status = 404;
+}
+const row = detail ? await getEntity<Record<string, unknown>>('vehicle', id, instanceId) : null;
+const user = await getAuthUser(Astro.request);
+const role = user?.role;
+
+const v = detail?.vehicle;
+const model = v ? findModel(v.make ?? '', v.model ?? '') : undefined;
+const rawType = typeof row?.type === 'string' ? row.type : model?.type;
+const typeKey = normalizeVehicleType(rawType) ?? model?.type;
+const typeLabel = VEHICLE_TYPE_LABELS.find((t) => t.value === typeKey)?.label ?? 'Vehículo';
+
+const catalog = model
+  ? {
+      make: model.make,
+      model: model.model,
+      typeLabel,
+      engineCC: model.engineCC,
+      powerHP: model.powerHP,
+      fuelType: { gasoline: 'gasolina', diesel: 'diésel', electric: 'eléctrico', hybrid: 'híbrido', gas: 'gas' }[model.fuelType] ?? model.fuelType,
+      payloadKg: model.payloadKg,
+      revisionPeriodKm: model.revisionPeriodKm,
+      oilChangeKm: model.oilChangeKm,
+      commonParts: model.commonParts,
+    }
+  : null;
+
+const manuals = detail ? await manualsOf(instanceId, id) : [];
+const notes = notesOf(row);
+---
+
+<FleetLayout title={detail ? `Expediente · ${detail.vehicle.name}` : 'Vehículo no encontrado'} section="game">
+  {detail ? (
+    <VehicleDossier
+      client:only="svelte"
+      vehicle={detail.vehicle}
+      history={detail.history}
+      catalog={catalog}
+      typeLabel={typeLabel}
+      manuals={manuals}
+      notes={notes}
+      canEdit={can(role, 'vehicle', 'update')}
+      canUpload={can(role, 'document', 'create')}
+    />
+  ) : (
+    <section class="not-found">
+      <h1>Vehículo no encontrado</h1>
+      <p>Este vehículo no existe en tu cuenta.</p>
+      <a href="/fleet/garage">Volver al garage</a>
+    </section>
+  )}
+</FleetLayout>
+
+<style>
+  .not-found {
+    padding: 48px 24px;
+    text-align: center;
+  }
+</style>

@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "module": "ESNext",
+    "target": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["@cloudflare/workers-types"],
+    "paths": {
+      "edge-mesh-dist/*": ["./node_modules/@swal/edge-mesh/dist/*"],
+      "@gara/cloud-impl": ["./src/cloud/local.ts"]
+    }
+  },
+  "extends": "astro/tsconfigs/strict",
+  "include": ["src/**/*", "astro.config.mjs"],
+  "exclude": ["src/lib/__vault_legacy/**/*", "dist", "node_modules"]
+}

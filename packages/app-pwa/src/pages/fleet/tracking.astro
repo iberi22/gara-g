@@ -1,0 +1,353 @@
+---
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import GenericTable from '../../components/GenericTableAstro.astro';
+import LiveMap from '../../components/tracking/LiveMap.svelte';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../lib/fleetSeed.js';
+import { listEntities } from '../../lib/domain.js';
+import { instanceIdFor } from '../../garage/domain/tenant.js';
+import { getLatestTelemetryByVin, type RawTelemetry, type RawVehicle } from '../../lib/livePoll.js';
+
+// Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
+// La semilla solo se escribe para el tenant demo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData();
+const telemetry = (await listEntities('telemetry', instanceId)) as unknown as RawTelemetry[];
+const vehicles = (await listEntities('vehicle', instanceId)) as unknown as RawVehicle[];
+
+const filterVin = Astro.url.searchParams.get('vin') || '';
+const initialRows = getLatestTelemetryByVin(telemetry, vehicles, filterVin);
+
+const columns = [
+  { key: 'plate', label: 'Placa', width: '8rem' },
+  { key: 'formattedSpeed', label: 'Velocidad', width: '7rem' },
+  { key: 'formattedRpm', label: 'RPM', width: '7rem' },
+  { key: 'formattedTemp', label: 'Temp', width: '6rem' },
+  { key: 'formattedFuel', label: 'Combustible', width: '7rem' },
+  { key: 'lastUpdate', label: 'Actualizado' },
+];
+const liveRows = initialRows;
+---
+
+<FleetLayout title="Tracking en Vivo" section="tracking">
+  <section data-testid="tracking-page">
+    <PageHeader title="Tracking" subtitle="Telemetría en vivo de la flota" icon="tracking" />
+    <LiveMap client:only="svelte" initialRows={initialRows} filterVin={filterVin}>
+      <div slot="fallback" style="min-height: 480px" aria-hidden="true"></div>
+    </LiveMap>
+
+    <!-- Section OBD2 Bluetooth & Simulator Controls -->
+    <div class="obd2-control-panel" data-testid="obd2-control-panel">
+      <div class="obd2-header">
+        <div class="obd2-title">
+          <span class="obd2-icon">🔌</span>
+          <div>
+            <h3>Conexión OBD2 Bluetooth / Simulador</h3>
+            <p id="obd2-browser-notice" class="obd2-notice"></p>
+          </div>
+        </div>
+        <div class="obd2-status" data-testid="obd2-status-badge">
+          <span id="obd2-status-dot" class="status-dot"></span>
+          <span id="obd2-status-text">Desconectado</span>
+        </div>
+      </div>
+
+      <div class="obd2-actions">
+        <button
+          id="btn-connect-obd2"
+          data-testid="btn-connect-obd2"
+          class="btn-obd2 btn-primary"
+        >
+          Conectar OBD2
+        </button>
+
+        <label class="simulator-toggle">
+          <input type="checkbox" id="toggle-obd2-simulator" data-testid="toggle-obd2-simulator" />
+          <span class="toggle-slider"></span>
+          <span class="toggle-label">Simulador Activo</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="live-indicator" data-testid="live-indicator">
+      <span class="live-dot"></span>
+      <span>Última telemetría en tiempo real</span>
+    </div>
+
+    <GenericTable columns={columns} rows={liveRows} testId="tracking-table" />
+  </section>
+</FleetLayout>
+
+<script>
+  import { ELM327Adapter, OBD2Simulator, isBluetoothSupported } from '../../lib/obd2.js';
+
+  // SPA-safe (ViewTransitions): init por panel (guard: el adapter vive por página).
+  function initObd2Panel() {
+    const panel = document.querySelector('.obd2-control-panel');
+    if (!panel || panel.hasAttribute('data-bound')) return;
+    panel.setAttribute('data-bound', '1');
+
+  let adapter: ELM327Adapter | null = null;
+  let simulator: OBD2Simulator | null = null;
+
+  const btnConnect = document.getElementById('btn-connect-obd2') as HTMLButtonElement | null;
+  const toggleSimulator = document.getElementById('toggle-obd2-simulator') as HTMLInputElement | null;
+  const statusText = document.getElementById('obd2-status-text');
+  const statusDot = document.getElementById('obd2-status-dot');
+  const browserNotice = document.getElementById('obd2-browser-notice');
+
+  const hasBT = isBluetoothSupported();
+
+  if (!hasBT) {
+    if (btnConnect) {
+      btnConnect.disabled = true;
+      btnConnect.title = 'Web Bluetooth no soportado en este navegador';
+    }
+    if (browserNotice) {
+      browserNotice.textContent = 'Web Bluetooth no soportado en este navegador. Utilice el simulador.';
+    }
+  } else {
+    if (browserNotice) {
+      browserNotice.textContent = 'Adaptador ELM327 listo para conectar vía Web Bluetooth.';
+    }
+  }
+
+  function updateStatusUI(status: string) {
+    if (!statusText || !statusDot) return;
+    statusText.textContent = status;
+    statusDot.className = 'status-dot';
+    if (status.includes('Conectado') || status.includes('Simulando')) {
+      statusDot.classList.add('status-connected');
+    } else if (status.includes('Conectando')) {
+      statusDot.classList.add('status-connecting');
+    } else {
+      statusDot.classList.add('status-disconnected');
+    }
+  }
+
+  if (btnConnect && hasBT) {
+    adapter = new ELM327Adapter();
+    btnConnect.addEventListener('click', async () => {
+      if (!adapter) return;
+      if (adapter.isConnected()) {
+        await adapter.disconnect();
+        btnConnect.textContent = 'Conectar OBD2';
+        updateStatusUI('Desconectado');
+      } else {
+        updateStatusUI('Conectando...');
+        const success = await adapter.connect();
+        if (success) {
+          btnConnect.textContent = 'Desconectar OBD2';
+          updateStatusUI('Conectado (ELM327)');
+        } else {
+          updateStatusUI('Error de conexión');
+        }
+      }
+    });
+  }
+
+  if (toggleSimulator) {
+    simulator = new OBD2Simulator({
+      intervalMs: 1500,
+      onRecord: (record) => {
+        // Dynamically add or update row in table if available
+        const tableBody = document.querySelector('[data-testid="tracking-table"] tbody');
+        if (tableBody) {
+          // CSS.escape: el VIN va dentro de un selector. Un VIN con una comilla o un
+          // corchete cerraria el atributo y el selector se iria a otra parte.
+          const vinSel = CSS.escape(String(record.vin));
+          const existingRow = document.querySelector(`tr[data-vin="${vinSel}"]`);
+          const rowHtml = `
+            <td class="p-3">SIM-8888</td>
+            <td class="p-3">${record.speed} km/h</td>
+            <td class="p-3">${record.rpm.toLocaleString('es-CO')}</td>
+            <td class="p-3">${record.coolantTemp}°C</td>
+            <td class="p-3">${record.fuelLevel}%</td>
+            <td class="p-3">${record.latitude.toFixed(4)}</td>
+            <td class="p-3">${record.longitude.toFixed(4)}</td>
+            <td class="p-3">${new Date(record.timestamp).toISOString()}</td>
+          `;
+
+          if (existingRow) {
+            existingRow.innerHTML = rowHtml;
+          } else {
+            const newRow = document.createElement('tr');
+            newRow.setAttribute('data-vin', record.vin);
+            newRow.className = 'border-b border-border/50 hover:bg-muted/20';
+            newRow.innerHTML = rowHtml;
+            tableBody.prepend(newRow);
+          }
+        }
+      },
+    });
+
+    toggleSimulator.addEventListener('change', () => {
+      if (!simulator) return;
+      if (toggleSimulator.checked) {
+        simulator.start();
+        updateStatusUI('Simulando Telemetría');
+      } else {
+        simulator.stop();
+        updateStatusUI('Desconectado');
+      }
+    });
+  }
+  } // initObd2Panel
+  document.addEventListener('astro:page-load', initObd2Panel);
+  initObd2Panel();
+</script>
+
+<style>
+  .page-head h2 { margin: 0; font-size: 1.5rem; color: var(--swal-text); }
+  .obd2-control-panel {
+    background: var(--swal-surface);
+    border: 1px solid var(--swal-border);
+    border-radius: 0;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+  .obd2-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .obd2-title {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .obd2-icon {
+    font-size: 1.5rem;
+  }
+  .obd2-title h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--swal-text);
+  }
+  .obd2-notice {
+    margin: 0.25rem 0 0 0;
+    font-size: 0.75rem;
+    color: var(--swal-text-muted);
+  }
+  .obd2-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    background: var(--swal-bg-surface);
+    border: 1px solid var(--swal-border);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--swal-text);
+  }
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--swal-text-faint);
+  }
+  .status-disconnected { background: var(--swal-text-faint); }
+  .status-connecting { background: var(--swal-warning); animation: pulse 1s infinite; }
+  .status-connected { background: var(--swal-success); }
+
+  .obd2-actions {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+  }
+  .btn-obd2 {
+    padding: 0.5rem 1rem;
+    border-radius: 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: none;
+  }
+  .btn-primary {
+    background: var(--swal-accent);
+    color: var(--swal-accent-contrast);
+  }
+  .btn-primary:hover:not(:disabled) {
+    opacity: 0.9;
+    transform: translateY(-1px);
+  }
+  .btn-primary:disabled {
+    background: var(--swal-surface-active);
+    color: var(--swal-text-faint);
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+
+  .simulator-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .simulator-toggle input {
+    display: none;
+  }
+  .toggle-slider {
+    width: 36px;
+    height: 20px;
+    background-color: var(--swal-border-strong);
+    border-radius: 20px;
+    position: relative;
+    transition: background-color 0.2s;
+  }
+  .toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background-color: var(--swal-surface);
+    top: 3px;
+    left: 3px;
+    transition: transform 0.2s;
+  }
+  .simulator-toggle input:checked + .toggle-slider {
+    background-color: var(--swal-success);
+  }
+  .simulator-toggle input:checked + .toggle-slider::before {
+    transform: translateX(16px);
+  }
+  .toggle-label {
+    font-size: 0.875rem;
+    color: var(--swal-text-secondary);
+    font-weight: 500;
+  }
+
+  .live-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 999px;
+    background: var(--swal-success-muted);
+    border: 1px solid var(--swal-success);
+    color: var(--swal-success);
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+  }
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--swal-success);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+</style>

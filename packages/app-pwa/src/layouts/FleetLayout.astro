@@ -1,0 +1,948 @@
+---
+/**
+ * FleetLayout — Layout principal del módulo de gestión de flotas.
+ * Estilo Antigravity: iconos finos (1.5 stroke), fuente monoespaciada,
+ * paleta mínima (gris + cyan acento), bordes 1px sutiles.
+ *
+ * Responsive:
+ * - Mobile (<768px): sidebar como drawer oculto tras hamburger, contenido full-width
+ * - Tablet (768-1024px): sidebar 200px, contenido ajustado
+ * - Desktop (>1024px): sidebar 240px, layout amplio
+ */
+
+import FleetIcon from '../components/FleetIcon.astro';
+import InterfaceSwitcher from '../components/InterfaceSwitcher.astro';
+import ToastContainer from '../components/ToastContainer.astro';
+import { listEntities } from '../lib/domain.js';
+import { unreadCount } from '../lib/notifications.js';
+import { DEFAULT_INSTANCE_ID } from '../lib/xavier.js';
+import Layout from './Layout.astro';
+import ThemeModeSwitch from '../components/theme/ThemeModeSwitch.astro';
+import PrefsBootstrap from '../components/prefs/PrefsBootstrap.astro';
+import { BACKUP_PATH, GUEST_BLOCKED_PATH, LOCAL_INSTANCE_ID, isGuestAllowedPath } from '../lib/appMode';
+import { isRouteHidden } from '../lib/features';
+// La version visible sale de package.json: antes era un 'v0.6.0' escrito a mano que no seguia a ninguna release.
+import { version as APP_VERSION } from '../../package.json';
+
+interface Props {
+  title?: string;
+  description?: string;
+  section?: string;
+}
+
+const {
+  title = 'Fleet Management',
+  description = 'SWAL-GARA Fleet Management Console',
+  section = 'dashboard',
+} = Astro.props;
+
+// Campana de notificaciones P1.2 (PR 917): conteo SSR por instanceId del query.
+// El tenant va primero por la sesion. Antes caia al tenant de los datos demo
+// cuando la query no traia instanceId, y el contador de la campana contaba
+// alertas de otro tenant. El canonico es solo el ultimo recurso.
+// Modo local (sin cuenta): no hay tenant en la nube. Se salta la lectura de notificaciones
+// para no leer nunca los datos de un tenant real.
+const isGuest = Astro.locals.mode === 'guest' && !Astro.locals.user;
+const bellInstanceId = isGuest
+  ? LOCAL_INSTANCE_ID
+  : ((Astro.locals.user as any)?.instanceId ?? Astro.url.searchParams.get('instanceId') ?? DEFAULT_INSTANCE_ID);
+// Lo que dice el subtitulo de la barra: la cuenta en la que se esta trabajando. Antes era
+// un "Empresa de Flotas · Demo 100% Funcional" fijo, que tambien veian los clientes.
+const accountLabel = isGuest
+  ? 'Modo local · sin cuenta'
+  : Astro.locals.user?.email
+    ? `Cuenta ${bellInstanceId} · ${Astro.locals.user.email}`
+    : 'Gestión de flotas';
+let bellUnread = 0;
+if (!isGuest) {
+  try {
+    const bellRows = (await listEntities('notification', bellInstanceId)) as any[];
+    bellUnread = unreadCount(bellRows);
+  } catch {
+    bellUnread = 0;
+  }
+}
+
+const allNavItems = [
+  { id: 'dashboard', label: 'Dashboard', href: '/fleet', icon: 'dashboard' },
+  { id: 'aui', label: 'AUI Copilot', href: '/fleet/aui', icon: 'zap' },
+  { id: 'game', label: 'Garage', href: '/fleet/garage', icon: 'game' },
+  { id: 'fleets', label: 'Flotas', href: '/fleet/fleets', icon: 'fleets' },
+  { id: 'vehicles', label: 'Vehículos', href: '/fleet/vehicles', icon: 'vehicles' },
+  { id: 'drivers', label: 'Conductores', href: '/fleet/drivers', icon: 'drivers' },
+  { id: 'maintenance', label: 'Mantenimiento', href: '/fleet/maintenance', icon: 'maintenance' },
+  { id: 'fuel', label: 'Combustible', href: '/fleet/fuel-logs', icon: 'fuel' },
+  { id: 'documents', label: 'Documentos', href: '/fleet/documents', icon: 'documents' },
+  { id: 'geofences', label: 'Geocercas', href: '/fleet/geofences', icon: 'geofences' },
+  { id: 'alerts', label: 'Alertas', href: '/fleet/alerts', icon: 'alerts' },
+  { id: 'tracking', label: 'Tracking', href: '/fleet/tracking', icon: 'tracking' },
+  { id: 'analytics', label: 'Analítica', href: '/fleet/analytics', icon: 'analytics' },
+  { id: 'catalog', label: 'Catálogo Vehicular', href: '/fleet/catalog', icon: 'search' },
+  { id: 'mercado', label: 'Mercado', href: '/fleet/mercado', icon: 'fleets' },
+  { id: 'radar', label: 'Radar V2V', href: '/fleet/radar', icon: 'tracking' },
+  { id: 'game-classic', label: 'Garaje clásico', href: '/fleet/game', icon: 'vehicles' },
+];
+
+// FLEET_ONLY (src/lib/features.ts): Mercado, V2V, Wallet y DePIN no salen en el menu. Sus
+// rutas ademas responden 404 desde el middleware, asi que un enlace viejo no las abre.
+const navItems = allNavItems.filter((item) => !isRouteHidden(item.href));
+
+// En modo local las secciones que necesitan cuenta se ven con un candado y llevan a la pagina
+// que explica por que (mejor que esconderlas: el usuario ve lo que gana con una cuenta).
+const navView = navItems.map((item) => {
+  const locked = isGuest && !isGuestAllowedPath(item.href);
+  return {
+    ...item,
+    locked,
+    href: locked ? `${GUEST_BLOCKED_PATH}?from=${encodeURIComponent(item.href).replaceAll('%2F', '/')}` : item.href,
+  };
+});
+---
+
+<Layout title={title} description={description}>
+  <PrefsBootstrap slot="head" />
+  <a href="#fleet-main-content" class="skip-link">Saltar al contenido principal</a>
+  <div class="fleet-shell" data-sidebar-open="false">
+    <button
+      class="sidebar-backdrop"
+      data-testid="sidebar-backdrop"
+      aria-label="Cerrar menú"
+      type="button"
+      tabindex="-1"
+    ></button>
+
+    <aside class="fleet-sidebar" id="fleet-sidebar" data-testid="fleet-sidebar">
+      <div class="brand">
+        <span class="brand-mark">G</span>
+        <div class="brand-text">
+          <span class="brand-name">GARA-G</span>
+          <span class="brand-sub">CONSOLA DE FLOTA</span>
+        </div>
+        <button class="sidebar-close" data-testid="sidebar-close" aria-label="Cerrar menú" type="button">
+          <FleetIcon name="close" size={18} />
+        </button>
+      </div>
+
+      <div class="sidebar-section-label">Navegación</div>
+
+      <nav class="sidebar-nav" aria-label="Fleet sections">
+        {navView.map((item) => (
+          <a
+            href={item.href}
+            class:list={['nav-item', item.id === section ? 'active' : '']}
+            data-section={item.id}
+            data-pref-module={item.id}
+            data-testid={`nav-${item.id}`}
+            aria-current={item.id === section ? 'page' : undefined}
+            data-locked={item.locked ? 'true' : undefined}
+            title={item.locked ? 'Necesita cuenta' : undefined}
+          >
+            <span class="nav-icon">
+              <FleetIcon name={item.icon} size={16} />
+            </span>
+            <span class="nav-label">{item.label}</span>
+            {item.locked && (
+              <svg class="nav-lock" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Necesita cuenta">
+                <rect x="5" y="11" width="14" height="10" rx="1" />
+                <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+              </svg>
+            )}
+          </a>
+        ))}
+        <a
+          href="/fleet/ajustes"
+          class:list={['nav-item', section === 'settings' ? 'active' : '']}
+          data-section="settings"
+          data-testid="nav-settings"
+          aria-current={section === 'settings' ? 'page' : undefined}
+        >
+          <span class="nav-icon">
+            <FleetIcon name="settings" size={16} />
+          </span>
+          <span class="nav-label">Ajustes</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        {isGuest && (
+          <div class="footer-user" data-testid="guest-footer">
+            <span class="footer-email">Modo local · sin cuenta</span>
+            <a class="footer-link" href="/login" data-astro-reload>Entrar con cuenta</a>
+            <a class="footer-link" href="/?inicio=1" data-testid="about-link" data-astro-reload>Acerca de GARA-G</a>
+          </div>
+        )}
+        {(Astro.locals.user) && (
+          <div class="footer-user">
+            <span class="footer-email">{Astro.locals.user.email}</span>
+            <form method="POST" action="/api/auth/logout">
+              <button type="submit" class="logout-btn">Cerrar sesión</button>
+            </form>
+          </div>
+        )}
+        <div class="footer-row">
+          <span class="g-status-dot" aria-hidden="true"></span>
+          <span class="status-text">Sistema activo</span>
+        </div>
+        <div class="footer-version">v{APP_VERSION} · {isGuest ? 'local' : bellInstanceId}</div>
+      </div>
+    </aside>
+
+    <main class="fleet-main" id="fleet-main-content">
+      <header class="fleet-topbar">
+        <div class="topbar-left">
+          <button
+            class="hamburger"
+            data-testid="hamburger"
+            aria-label="Abrir menú"
+            aria-controls="fleet-sidebar"
+            aria-expanded="false"
+            type="button"
+          >
+            <FleetIcon name="menu" size={18} />
+          </button>
+          <div class="topbar-titles">
+            <h1 class="topbar-title">{title}</h1>
+            <span class="topbar-subtitle swal-kicker">{accountLabel}</span>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <ThemeModeSwitch />
+          {!isGuest && (
+            <a
+              href="/fleet/notifications"
+              class="notif-bell"
+              data-testid="notif-bell"
+              aria-label="Notificaciones"
+            >
+              🔔
+              {bellUnread > 0 && (
+                <span class="notif-badge" data-testid="notif-badge" role="status" aria-live="polite" aria-label={`${bellUnread} notificaciones no leídas`}>{bellUnread}</span>
+              )}
+            </a>
+          )}
+          {!isGuest && <InterfaceSwitcher />}
+          {!isGuest && (
+            <span class="pro-pill" data-testid="pro-pill">
+              <FleetIcon name="check" size={12} />
+              <span class="pro-pill-text">PRO NODO ACTIVO</span>
+            </span>
+          )}
+        </div>
+      </header>
+      {isGuest && (
+        <aside class="guest-banner" data-testid="guest-banner" role="note">
+          <p class="guest-banner-text">Modo local: tus datos están solo en este navegador.</p>
+          <div class="guest-banner-actions">
+            <a href={BACKUP_PATH}>Activar respaldo cifrado</a>
+            <a href="/login" data-astro-reload>Entrar con cuenta</a>
+            <button type="button" class="guest-banner-close" data-testid="guest-banner-close" aria-label="Cerrar aviso">
+              <FleetIcon name="close" size={14} />
+            </button>
+          </div>
+        </aside>
+      )}
+      <div class="fleet-content">
+        <div class="fleet-skeleton" data-testid="loading-skeleton" aria-hidden="true">
+          <div class="skeleton-bar"></div>
+          <div class="skeleton-grid">
+            <div class="skeleton-box"></div>
+            <div class="skeleton-box"></div>
+            <div class="skeleton-box"></div>
+          </div>
+        </div>
+        <slot />
+      </div>
+      <ToastContainer />
+    </main>
+  </div>
+</Layout>
+
+<style>
+  /* === Layout shell === */
+  .fleet-shell {
+    display: flex;
+    min-height: 100vh;
+    background: var(--swal-bg);
+    color: var(--swal-text);
+    position: relative;
+  }
+
+  /* === Sidebar backdrop (mobile) === */
+  .sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: var(--swal-overlay);
+    backdrop-filter: blur(2px);
+    z-index: 40;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  /* === Sidebar (Antigravity-style) === */
+  .fleet-sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0.875rem 0;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    font-family: var(--g-font-mono);
+    transition: transform 220ms ease;
+    z-index: 50;
+    background: var(--swal-surface);
+    border-right: 1px solid var(--swal-border);
+  }
+
+  .sidebar-close {
+    display: none;
+    background: transparent;
+    border: none;
+    color: var(--swal-text-muted);
+    cursor: pointer;
+    padding: 0.25rem;
+    margin-left: auto;
+    border-radius: var(--g-radius-sm);
+  }
+  .sidebar-close:hover {
+    color: var(--swal-text);
+    background: var(--swal-hover-bg);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.375rem 1rem 0.875rem;
+  }
+  .brand-mark {
+    width: 24px;
+    height: 24px;
+    background: linear-gradient(135deg, var(--swal-accent-cyan) 0%, var(--swal-text-faint) 100%);
+    border-radius: var(--g-radius-md);
+    display: grid;
+    place-items: center;
+    color: var(--swal-bg);
+    font-weight: 700;
+    font-size: 0.875rem;
+    font-family: var(--g-font-sans);
+    flex-shrink: 0;
+  }
+  .brand-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+    min-width: 0;
+  }
+  .brand-name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--swal-text);
+    font-family: var(--g-font-sans);
+  }
+  .brand-sub {
+    font-size: 0.625rem;
+    color: var(--swal-text-faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .sidebar-section-label {
+    font-size: 0.6875rem;
+    color: var(--swal-text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 0.5rem 1rem 0.375rem;
+  }
+
+  .sidebar-nav {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 0 0.5rem;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.4375rem 0.625rem;
+    color: var(--swal-text-muted);
+    text-decoration: none;
+    font-size: 0.8125rem;
+    font-family: var(--g-font-sans);
+    border-radius: var(--g-radius-md);
+    transition: background 120ms ease, color 120ms ease;
+    font-weight: 400;
+    min-height: 36px;
+  }
+  .nav-item:hover {
+    background: var(--swal-hover-bg);
+    color: var(--swal-text);
+  }
+  .nav-item.active {
+    background: var(--swal-active-bg);
+    color: var(--swal-text);
+    border-left-color: var(--swal-accent);
+  }
+  .nav-item.active::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 3px;
+    height: 100%;
+    background: var(--swal-accent);
+  }
+  .nav-icon {
+    width: 16px;
+    height: 16px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+  }
+
+  .sidebar-footer {
+    padding: 0.75rem 1rem 0;
+    border-top: 1px solid var(--swal-hover-bg);
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+  .footer-user {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--swal-hover-bg);
+    margin-bottom: 0.25rem;
+  }
+  .footer-email {
+    font-size: 0.75rem;
+    color: var(--swal-text-faint);
+    font-family: var(--g-font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .logout-btn {
+    background: transparent;
+    border: 1px solid var(--swal-hover-bg);
+    border-radius: var(--g-radius-sm);
+    color: var(--swal-text-muted);
+    font-size: 0.75rem;
+    font-family: inherit;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    text-align: left;
+    transition: background 0.15s, color 0.15s;
+  }
+  .logout-btn:hover {
+    background: var(--swal-danger-bg);
+    border-color: var(--swal-danger-muted);
+    color: var(--swal-danger);
+  }
+  .footer-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.375rem;
+  }
+  /* El punto de estado es .g-status-dot del tema (con su @keyframes g-pulse). */
+  .status-text {
+    font-size: 0.6875rem;
+    color: var(--swal-text-muted);
+  }
+  .footer-version {
+    font-size: 0.625rem;
+    color: var(--swal-text-faint);
+    letter-spacing: 0.04em;
+  }
+
+  /* === Main === */
+  .fleet-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .fleet-topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--swal-hover-bg);
+    backdrop-filter: blur(8px);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--swal-bg-surface);
+    border-bottom: 1px solid var(--swal-line-hairline);
+  }
+  .topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+    flex: 1;
+  }
+  .topbar-titles {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    min-width: 0;
+  }
+  .hamburger {
+    display: none;
+    background: transparent;
+    border: 1px solid var(--swal-border);
+    border-radius: var(--g-radius-md);
+    padding: 0.5rem;
+    color: var(--swal-text);
+    cursor: pointer;
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+  }
+  .hamburger:hover {
+    background: var(--swal-hover-bg);
+  }
+  .topbar-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--swal-text);
+    margin: 0;
+    letter-spacing: -0.01em;
+    font-family: var(--g-font-sans);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .topbar-subtitle {
+    font-size: 0.6875rem;
+    color: var(--swal-text-muted);
+    font-family: var(--g-font-mono);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+  .notif-bell { position: relative; font-size: 1.25rem; text-decoration: none; margin-right: 0.5rem; }
+  .notif-badge { position: absolute; top: -6px; right: -8px; background: var(--swal-accent); color: var(--swal-accent-contrast); font-size: 0.65rem; font-weight: 700; border-radius: 9999px; padding: 0 0.35rem; line-height: 1.2rem; }
+  .pro-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.625rem;
+    padding: 0.375rem 0.625rem;
+    border-radius: 999px;
+    background: var(--swal-success-muted);
+    color: var(--swal-success);
+    border: 1px solid var(--swal-success-muted);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    font-family: var(--g-font-mono);
+    white-space: nowrap;
+  }
+  .nav-lock { margin-left: auto; flex-shrink: 0; color: var(--swal-text-faint); }
+  /* Bloqueado = candado + texto atenuado por token; una opacidad sobre el texto baja el contraste a 3.8:1. */
+  .nav-item[data-locked] .nav-label { color: var(--swal-text-muted); }
+  .footer-link {
+    font-size: 0.75rem;
+    color: var(--swal-text-secondary);
+    text-decoration: underline;
+    min-height: 24px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .footer-link:hover { color: var(--swal-text); }
+  .guest-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.25rem 1rem;
+    padding: 0.5rem 1rem;
+    background: var(--swal-warning-muted);
+    border-bottom: 1px solid var(--swal-border);
+    border-left: 3px solid var(--swal-warning);
+    color: var(--swal-text);
+    font-size: 0.8125rem;
+  }
+  .guest-banner[hidden] { display: none; }
+  .guest-banner-text { margin: 0; }
+  .guest-banner-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 1rem; }
+  .guest-banner-actions a {
+    color: var(--swal-text);
+    text-decoration: underline;
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .guest-banner-close {
+    background: transparent;
+    border: 0;
+    color: var(--swal-text-muted);
+    cursor: pointer;
+    width: 32px;
+    height: 32px;
+    display: inline-grid;
+    place-items: center;
+  }
+  .guest-banner-close:hover { color: var(--swal-text); }
+  .fleet-content {
+    flex: 1;
+    padding: 1rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-width: 0;
+    position: relative;
+  }
+
+  /* === Section Skeleton (W13.3) ===
+   * Oculta por defecto: antes se pintaba en el SSR y 150 ms despues el contenido saltaba
+   * hacia arriba (CLS), y sin JS tapaba la pagina para siempre. Ahora solo aparece
+   * (.pending) cuando el router empieza a navegar, superpuesta: no empuja nada. */
+  .fleet-skeleton {
+    display: none;
+  }
+  .fleet-skeleton.pending {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    position: absolute;
+    top: 1rem;
+    left: 1rem;
+    right: 1rem;
+    z-index: 5;
+    padding: 0.875rem;
+    background: var(--swal-bg-surface);
+    border: 1px solid var(--swal-hover-bg);
+    border-radius: var(--g-radius-lg);
+    pointer-events: none;
+  }
+  .skeleton-bar {
+    height: 1.25rem;
+    width: 30%;
+    background: var(--swal-bg-surface);
+    border-radius: var(--g-radius-sm);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+  .skeleton-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem;
+  }
+  .skeleton-box {
+    height: 4rem;
+    background: var(--swal-bg-surface);
+    border-radius: var(--g-radius-md);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 0.75; }
+  }
+
+  /* === Responsive: Tablet (768-1024px) === */
+  @media (max-width: 1023px) {
+    .fleet-sidebar {
+      width: 200px;
+    }
+    /* Con el menu de 200px quedan ~570px de barra: el grupo de la derecha (tema con etiquetas,
+     * campana, selector de interfaz y pildora PRO) sumaba ~750px y ensanchaba el documento.
+     * Aqui se queda solo con iconos y la pildora corta, como en movil. */
+    .topbar-right {
+      flex-shrink: 1;
+      min-width: 0;
+      gap: 0.375rem;
+    }
+    /* Visualmente ocultas, no display:none: el nombre accesible de los botones de tema y de
+     * interfaz tiene que sobrevivir cuando solo se ven los iconos. */
+    .topbar-right :global(.theme-label),
+    .topbar-right :global(.mode-label) {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .pro-pill-text {
+      display: none;
+    }
+    .pro-pill::after {
+      content: 'PRO';
+      font-size: 0.625rem;
+    }
+  }
+
+  /* === Responsive: Mobile (<768px) — drawer === */
+  @media (max-width: 767px) {
+    .fleet-shell {
+      flex-direction: column;
+    }
+    .fleet-sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 280px;
+      max-width: 85vw;
+      height: 100vh;
+      transform: translateX(-100%);
+    }
+    .fleet-shell[data-sidebar-open="true"] .fleet-sidebar {
+      transform: translateX(0);
+      /* La sombra solo con el cajon abierto: cerrado, asomaba por el borde izquierdo. */
+      box-shadow: 4px 0 20px var(--swal-overlay);
+    }
+    .fleet-shell[data-sidebar-open="true"] .sidebar-backdrop {
+      display: block;
+    }
+    .sidebar-close {
+      display: grid;
+      place-items: center;
+      min-width: 44px;
+      min-height: 44px;
+    }
+    .logout-btn {
+      min-height: 44px;
+    }
+    .hamburger {
+      display: grid;
+      place-items: center;
+    }
+    /* Hamburger icono: rotar el + cuando abierto */
+    .hamburger[aria-expanded="true"] {
+      background: var(--swal-active-bg);
+      border-color: var(--swal-active-bg);
+    }
+    .fleet-topbar {
+      padding: 0.625rem 0.875rem;
+    }
+    .topbar-title {
+      font-size: 1rem;
+    }
+    .topbar-subtitle {
+      display: none;
+    }
+    .fleet-content {
+      padding: 0.875rem 0.75rem;
+    }
+    /* En movil la parte derecha cedia 0 px y empujaba fuera el hamburguesa y el titulo:
+     * ahora puede encogerse, y el selector Admin/AUI/Garaje se queda en el menu lateral
+     * (que tiene las mismas entradas). */
+    .topbar-right {
+      flex-shrink: 1;
+      min-width: 0;
+      gap: 0.375rem;
+    }
+    .topbar-right :global([data-testid="interface-switcher"]) {
+      display: none;
+    }
+    .notif-bell {
+      margin-right: 0.25rem;
+    }
+    .pro-pill-text {
+      display: none;
+    }
+    .pro-pill::after {
+      content: 'PRO';
+      font-size: 0.625rem;
+    }
+  }
+
+  /* === Responsive: Mobile pequeño (<480px) === */
+  @media (max-width: 480px) {
+    .pro-pill {
+      display: none;
+    }
+    .fleet-content {
+      padding: 0.75rem 0.5rem;
+    }
+  }
+
+  /* Pantallas tactiles: areas de 44px (el menu lateral y el boton de salir) */
+  @media (pointer: coarse) {
+    .nav-item {
+      min-height: 44px;
+    }
+    .logout-btn {
+      min-height: 44px;
+    }
+  }
+</style>
+
+<script is:inline>
+  // SPA-safe (ViewTransitions): el drawer se reinicia en cada navegacion.
+  //
+  // Este script es de modulo, asi que sin el listener de abajo se ejecutaria
+  // UNA vez. Con el ClientRouter de Astro, `document` sobrevive a la
+  // navegacion pero los nodos del layout se sustituyen: los listeners
+  // atados al antiguo DOM quedan apuntando a nodos que ya no existen y el
+  // hamburguesa deja de abrir el menu en cuanto el usuario navega una vez.
+  //
+  // `astro:page-load` es el evento correcto y el patron que ya usan
+  // ToastContainer.astro, InterfaceSwitcher.astro y notifications/index.astro.
+  var MOBILE_MQ = '(max-width: 767px)';
+
+  function sidebarIsOpen() {
+    var shell = document.querySelector('.fleet-shell');
+    return !!shell && shell.getAttribute('data-sidebar-open') === 'true';
+  }
+
+  // Cerrado en movil, el drawer sigue en el DOM (solo desplazado fuera de pantalla): `inert`
+  // saca sus enlaces de la tabulacion y del arbol de accesibilidad. En escritorio es la barra
+  // fija y nunca es inert.
+  function syncSidebarInert() {
+    var sidebar = document.querySelector('.fleet-sidebar');
+    if (!sidebar) return;
+    var mobile = window.matchMedia(MOBILE_MQ).matches;
+    sidebar.inert = mobile && !sidebarIsOpen();
+  }
+
+  // opts.focus: devolver el foco al hamburguesa (cierre por teclado/boton). Al cerrar porque se
+  // navega no se roba el foco al enlace que el usuario acaba de pulsar.
+  function setSidebar(open, opts) {
+    var shell = document.querySelector('.fleet-shell');
+    if (!shell) return;
+    var hamburger = document.querySelector('[data-testid="hamburger"]');
+    var closeBtn = document.querySelector('[data-testid="sidebar-close"]');
+    shell.setAttribute('data-sidebar-open', open ? 'true' : 'false');
+    if (hamburger) hamburger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    document.body.style.overflow = open ? 'hidden' : '';
+    syncSidebarInert();
+    if (open) {
+      if (closeBtn) closeBtn.focus({ preventScroll: true });
+    } else if (opts && opts.focus && hamburger) {
+      hamburger.focus({ preventScroll: true });
+    }
+  }
+
+  function initSidebar() {
+    var hamburger = document.querySelector('[data-testid="hamburger"]');
+    var closeBtn = document.querySelector('[data-testid="sidebar-close"]');
+    var backdrop = document.querySelector('[data-testid="sidebar-backdrop"]');
+
+    // El guard evita duplicar listeners si `initSidebar` se llama dos veces
+    // sobre el mismo DOM (ClientRouter dispara page-load tambien en el
+    // before-swap de una navegacion que se cancela).
+    if (hamburger && !hamburger.hasAttribute('data-bound')) {
+      hamburger.setAttribute('data-bound', '1');
+      hamburger.addEventListener('click', function () { setSidebar(true); });
+    }
+    if (closeBtn && !closeBtn.hasAttribute('data-bound')) {
+      closeBtn.setAttribute('data-bound', '1');
+      closeBtn.addEventListener('click', function () { setSidebar(false, { focus: true }); });
+    }
+    if (backdrop && !backdrop.hasAttribute('data-bound')) {
+      backdrop.setAttribute('data-bound', '1');
+      backdrop.addEventListener('click', function () { setSidebar(false, { focus: true }); });
+    }
+
+    // Cerrar al navegar (mobile UX), sin mover el foco
+    document.querySelectorAll('.nav-item').forEach(function (link) {
+      if (link.hasAttribute('data-bound')) return;
+      link.setAttribute('data-bound', '1');
+      link.addEventListener('click', function () {
+        if (window.innerWidth < 768) setSidebar(false);
+      });
+    });
+
+    syncSidebarInert();
+  }
+
+  // Los listeners globales se registran una sola vez (este script puede evaluarse de nuevo):
+  // leen el estado actual del DOM, no un nodo capturado.
+  if (!window.__garaSidebarGlobals) {
+    window.__garaSidebarGlobals = true;
+
+    document.addEventListener('keydown', function (e) {
+      if (!sidebarIsOpen()) return;
+      if (e.key === 'Escape') {
+        setSidebar(false, { focus: true });
+        return;
+      }
+      // Trampa de foco: con el drawer abierto, Tab y Shift+Tab ciclan dentro de el.
+      if (e.key === 'Tab') {
+        var sidebar = document.querySelector('.fleet-sidebar');
+        if (!sidebar) return;
+        var items = Array.prototype.filter.call(
+          sidebar.querySelectorAll('a[href], button:not([disabled])'),
+          function (el) { return el.offsetParent !== null || el === document.activeElement; }
+        );
+        if (!items.length) return;
+        var first = items[0];
+        var last = items[items.length - 1];
+        var active = document.activeElement;
+        if (!sidebar.contains(active)) {
+          e.preventDefault();
+          first.focus();
+        } else if (e.shiftKey && active === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    });
+
+    // Al pasar a escritorio con el drawer abierto, se cierra; el inert se recalcula.
+    window.matchMedia(MOBILE_MQ).addEventListener('change', function (ev) {
+      if (!ev.matches && sidebarIsOpen()) setSidebar(false);
+      else syncSidebarInert();
+    });
+
+    // Skeleton: solo aparece (superpuesta, sin empujar el contenido) mientras el router
+    // carga la pagina siguiente; se quita al terminar la preparacion o al cargar.
+    document.addEventListener('astro:before-preparation', function () {
+      var sk = document.querySelector('[data-testid="loading-skeleton"]');
+      if (sk) sk.classList.add('pending');
+    });
+    document.addEventListener('astro:after-preparation', function () {
+      var sk = document.querySelector('[data-testid="loading-skeleton"]');
+      if (sk) sk.classList.remove('pending');
+    });
+  }
+
+  // Aviso de modo local: se descarta por sesion de pestaña (sessionStorage). El nodo del
+  // layout se sustituye en cada navegacion, asi que se re-aplica en cada page-load.
+  var GUEST_BANNER_KEY = 'gara:guest-banner-closed';
+  function initGuestBanner() {
+    var banner = document.querySelector('[data-testid="guest-banner"]');
+    if (!banner) return;
+    var closed = false;
+    try { closed = sessionStorage.getItem(GUEST_BANNER_KEY) === '1'; } catch (e) {}
+    if (closed) { banner.setAttribute('hidden', ''); return; }
+    var btn = banner.querySelector('[data-testid="guest-banner-close"]');
+    if (btn && !btn.hasAttribute('data-bound')) {
+      btn.setAttribute('data-bound', '1');
+      btn.addEventListener('click', function () {
+        try { sessionStorage.setItem(GUEST_BANNER_KEY, '1'); } catch (e) {}
+        banner.setAttribute('hidden', '');
+      });
+    }
+  }
+
+  document.addEventListener('astro:page-load', initSidebar);
+  document.addEventListener('astro:page-load', initGuestBanner);
+  initSidebar();
+  initGuestBanner();
+</script>

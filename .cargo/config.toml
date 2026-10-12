@@ -1,0 +1,9 @@
+# Local CI config — overrides ~/.cargo/config.toml offline=true
+# This allows cargo to fetch missing crates when running local CI
+[net]
+git-fetch-with-cli = true
+offline = false
+
+# Use a separate target dir for local CI to avoid conflicts
+[build]
+target-dir = "/tmp/gara-g-ci-target"

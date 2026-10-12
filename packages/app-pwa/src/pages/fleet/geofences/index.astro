@@ -1,0 +1,320 @@
+---
+import FleetLayout from '../../../layouts/FleetLayout.astro';
+import GenericTable from '../../../components/GenericTableAstro.astro';
+import EntityForm from '../../../components/EntityForm.astro';
+import PageHeader from '../../../components/PageHeader.astro';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../lib/fleetSeed.js';
+import { listEntities } from '../../../lib/domain.js';
+import { geofenceTypeLabel } from '../../../lib/alertLabels';
+import { escapeHtml } from '../../../lib/html.js';
+import { instanceIdFor } from '../../../garage/domain/tenant.js';
+import 'leaflet/dist/leaflet.css';
+import '../../../styles/leaflet-taller.css';
+
+// Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
+// La semilla solo se escribe para el tenant demo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData().catch(() => {});
+
+const records = await listEntities('geofence', instanceId);
+
+// Normalize records: keep only fields needed by the table
+const rows = records.map((r: any) => ({
+  id: r.id,
+  name: r.name,
+  type: r.type,
+  typeLabel: geofenceTypeLabel(r.type),
+  alertOnEnter: r.alertOnEnter,
+  alertOnExit: r.alertOnExit,
+  polygon: r.polygon,
+  fleetId: r.fleetId,
+}));
+
+const columns = [
+  { key: 'name', label: 'Nombre' },
+  { key: 'typeLabel', label: 'Tipo' },
+  { key: 'alertOnEnter', label: 'Alerta entrada' },
+  { key: 'alertOnExit', label: 'Alerta salida' },
+];
+
+const geofenceFields = [
+  { name: 'name', label: 'Nombre', type: 'text', required: true, placeholder: 'Zona Norte' },
+  {
+    name: 'type', label: 'Tipo', type: 'select', required: true,
+    options: [
+      { value: 'port', label: 'Puerto' },
+      { value: 'service', label: 'Taller / Servicio' },
+      { value: 'client', label: 'Cliente' },
+      { value: 'depot', label: 'Depósito / Centro' },
+      { value: 'restricted', label: 'Restringida' },
+    ],
+  },
+  {
+    name: 'polygon',
+    label: 'Coordenadas polígono',
+    type: 'text',
+    required: true,
+    placeholder: 'lat,lng lat,lng lat,lng …',
+    help: 'Pares lat,lon separados por espacio. Ej: 4.7350,-74.0500 4.7250,-74.0500 4.7250,-74.0400 4.7350,-74.0400',
+  },
+  { name: 'alertOnEnter', label: 'Alertar al entrar', type: 'checkbox' },
+  { name: 'alertOnExit', label: 'Alertar al salir', type: 'checkbox' },
+];
+
+// Serialize geofences for client-side Leaflet (sanitize: only fields needed)
+const geofencesJson = JSON.stringify(
+  rows.map((g: any) => ({
+    id: g.id,
+    name: g.name,
+    type: g.type,
+    // El texto de usuario que va a entrar en el HTML del popup se escapa aqui, con el unico
+    // escapeHtml de lib/html.ts (Leaflet no escapa: bindPopup interpreta la cadena como HTML).
+    nameHtml: escapeHtml(g.name),
+    typeHtml: escapeHtml(geofenceTypeLabel(g.type) || ''),
+    alertOnEnter: !!g.alertOnEnter,
+    alertOnExit: !!g.alertOnExit,
+    polygon: g.polygon,
+  })),
+);
+---
+
+<FleetLayout title="Geocercas" section="geofences">
+  <section data-testid="geofences-page">
+    <PageHeader
+      title="Geocercas"
+      subtitle="Zonas delimitadas con alertas de entrada y salida"
+      icon="geofences"
+      count={rows.length}
+      countLabel="geocercas"
+    >
+      <button
+        type="button"
+        id="toggle-map-view"
+        class="g-btn g-btn-secondary"
+        data-testid="toggle-map-view"
+        aria-pressed="false"
+      >
+        🗺️ Ver mapa
+      </button>
+    </PageHeader>
+
+    <EntityForm
+      entity="geofence"
+      instanceId={instanceId}
+      fields={geofenceFields}
+      cancelUrl="/fleet/geofences"
+    />
+
+    <div id="geofence-map-wrap" data-testid="geofence-map-wrap" data-geofences={geofencesJson} hidden>
+      <div
+        id="geofence-map"
+        class="g-geofence-map"
+        data-testid="geofence-map"
+        role="region"
+        aria-label="Mapa de geocercas"
+      ></div>
+      <p class="g-map-hint">
+        Haz click en una geocerca para resaltarla. Doble click para centrar.
+      </p>
+    </div>
+
+    <div id="geofence-table-wrap" data-testid="geofence-table-wrap">
+      <GenericTable
+        columns={columns}
+        rows={rows}
+        testId="geofences-table"
+        caption="Listado de geocercas"
+        actions={[
+          { label: 'Editar', href: (row: any) => `/fleet/geofences/edit/${row.id}` },
+        ]}
+      />
+    </div>
+  </section>
+</FleetLayout>
+
+<!-- Leaflet va empaquetado (CSS en el frontmatter, JS con import() al abrir el mapa): sin CDN,
+     asi el mapa funciona sin red en la PWA instalada. Los datos viajan en data-geofences. -->
+<script>
+  // Parse polygon string "lat,lng lat,lng …" into [[lat,lng], …]
+  function parsePolygon(str: unknown): [number, number][] {
+    if (!str || typeof str !== 'string') return [];
+    return str
+      .trim()
+      .split(/\s+/)
+      .map((pair) => {
+        const [lat, lng] = pair.split(',').map(Number);
+        return Number.isFinite(lat) && Number.isFinite(lng) ? ([lat, lng] as [number, number]) : null;
+      })
+      .filter((p): p is [number, number] => p !== null);
+  }
+
+  // Clase CSS por tipo (src/styles/leaflet-taller.css): el color sale de un token --swal-*,
+  // asi sigue al tema claro/oscuro sin repintar la capa.
+  function classForType(type: string): string {
+    switch (type) {
+      case 'port':
+      case 'service':
+      case 'client':
+      case 'depot':
+      case 'restricted':
+        return 'geo-t-' + type;
+      default:
+        return 'geo-t-port';
+    }
+  }
+
+  let map: any = null;
+  let layersById = new Map<string, any>();
+
+  async function initMap() {
+    const el = document.getElementById('geofence-map');
+    if (!el || map) return;
+    // Leaflet se carga solo cuando el usuario abre el mapa (la tabla es la vista por defecto).
+    const mod: any = await import('leaflet');
+    const L: any = mod.default ?? mod;
+    // Otro clic mientras se cargaba ya lo inicializo.
+    if (map) return;
+    const geofencesJson = document.getElementById('geofence-map-wrap')?.dataset.geofences;
+
+    // Default view: Colombia (lat=4.57, lng=-74.29), zoom=6
+    map = L.map(el, {
+      center: [4.57, -74.29],
+      zoom: 6,
+      scrollWheelZoom: true,
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors',
+    }).addTo(map);
+
+    const geofences: any[] = JSON.parse(geofencesJson || '[]');
+    const bounds: [number, number][] = [];
+
+    geofences.forEach((g: any) => {
+      const latlngs = parsePolygon(g.polygon);
+      if (!latlngs.length) return;
+      const typeClass = classForType(g.type);
+
+      const layer = L.polygon(latlngs, {
+        className: 'geo-t ' + typeClass,
+        weight: 2,
+        fillOpacity: 0.25,
+      }).addTo(map);
+
+      const enterBadge = g.alertOnEnter ? '🔔 Entra' : '';
+      const exitBadge = g.alertOnExit ? '🚪 Sale' : '';
+      const badges = [enterBadge, exitBadge].filter(Boolean).join(' · ');
+
+      layer.bindPopup(
+        '<strong>' + g.nameHtml + '</strong><br/>' +
+        '<span class="geo-type ' + typeClass + '">' +
+        g.typeHtml + '</span><br/>' +
+        (badges ? '<span style="font-size:0.75rem">' + badges + '</span><br/>' : '') +
+        '<a href="/fleet/geofences/edit/' + encodeURIComponent(g.id) +
+        '" class="g-popup-edit">Editar →</a>'
+      );
+
+      layer.on('click', () => {
+        // Highlight: thicken stroke + raise fillOpacity, reset others
+        layersById.forEach((other: any, oid: string) => {
+          if (oid !== g.id && other && other.setStyle) {
+            other.setStyle({ weight: 2, fillOpacity: 0.25 });
+          }
+        });
+        layer.setStyle({ weight: 4, fillOpacity: 0.45 });
+        layer.openPopup();
+      });
+
+      layer.on('dblclick', () => {
+        map.fitBounds(layer.getBounds(), { padding: [40, 40] });
+      });
+
+      layersById.set(g.id, layer);
+      latlngs.forEach((p) => bounds.push(p));
+    });
+
+    // Fit bounds if we have at least one polygon
+    if (bounds.length) {
+      try {
+        map.fitBounds(bounds, { padding: [30, 30], maxZoom: 12 });
+      } catch (_) {}
+    }
+  }
+
+  // Toggle button
+  function setupToggle() {
+    const btn = document.getElementById('toggle-map-view');
+    const mapWrap = document.getElementById('geofence-map-wrap');
+    const tableWrap = document.getElementById('geofence-table-wrap');
+    if (!btn || !mapWrap || !tableWrap) return;
+    // En la carga inicial corren a la vez la llamada directa y `astro:page-load`: sin esta marca
+    // el boton queda con DOS manejadores y cada clic muestra y oculta el mapa en el mismo gesto.
+    if (btn.dataset.wired === '1') return;
+    btn.dataset.wired = '1';
+
+    btn.addEventListener('click', () => {
+      const showingMap = !mapWrap.hidden;
+      if (showingMap) {
+        mapWrap.hidden = true;
+        tableWrap.hidden = false;
+        btn.textContent = '🗺️ Ver mapa';
+        btn.setAttribute('aria-pressed', 'false');
+      } else {
+        mapWrap.hidden = false;
+        tableWrap.hidden = true;
+        btn.textContent = '📋 Ver tabla';
+        btn.setAttribute('aria-pressed', 'true');
+        // Initialize map lazily on first show; ensure size is correct
+        // Leaflet needs invalidateSize after container becomes visible
+        void initMap().then(() => setTimeout(() => { if (map) map.invalidateSize(); }, 50));
+      }
+    });
+  }
+
+  // SPA-safe (ViewTransitions): `DOMContentLoaded` no vuelve a dispararse con el
+  // ClientRouter, asi que el toggle mapa/tabla y el mapa quedaban sin conectar
+  // en cuanto el usuario llegaba a esta página desde otra por navegación interna.
+  // Se usa el mismo patrón que el resto de la app: `astro:page-load`, más una
+  // llamada inmediata para la carga inicial sin ViewTransitions.
+  document.addEventListener('astro:page-load', setupToggle);
+  setupToggle();
+</script>
+
+<style>
+  .g-page-header :global(.g-btn) {
+    margin-left: auto;
+  }
+
+  #geofence-map-wrap {
+    margin-top: 1rem;
+  }
+
+  .g-geofence-map {
+    width: 100%;
+    height: 500px;
+    border: 1px solid var(--g-border-accent);
+    border-radius: 0;
+    overflow: hidden;
+    background: var(--g-bg-base);
+  }
+
+  .g-map-hint {
+    font-size: 0.75rem;
+    color: var(--g-text-disabled);
+    margin: 0.5rem 0 0;
+    text-align: right;
+  }
+
+  :global(.g-popup-edit) {
+    display: inline-block;
+    margin-top: 0.25rem;
+    color: var(--g-accent-cyan);
+    text-decoration: none;
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+  :global(.g-popup-edit:hover) {
+    text-decoration: underline;
+  }
+</style>

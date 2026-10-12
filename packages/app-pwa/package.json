@@ -1,0 +1,48 @@
+{
+  "name": "gara-g-app-pwa",
+  "version": "0.1.1",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "node ../../scripts/build-workers.js",
+    "deploy:staging:config": "node scripts/prepare-staging-config.mjs",
+    "preview": "astro preview",
+    "astro": "astro",
+    "check": "astro check",
+    "test": "vitest run --exclude '**/deploy-bundle-safety.test.ts'"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "^14.3.3",
+    "@astrojs/svelte": "^7.2.5",
+    "@fontsource/inter": "5.3.0",
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "@swal/edge-mesh": "^0.1.1",
+    "@swal/ui": "^0.2.0",
+    "@swal/vault": "^0.2.0",
+    "@types/leaflet": "^1.9.22",
+    "astro": "^7.3.5",
+    "chart.js": "^4.5.1",
+    "idb": "8.0.3",
+    "leaflet": "^1.9.4",
+    "peerjs": "^1.5.5",
+    "svelte": "^5.57.1",
+    "three": "0.186.1",
+    "yjs": "^13.6.32"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "@axe-core/playwright": "4.13.0",
+    "@cloudflare/workers-types": "5.20261006.1",
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/leaflet": "^1.9.22",
+    "@types/three": "0.186.0",
+    "fake-indexeddb": "6.2.5",
+    "typescript": "^5.9.2",
+    "vite-plugin-pwa": "^1.3.0",
+    "vitest": "^4.1.11",
+    "workbox-window": "^7.3.0"
+  }
+}

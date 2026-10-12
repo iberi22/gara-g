@@ -1,0 +1,35 @@
+---
+/**
+ * /fleet/garage/anunciantes — Portal del anunciante (tiendas de repuestos, talleres y
+ * servicios que pujan por aparecer en el garage de sus clientes potenciales).
+ *
+ * Monta UN solo componente Svelte con `client:only`. El por que y no `client:load`: en el
+ * dev de este repo el render SSR de Svelte 5 revienta (workerd: "Unexpected Node.js imports
+ * for environment ssr", node:async_hooks desde svelte/internal/server) y la isla llega al
+ * HTML vacia, dejando la pagina en blanco. Es el mismo motivo por el que `tracking.astro`
+ * y `aui.astro` usan `client:only`. El layout sigue siendo SSR; solo el portal se pinta en
+ * el cliente, y toda su interaccion va contra /api/garage/ads/*.
+ *
+ * Lo que se le explica al anunciante, en palabras simples, es exactamente lo mismo que
+ * hace la subasta: por que no siempre sale su anuncio y por que lo que paga no es su puja.
+ * Un anunciante que no entiende el segundo precio acaba quejándose, con razón.
+ */
+import FleetLayout from '../../../layouts/FleetLayout.astro';
+import { GUEST_BLOCKED_PATH } from '../../../lib/appMode';
+import AnunciantesPortal from '../../../components/garage-ads/AnunciantesPortal.svelte';
+
+export const prerender = false;
+
+// Anunciar es una función de cuenta (la API exige sesión). El invitado entra al garage por el
+// prefijo /fleet/garage, pero aquí solo vería 401 en la consola y un portal que no puede usar:
+// se le explica que necesita cuenta, igual que en el resto de secciones bloqueadas.
+if (Astro.locals.mode === 'guest' && !Astro.locals.user) {
+  return Astro.redirect(`${GUEST_BLOCKED_PATH}?from=/fleet/garage/anunciantes`, 303);
+}
+---
+
+<FleetLayout title="Anunciantes" section="vehicles" description="Anunciantes del shop del garage">
+  <section data-testid="anunciantes-page">
+    <AnunciantesPortal client:only="svelte" />
+  </section>
+</FleetLayout>

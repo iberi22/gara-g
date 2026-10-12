@@ -1,0 +1,249 @@
+---
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import GenericTable from '../../components/GenericTableAstro.astro';
+import EntityForm from '../../components/EntityForm.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../lib/fleetSeed.js';
+import { listEntities } from '../../lib/domain.js';
+import { instanceIdFor } from '../../garage/domain/tenant.js';
+import { usageUnitOfType } from '../../lib/vehicleCatalog';
+import {
+  computeNextService,
+  serviceState,
+  filterByVehicle,
+  sortByNextDate,
+  groupByDay,
+} from '../../lib/maintenance.js';
+
+// Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
+// La semilla solo se escribe para el tenant demo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData();
+const records = await listEntities('maintenance', instanceId);
+const vehicles = await listEntities('vehicle', instanceId);
+const vehicleOptions = vehicles.map((v: any) => ({
+  value: v.id, label: `${v.plate || v.name || v.vin || 'Sin placa'} — ${v.make} ${v.model}`,
+}));
+
+/** Etiqueta del vehiculo: placa; la maquinaria sin placa se nombra por su nombre o serie. */
+const vehicleLabelOf = (id: string | undefined): string => {
+  const v: any = vehicles.find((x: any) => x.id === id);
+  return v?.plate || v?.name || v?.vin || (id ?? '').slice(0, 8);
+};
+/** km o horas segun el vehiculo del registro (la maquinaria se mide por horometro). */
+const usageUnitOfRecord = (r: any): 'km' | 'h' =>
+  usageUnitOfType((vehicles.find((x: any) => x.id === r.vehicleId) as any)?.type);
+const usageText = (value: unknown, unit: 'km' | 'h'): string =>
+  value === undefined || value === null || value === '' ? '—' : `${Number(value).toLocaleString('es-CO')} ${unit}`;
+
+const rows = records.map((r: any) => {
+  const unit = usageUnitOfRecord(r);
+  return {
+    ...r,
+    costDisplay: '$' + (r.cost || 0).toLocaleString('es-CO'),
+    vehicleLabel: vehicleLabelOf(r.vehicleId),
+    usageDisplay: usageText(unit === 'h' ? (r.hours ?? r.km) : r.km, unit),
+  };
+});
+
+const columns = [
+  { key: 'vehicleLabel', label: 'Vehículo', width: '8rem' },
+  { key: 'type', label: 'Tipo' },
+  { key: 'date', label: 'Fecha' },
+  { key: 'usageDisplay', label: 'Km / horas', align: 'right' as const },
+  { key: 'costDisplay', label: 'Costo', align: 'right' as const },
+  { key: 'workshop', label: 'Taller' },
+  { key: 'status', label: 'Estado' },
+];
+
+// ── Calendario de mantenimiento (WAVE-11.05, issue 874) ──
+const calVehicleFilter = Astro.url.searchParams.get('vehicleId') ?? 'all';
+const calRecords = filterByVehicle(records as any, calVehicleFilter) as any[];
+const upcoming = sortByNextDate(calRecords as any).slice(0, 10) as any[];
+const byDay = groupByDay(calRecords as any);
+const today = new Date();
+const calYear = today.getFullYear();
+const calMonth = today.getMonth();
+const calFirstWeekday = new Date(calYear, calMonth, 1).getDay();
+const calDaysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+const calCells: Array<{ day: number | null; iso: string | null }> = [];
+for (let i = 0; i < calFirstWeekday; i++) calCells.push({ day: null, iso: null });
+for (let d = 1; d <= calDaysInMonth; d++) {
+  const iso = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  calCells.push({ day: d, iso });
+}
+// Hoy en hora local: toISOString() da el dia UTC y, pasadas las 19:00 en Colombia, marcaba mañana.
+const todayIso = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+const calMonthName = today.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
+const stateBadge: Record<string, string> = {
+  vencido: 'g-cal-badge-overdue',
+  proximo: 'g-cal-badge-soon',
+  ok: 'g-cal-badge-ok',
+  completado: 'g-cal-badge-done',
+};
+---
+
+<FleetLayout title="Mantenimiento" section="maintenance">
+  <section data-testid="maintenance-page">
+    <PageHeader title="Mantenimiento" subtitle={`${records.length} servicios registrados`} icon="maintenance" />
+
+    {Astro.url.searchParams.get('deleted') && (
+      <div class="g-toast g-toast-success">✅ Registro eliminado.</div>
+    )}
+
+    <details class="g-create-form">
+      <summary class="g-create-toggle"><span>➕ Registrar mantenimiento</span></summary>
+      <div class="g-create-content">
+        <EntityForm
+          entity="maintenance"
+          instanceId={instanceId}
+          fields={[
+            { name: 'vehicleId', label: 'Vehículo', type: 'select', required: true, options: vehicleOptions },
+            { name: 'type', label: 'Tipo', type: 'select', required: true,
+              options: [
+                { value: 'preventivo', label: 'Preventivo' },
+                { value: 'correctivo', label: 'Correctivo' },
+                { value: 'predictivo', label: 'Predictivo' },
+                { value: 'inspeccion', label: 'Inspección' },
+                { value: 'reparacion', label: 'Reparación' },
+                { value: 'llantas', label: 'Llantas' },
+                { value: 'aceite', label: 'Cambio de aceite' },
+              ]
+            },
+            { name: 'date', label: 'Fecha', type: 'date', required: true },
+            { name: 'km', label: 'Kilometraje (km)', type: 'number', step: '1' },
+            { name: 'hours', label: 'Horómetro (horas, maquinaria)', type: 'number', step: '1' },
+            { name: 'cost', label: 'Costo (COP)', type: 'number', step: '1000' },
+            { name: 'workshop', label: 'Taller', type: 'text', placeholder: 'Talleres del Norte' },
+            { name: 'description', label: 'Descripción', type: 'textarea' },
+            { name: 'status', label: 'Estado', type: 'select', required: true,
+              options: [
+                { value: 'scheduled', label: 'Programado' },
+                { value: 'in_progress', label: 'En curso' },
+                { value: 'completed', label: 'Completado' },
+                { value: 'cancelled', label: 'Cancelado' },
+              ]
+            },
+          ]}
+          cancelUrl="/fleet/maintenance"
+        />
+      </div>
+    </details>
+
+    <section data-testid="maintenance-calendar" class="g-cal">
+      <div class="g-cal-head">
+        <h3>🗓️ Calendario — {calMonthName}</h3>
+        <form method="get" class="g-cal-filter">
+          <label for="cal-vehicle">Vehículo:</label>
+          <select id="cal-vehicle" name="vehicleId" class="g-select">
+            <option value="all" selected={calVehicleFilter === 'all'}>Todos</option>
+            {vehicles.map((v: any) => (
+              <option value={v.id} selected={calVehicleFilter === v.id}>
+                {v.plate} — {v.make} {v.model}
+              </option>
+            ))}
+          </select>
+          <button type="submit" class="g-btn g-cal-filter-btn" aria-label="Filtrar el calendario por vehículo">Filtrar</button>
+        </form>
+      </div>
+      <div class="g-cal-grid">
+        {['D', 'L', 'M', 'X', 'J', 'V', 'S'].map((wd) => (
+          <div class="g-cal-weekday swal-kicker">{wd}</div>
+        ))}
+        {calCells.map((cell) => (
+          <div class={`g-cal-day swal-chamfer-sm${cell.day ? '' : ' g-cal-day-empty'}${cell.iso === todayIso ? ' g-cal-day-today' : ''}`}>
+            <div class="g-cal-day-inner swal-chamfer-sm">
+              {cell.day && (
+                <>
+                  <span class="g-cal-daynum">{cell.day}</span>
+                  {(byDay.get(cell.iso!) ?? []).map((r: any) => (
+                    <span class={`g-cal-dot ${stateBadge[serviceState(r)]}`} title={`${r.type} — ${r.workshop ?? ''}`}>
+                      {r.type}
+                    </span>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <section data-testid="upcoming-services" class="g-cal-upcoming">
+      <h3>⏭️ Próximos servicios</h3>
+      {upcoming.length === 0 ? (
+        <p class="g-cal-empty">Sin servicios programados.</p>
+      ) : (
+        <ul>
+          {upcoming.map((r: any) => {
+            const next = computeNextService(r);
+            const st = serviceState(r);
+            const plate = vehicleLabelOf(r.vehicleId);
+            const unit = usageUnitOfRecord(r);
+            const nextUsage = unit === 'h' ? (r.nextHours ?? (r.hours !== undefined ? Number(r.hours) + 500 : undefined)) : next.nextKm;
+            return (
+              <li data-testid="upcoming-row" data-state={st}>
+                <span class={`g-cal-badge ${stateBadge[st]}`}>{st}</span>
+                <strong>{r.type}</strong>
+                <span>{plate}</span>
+                <span>próx. {usageText(nextUsage, unit)}</span>
+                <span>{next.nextDate ?? '—'}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+
+    <GenericTable
+      columns={columns}
+      rows={rows}
+      testId="maintenance-table"
+      showActions={true}
+      editBase="/fleet/maintenance/edit"
+      entity="maintenance"
+      instanceId={instanceId}
+    />
+  </section>
+</FleetLayout>
+
+<style>
+.page-head h2 { margin: 0; font-size: 1.5rem; color: var(--swal-text); }
+.g-toast { padding: 0.75rem 1rem; border-radius: 0.375rem; margin-bottom: 1rem; font-size: 0.875rem; }
+.g-toast-success { background: var(--swal-success-muted); border: 1px solid var(--swal-success); color: var(--swal-success); }
+.g-create-form { margin-bottom: 1rem; background: var(--g-bg-elevated); border: 1px solid var(--g-border-accent); border-radius: 0.5rem; }
+.g-create-toggle { padding: 0.75rem 1rem; cursor: pointer; font-size: 0.875rem; font-weight: 600; color: var(--g-accent-primary); user-select: none; list-style: none; }
+.g-create-content { padding: 1rem 1rem 1.5rem; }
+
+.g-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem; }
+.g-cal-filter { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.g-cal-filter-btn { min-height: 2.75rem; padding: 0.4rem 0.9rem; cursor: pointer; }
+.g-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.5rem; }
+.g-cal-weekday { text-align: center; }
+.g-cal-day { background: var(--swal-line-hairline); padding: 1px; filter: drop-shadow(var(--swal-shadow-sm)); min-height: 5rem; display: flex; flex-direction: column; }
+.g-cal-day-inner { background: var(--swal-surface); height: 100%; padding: 0.25rem; display: flex; flex-direction: column; gap: 0.25rem; flex: 1; }
+.g-cal-day-today { outline: 2px solid var(--swal-accent); }
+.g-cal-day-empty { background: none; filter: none; padding: 0; min-height: 0; }
+.g-cal-day-empty .g-cal-day-inner { background: none; }
+.g-cal-daynum { font-family: var(--swal-font-mono); font-size: 0.75rem; text-align: right; color: var(--swal-text-muted); }
+.g-cal-dot { display: inline-block; font-size: 0.65rem; padding: 0.1rem 0.25rem; border-radius: 0; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--swal-font-mono); }
+.g-cal-badge { display: inline-block; font-size: 0.65rem; padding: 0.2rem 0.4rem; font-family: var(--swal-font-mono); text-transform: uppercase; border-radius: var(--swal-radius-sm); }
+.g-cal-badge-overdue { background: var(--swal-danger-muted); color: var(--swal-danger); border: 1px solid var(--swal-danger); }
+.g-cal-badge-soon { background: var(--swal-warning-muted); color: var(--swal-warning); border: 1px solid var(--swal-warning); }
+.g-cal-badge-ok, .g-cal-badge-done { background: var(--swal-success-muted); color: var(--swal-success); border: 1px solid var(--swal-success); }
+.g-cal-upcoming ul { display: flex; flex-direction: column; gap: 0.5rem; list-style: none; padding: 0; margin: 0; }
+.g-cal-upcoming li { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: 1rem; padding: 0.5rem 1rem; background: var(--swal-surface); border: 1px solid var(--swal-line-hairline); }
+.g-cal-empty { color: var(--swal-text-muted); font-style: italic; }
+@media (max-width: 480px) {
+  .g-cal-grid { gap: 0.1rem; }
+  .g-cal-day { min-height: 3.5rem; }
+  .g-cal-day-inner { padding: 0.1rem; }
+  .g-cal-dot { width: 6px; height: 6px; border-radius: 50%; padding: 0; text-indent: -9999px; overflow: hidden; }
+  /* Solo el punto del calendario va relleno: la insignia del listado lleva texto del mismo color
+     que el relleno, y a este ancho quedaba como un bloque liso sin palabra. */
+  .g-cal-dot.g-cal-badge-overdue { background: var(--swal-danger); }
+  .g-cal-dot.g-cal-badge-soon { background: var(--swal-warning); }
+  .g-cal-dot.g-cal-badge-ok, .g-cal-dot.g-cal-badge-done { background: var(--swal-success); }
+  .g-cal-upcoming li { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; }
+}
+</style>

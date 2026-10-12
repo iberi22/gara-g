@@ -1,0 +1,26 @@
+{
+  "name": "gara-g",
+  "version": "0.1.1",
+  "private": true,
+  "description": "GARA-G: local-first fleet and vehicle management PWA (works offline, no backend required).",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "test": "pnpm test:canon",
+    "test:canon": "pnpm --filter gara-g-app-pwa test",
+    "test:full": "pnpm test:canon && pnpm --filter gara-g-app-pwa exec playwright test",
+    "build:canon": "pnpm --filter gara-g-app-pwa build",
+    "check:public": "bash scripts/check-public-tree.sh",
+    "lint": "node scripts/lint-check.cjs",
+    "lint:fix": "biome check --write --unsafe ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.2.0",
+    "@vitest/coverage-v8": "^4.1.11",
+    "jsdom": "^30.1.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  }
+}

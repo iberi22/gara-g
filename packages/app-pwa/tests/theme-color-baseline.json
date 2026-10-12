@@ -1,0 +1,10 @@
+{
+  "src/components/EntityForm.astro": 1,
+  "src/components/ToastContainer.astro": 1,
+  "src/components/garage-dossier/DossierManuals.svelte": 1,
+  "src/components/garage/GarageApp.svelte": 1,
+  "src/components/theme/ThemeBootstrap.astro": 2,
+  "src/components/vehicle/VehicleTable.svelte": 14,
+  "src/layouts/BaseLayout.astro": 1,
+  "src/layouts/Layout.astro": 1
+}

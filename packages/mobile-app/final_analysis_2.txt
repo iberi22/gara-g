@@ -1,0 +1,218 @@
+Analyzing mobile-app...
+
+   info • Don't invoke 'print' in production code • integration_test/app_test.dart:11:5 • avoid_print
+   info • Don't invoke 'print' in production code • integration_test/app_test.dart:15:7 • avoid_print
+   info • Don't invoke 'print' in production code • integration_test/app_test.dart:16:7 • avoid_print
+   info • Don't invoke 'print' in production code • integration_test/app_test.dart:23:5 • avoid_print
+   info • Don't invoke 'print' in production code • integration_test/app_test.dart:28:5 • avoid_print
+   info • Don't invoke 'print' in production code • integration_test/app_test.dart:33:9 • avoid_print
+   info • Don't invoke 'print' in production code • integration_test/app_test.dart:35:9 • avoid_print
+   info • Dangling library doc comment • lib/economy/quest_system.dart:1:1 • dangling_library_doc_comments
+   info • Dangling library doc comment • lib/economy/referral_service.dart:1:1 • dangling_library_doc_comments
+   info • Dangling library doc comment • lib/economy/subscription_service.dart:1:1 • dangling_library_doc_comments
+   info • Dangling library doc comment • lib/economy/token_manager.dart:1:1 • dangling_library_doc_comments
+warning • Unused import: 'package:gara_g_pilot/src/rust/api.dart' • lib/main.dart:4:8 • unused_import
+   info • The constant name 'IN_VEHICLE' isn't a lowerCamelCase identifier • lib/src/models/user_activity_model.dart:2:3 • constant_identifier_names
+   info • The constant name 'STILL' isn't a lowerCamelCase identifier • lib/src/models/user_activity_model.dart:3:3 • constant_identifier_names
+   info • The constant name 'WALKING' isn't a lowerCamelCase identifier • lib/src/models/user_activity_model.dart:4:3 • constant_identifier_names
+   info • The constant name 'UNKNOWN' isn't a lowerCamelCase identifier • lib/src/models/user_activity_model.dart:5:3 • constant_identifier_names
+   info • The constant name 'Idle' isn't a lowerCamelCase identifier • lib/src/models/user_activity_model.dart:9:3 • constant_identifier_names
+   info • The constant name 'Detecting' isn't a lowerCamelCase identifier • lib/src/models/user_activity_model.dart:10:3 • constant_identifier_names
+   info • The constant name 'Driving' isn't a lowerCamelCase identifier • lib/src/models/user_activity_model.dart:11:3 • constant_identifier_names
+   info • The constant name 'Stopped' isn't a lowerCamelCase identifier • lib/src/models/user_activity_model.dart:12:3 • constant_identifier_names
+   info • The private field _metadata could be 'final' • lib/src/providers/garage_provider.dart:10:29 • prefer_final_fields
+   info • The import of 'dart:typed_data' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/foundation.dart' • lib/src/providers/mesh_provider.dart:2:8 • unnecessary_import
+   info • Dangling library doc comment • lib/src/providers/v2v_provider.dart:1:1 • dangling_library_doc_comments
+   info • The import of 'dart:typed_data' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/foundation.dart' • lib/src/providers/v2v_provider.dart:6:8 • unnecessary_import
+warning • Unused import: 'package:permission_handler/permission_handler.dart' • lib/src/providers/v2v_provider.dart:18:8 • unused_import
+  error • The method 'initialize' isn't defined for the type 'V2VService' • lib/src/providers/v2v_provider.dart:105:23 • undefined_method
+  error • The argument type 'String' can't be assigned to the parameter type 'Uint8List'.  • lib/src/providers/v2v_provider.dart:212:36 • argument_type_not_assignable
+  error • A value of type 'BigInt' can't be assigned to a variable of type 'int' • lib/src/providers/v2v_provider.dart:365:25 • invalid_assignment
+  error • The argument type 'BigInt' can't be assigned to the parameter type 'num'.  • lib/src/providers/v2v_provider.dart:366:36 • argument_type_not_assignable
+   info • Invalid use of a private type in a public API • lib/src/screens/ai_screen.dart:10:3 • library_private_types_in_public_api
+   info • Dangling library doc comment • lib/src/screens/chat_screen.dart:1:1 • dangling_library_doc_comments
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/dashboard_screen.dart:151:43 • deprecated_member_use
+warning • The value of the field '_lastVideoFile' isn't used • lib/src/screens/dashcam_screen.dart:21:10 • unused_field
+  error • Too many positional arguments: 1 expected, but 2 found • lib/src/screens/dashcam_screen.dart:211:64 • extra_positional_arguments
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/dashcam_screen.dart:366:58 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/dashcam_screen.dart:366:89 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/dashcam_screen.dart:372:61 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/dashcam_screen.dart:377:61 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/earnings_screen.dart:71:39 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/earnings_screen.dart:71:75 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/earnings_screen.dart:74:54 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/earnings_screen.dart:131:43 • deprecated_member_use
+warning • Unused import: 'package:gara_g_pilot/src/rust/api.dart' • lib/src/screens/garage_screen.dart:3:8 • unused_import
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/garage_screen.dart:183:71 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/garage_screen.dart:225:53 • deprecated_member_use
+   info • Unnecessary use of multiple underscores • lib/src/screens/garage_screen.dart:243:39 • unnecessary_underscores
+   info • Unnecessary use of multiple underscores • lib/src/screens/garage_screen.dart:243:43 • unnecessary_underscores
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/garage_screen.dart:256:52 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/garage_screen.dart:280:47 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/garage_screen.dart:309:62 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/garage_screen.dart:335:29 • deprecated_member_use
+   info • The private field _isLoadingStats could be 'final' • lib/src/screens/gateway_screen.dart:17:8 • prefer_final_fields
+warning • The value of the field '_isLoadingStats' isn't used • lib/src/screens/gateway_screen.dart:17:8 • unused_field
+  error • The method 'getSatelliteStatus' isn't defined for the type '_GatewayScreenState' • lib/src/screens/gateway_screen.dart:27:31 • undefined_method
+  error • The method 'getLoraStatus' isn't defined for the type '_GatewayScreenState' • lib/src/screens/gateway_screen.dart:28:32 • undefined_method
+  error • The method 'connectSatellite' isn't defined for the type '_GatewayScreenState' • lib/src/screens/gateway_screen.dart:50:28 • undefined_method
+  error • The method 'connectLora' isn't defined for the type '_GatewayScreenState' • lib/src/screens/gateway_screen.dart:87:28 • undefined_method
+  error • The method 'startLoraListening' isn't defined for the type '_GatewayScreenState' • lib/src/screens/gateway_screen.dart:112:25 • undefined_method
+   info • Don't use 'BuildContext's across async gaps • lib/src/screens/governance_screen.dart:39:28 • use_build_context_synchronously
+   info • Don't use 'BuildContext's across async gaps • lib/src/screens/governance_screen.dart:43:28 • use_build_context_synchronously
+  error • The getter 'proposals' isn't defined for the type 'GovernanceInfo' • lib/src/screens/governance_screen.dart:77:29 • undefined_getter
+  error • The getter 'proposals' isn't defined for the type 'GovernanceInfo' • lib/src/screens/governance_screen.dart:97:39 • undefined_getter
+  error • The getter 'proposals' isn't defined for the type 'GovernanceInfo' • lib/src/screens/governance_screen.dart:99:47 • undefined_getter
+   info • The private field _routePoints could be 'final' • lib/src/screens/map_screen.dart:21:16 • prefer_final_fields
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/marketplace_screen.dart:322:26 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/marketplace_screen.dart:345:43 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/marketplace_screen.dart:359:27 • deprecated_member_use
+   info • 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre • lib/src/screens/marketplace_screen.dart:439:9 • deprecated_member_use
+   info • 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre • lib/src/screens/marketplace_screen.dart:505:7 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/marketplace_screen.dart:563:44 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/marketplace_screen.dart:564:45 • deprecated_member_use
+warning • Unused import: 'package:gara_g_pilot/src/rust/api.dart' • lib/src/screens/obd_live_screen.dart:4:8 • unused_import
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/obd_live_screen.dart:169:42 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/obd_live_screen.dart:179:69 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/obd_live_screen.dart:204:28 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/obd_live_screen.dart:216:66 • deprecated_member_use
+   info • Dangling library doc comment • lib/src/screens/v2v_screen.dart:1:1 • dangling_library_doc_comments
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:146:39 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:168:49 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:186:45 • deprecated_member_use
+warning • The value of the local variable 'angle' isn't used • lib/src/screens/v2v_screen.dart:203:19 • unused_local_variable
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:244:37 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:314:30 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:344:35 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:352:37 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:385:36 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:398:41 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:400:46 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:401:39 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:535:30 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:536:31 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:541:35 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:551:39 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_screen.dart:588:49 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_settings_screen.dart:97:39 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_settings_screen.dart:99:56 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_settings_screen.dart:123:58 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/v2v_settings_screen.dart:226:29 • deprecated_member_use
+  error • Invalid constant value • lib/src/screens/v2v_settings_screen.dart:243:33 • invalid_constant
+   info • Unnecessary use of multiple underscores • lib/src/screens/vehicle_detail_screen.dart:39:39 • unnecessary_underscores
+   info • Unnecessary use of multiple underscores • lib/src/screens/vehicle_detail_screen.dart:39:43 • unnecessary_underscores
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/vehicle_detail_screen.dart:49:67 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/vehicle_detail_screen.dart:115:43 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/vehicle_detail_screen.dart:117:62 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/vehicle_detail_screen.dart:137:56 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/vehicle_detail_screen.dart:178:59 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/vehicle_detail_screen.dart:179:60 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/vehicle_detail_screen.dart:248:20 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/vehicle_detail_screen.dart:305:60 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/vehicle_detail_screen.dart:333:45 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/vehicle_detail_screen.dart:344:108 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/vehicle_detail_screen.dart:356:82 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/screens/vehicle_detail_screen.dart:407:59 • deprecated_member_use
+  error • The name 'UserActivityEvent' isn't a type, so it can't be used as a type argument • lib/src/services/activity_recognition_service.dart:8:22 • non_type_as_type_argument
+  error • Undefined name 'userActivityEvents' • lib/src/services/activity_recognition_service.dart:26:31 • undefined_identifier
+  error • Undefined class 'UserActivityEvent' • lib/src/services/activity_recognition_service.dart:26:58 • undefined_class
+  error • Undefined class 'UserActivityEvent' • lib/src/services/activity_recognition_service.dart:39:36 • undefined_class
+  error • Undefined name 'UserActivityType' • lib/src/services/activity_recognition_service.dart:44:23 • undefined_identifier
+  error • Undefined name 'UserActivityType' • lib/src/services/activity_recognition_service.dart:46:30 • undefined_identifier
+  error • Undefined name 'UserActivityType' • lib/src/services/activity_recognition_service.dart:48:30 • undefined_identifier
+warning • The value of the field '_externalApiKey' isn't used • lib/src/services/ai_bridge.dart:178:11 • unused_field
+   info • The import of 'dart:typed_data' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/foundation.dart' • lib/src/services/ble_service.dart:2:8 • unnecessary_import
+   info • 'localName' is deprecated and shouldn't be used. use advName instead • lib/src/services/ble_service.dart:61:82 • deprecated_member_use
+  error • The named parameter 'license' is required, but there's no corresponding argument • lib/src/services/ble_service.dart:73:20 • missing_required_argument
+   info • 'desiredAccuracy' is deprecated and shouldn't be used. use settings parameter with AndroidSettings, AppleSettings, WebSettings, or LocationSettings • lib/src/services/ble_service.dart:117:72 • deprecated_member_use
+  error • The named parameter 'hopCount' is required, but there's no corresponding argument • lib/src/services/ble_service.dart:119:28 • missing_required_argument
+  error • The named parameter 'maxHops' is required, but there's no corresponding argument • lib/src/services/ble_service.dart:119:28 • missing_required_argument
+  error • The named parameter 'networkId' is required, but there's no corresponding argument • lib/src/services/ble_service.dart:119:28 • missing_required_argument
+  error • The named parameter 'reserved' isn't defined • lib/src/services/ble_service.dart:123:21 • undefined_named_parameter
+  error • The getter 'reserved' isn't defined for the type 'SafetyPacket' • lib/src/services/ble_service.dart:123:38 • undefined_getter
+  error • The function 'getPendingRewards' isn't defined • lib/src/services/marketplace_service.dart:85:25 • undefined_function
+  error • The function 'calculateCoverageProof' isn't defined • lib/src/services/marketplace_service.dart:124:32 • undefined_function
+  error • The function 'submitCoverageProof' isn't defined • lib/src/services/marketplace_service.dart:130:33 • undefined_function
+  error • The method 'askLocationAndExternalStoragePermission' isn't defined for the type 'Nearby' • lib/src/services/mesh_service.dart:126:13 • undefined_method
+  error • The method 'init' isn't defined for the type 'Nearby' • lib/src/services/mesh_service.dart:155:13 • undefined_method
+  error • Undefined name 'EventType' • lib/src/services/mesh_service.dart:160:16 • undefined_identifier
+  error • The named parameter 'onConnectionInitiated' is required, but there's no corresponding argument • lib/src/services/mesh_service.dart:164:21 • missing_required_argument
+  error • The named parameter 'onConnectionResult' is required, but there's no corresponding argument • lib/src/services/mesh_service.dart:164:21 • missing_required_argument
+  error • The named parameter 'onDisconnected' is required, but there's no corresponding argument • lib/src/services/mesh_service.dart:164:21 • missing_required_argument
+  error • 2 positional arguments expected by 'requestConnection', but 0 found • lib/src/services/mesh_service.dart:165:15 • not_enough_positional_arguments
+  error • The named parameter 'userName' isn't defined • lib/src/services/mesh_service.dart:165:15 • undefined_named_parameter
+  error • The named parameter 'endpointId' isn't defined • lib/src/services/mesh_service.dart:166:15 • undefined_named_parameter
+  error • The named parameter 'endpointName' isn't defined • lib/src/services/mesh_service.dart:167:15 • undefined_named_parameter
+  error • Undefined name 'EventType' • lib/src/services/mesh_service.dart:170:16 • undefined_identifier
+  error • The named parameter 'onPayLoadRecieved' is required, but there's no corresponding argument • lib/src/services/mesh_service.dart:174:21 • missing_required_argument
+  error • Undefined name 'EventType' • lib/src/services/mesh_service.dart:176:16 • undefined_identifier
+  error • Undefined name 'EventType' • lib/src/services/mesh_service.dart:182:16 • undefined_identifier
+  error • Undefined name 'EventType' • lib/src/services/mesh_service.dart:188:16 • undefined_identifier
+  error • Undefined name 'EventType' • lib/src/services/mesh_service.dart:191:16 • undefined_identifier
+  error • 2 positional arguments expected by 'startAdvertising', but 0 found • lib/src/services/mesh_service.dart:207:9 • not_enough_positional_arguments
+  error • The named parameter 'userName' isn't defined • lib/src/services/mesh_service.dart:207:9 • undefined_named_parameter
+  error • The named parameter 'strategy' isn't defined • lib/src/services/mesh_service.dart:208:9 • undefined_named_parameter
+  error • The named parameter 'onPayLoadRecieved' is required, but there's no corresponding argument • lib/src/services/mesh_service.dart:213:19 • missing_required_argument
+  error • 2 positional arguments expected by 'startDiscovery', but 0 found • lib/src/services/mesh_service.dart:248:9 • not_enough_positional_arguments
+  error • The named parameter 'userName' isn't defined • lib/src/services/mesh_service.dart:248:9 • undefined_named_parameter
+  error • The named parameter 'strategy' isn't defined • lib/src/services/mesh_service.dart:249:9 • undefined_named_parameter
+  error • The named parameter 'onConnectionInitiated' is required, but there's no corresponding argument • lib/src/services/mesh_service.dart:254:19 • missing_required_argument
+  error • The named parameter 'onConnectionResult' is required, but there's no corresponding argument • lib/src/services/mesh_service.dart:254:19 • missing_required_argument
+  error • The named parameter 'onDisconnected' is required, but there's no corresponding argument • lib/src/services/mesh_service.dart:254:19 • missing_required_argument
+  error • 2 positional arguments expected by 'requestConnection', but 0 found • lib/src/services/mesh_service.dart:255:13 • not_enough_positional_arguments
+  error • The named parameter 'userName' isn't defined • lib/src/services/mesh_service.dart:255:13 • undefined_named_parameter
+  error • The named parameter 'endpointId' isn't defined • lib/src/services/mesh_service.dart:256:13 • undefined_named_parameter
+  error • The named parameter 'endpointName' isn't defined • lib/src/services/mesh_service.dart:257:13 • undefined_named_parameter
+   info • Don't invoke 'print' in production code • lib/src/services/telemetry_service.dart:36:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/telemetry_service.dart:46:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/telemetry_service.dart:50:5 • avoid_print
+   info • Dangling library doc comment • lib/src/services/v2v_service.dart:1:1 • dangling_library_doc_comments
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:226:7 • avoid_print
+  error • The name 'GyroscopeEvent' isn't a type, so it can't be used as a type argument • lib/src/services/v2v_service.dart:241:22 • non_type_as_type_argument
+warning • The value of the field '_myEndpointId' isn't used • lib/src/services/v2v_service.dart:248:11 • unused_field
+   info • The private field _myDeviceName could be 'final' • lib/src/services/v2v_service.dart:249:10 • prefer_final_fields
+   info • The private field _isRustInitialized could be 'final' • lib/src/services/v2v_service.dart:253:8 • prefer_final_fields
+  error • Undefined name 'gyroscopeEvents' • lib/src/services/v2v_service.dart:297:30 • undefined_identifier
+  error • Undefined class 'GyroscopeEvent' • lib/src/services/v2v_service.dart:297:54 • undefined_class
+  error • Undefined class 'GyroscopeEvent' • lib/src/services/v2v_service.dart:302:30 • undefined_class
+warning • The declaration '_startLocationUpdates' isn't referenced • lib/src/services/v2v_service.dart:316:8 • unused_element
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:354:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:376:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:394:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:402:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:413:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:435:5 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:453:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:467:11 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:495:9 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:520:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:539:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:559:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:579:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:600:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:632:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/v2v_service.dart:649:7 • avoid_print
+  error • Target of URI doesn't exist: 'package:gara_g_pilot/src/rust/api/api.dart' • lib/src/services/voice_safety_agent.dart:5:8 • uri_does_not_exist
+  error • The method 'createVoiceAlertStream' isn't defined for the type 'VoiceSafetyAgent' • lib/src/services/voice_safety_agent.dart:118:5 • undefined_method
+   info • Don't invoke 'print' in production code • lib/src/services/voice_safety_agent.dart:125:9 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/voice_safety_agent.dart:141:7 • avoid_print
+warning • Dead code • lib/src/services/voice_safety_agent.dart:244:55 • dead_code
+warning • The left operand can't be null, so the right operand is never executed • lib/src/services/voice_safety_agent.dart:244:58 • dead_null_aware_expression
+   info • Dangling library doc comment • lib/src/services/wallet_storage_service.dart:1:1 • dangling_library_doc_comments
+warning • Unused import: 'dart:typed_data' • lib/src/services/wallet_storage_service.dart:8:8 • unused_import
+   info • Don't invoke 'print' in production code • lib/src/services/youtube_service.dart:33:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/youtube_service.dart:39:7 • avoid_print
+  error • The function 'YoutubeApi' isn't defined • lib/src/services/youtube_service.dart:55:29 • undefined_function
+   info • Don't invoke 'print' in production code • lib/src/services/youtube_service.dart:81:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/src/services/youtube_service.dart:85:7 • avoid_print
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/widgets/coverage_heatmap.dart:30:37 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/widgets/coverage_heatmap.dart:32:43 • deprecated_member_use
+  error • The named parameter 'isFilled' isn't defined • lib/src/widgets/coverage_heatmap.dart:33:11 • undefined_named_parameter
+warning • The value of the local variable 'x' isn't used • lib/src/widgets/coverage_heatmap.dart:63:16 • unused_local_variable
+warning • The value of the local variable 'y' isn't used • lib/src/widgets/coverage_heatmap.dart:64:16 • unused_local_variable
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/widgets/telemetry_card.dart:21:40 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/src/widgets/telemetry_card.dart:25:51 • deprecated_member_use
+  error • The named parameter 'activityRecognitionService' is required, but there's no corresponding argument • test/widget_test.dart:17:29 • missing_required_argument
+  error • The named parameter 'tripService' is required, but there's no corresponding argument • test/widget_test.dart:17:29 • missing_required_argument
+
+214 issues found. (ran in 5.0s)

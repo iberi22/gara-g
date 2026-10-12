@@ -1,0 +1,86 @@
+---
+/**
+ * /fleet/garage — Vista principal HUD 3D de videojuego para el Garage de GARA-G.
+ *
+ * En modo normal de escritorio y móvil web se integra con FleetLayout.
+ * En modo WebView (?embed=app o UA GaraGApp) se renderiza en modo inmersivo sin cromo
+ * de navegación, con soporte para safe-area-inset y prevención de rebote (overscroll: none).
+ */
+import FleetLayout from '../../../layouts/FleetLayout.astro';
+import GarageApp from '../../../components/garage/GarageApp.svelte';
+import { isWebViewMode } from '../../../components/garage/webview';
+import '../../../styles/gara-theme.css';
+import ThemeBootstrap from '../../../components/theme/ThemeBootstrap.astro';
+
+export const prerender = false;
+
+const isWebView = isWebViewMode(
+  Astro.url.searchParams,
+  Astro.request.headers.get('user-agent'),
+);
+---
+
+{isWebView ? (
+  <html lang="es" data-theme="taller">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+      <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+      <ThemeBootstrap />
+      <title>GARA-G Garage</title>
+      <style>
+        html, body {
+          margin: 0;
+          padding: 0;
+          width: 100%;
+          height: 100dvh;
+          overflow: hidden;
+          background: var(--swal-bg);
+          overscroll-behavior: none;
+          -webkit-user-select: none;
+          user-select: none;
+        }
+      </style>
+    </head>
+    <body>
+      <GarageApp client:only="svelte" />
+    </body>
+  </html>
+) : (
+  <FleetLayout title="Garage" section="game">
+    <div class="garage-hud-bleed">
+      <GarageApp client:only="svelte" />
+    </div>
+  </FleetLayout>
+)}
+
+<style>
+  /*
+    El HUD es una hoja de plano a pantalla completa: ocupa el alto REAL que queda bajo la
+    barra de FleetLayout, sin scroll de pagina. Antes se usaba un `calc(100vh - 62px)` con
+    un offset fijo que ya no coincidia con la barra actual y provocaba scroll en el documento
+    (la franja de telemetria quedaba cortada por abajo). `100dvh` sigue al viewport real de
+    los navegadores con barra de direcciones dinamica; se recorta por abajo para no invadir
+    la barra del navegador.
+  */
+  .garage-hud-bleed {
+    margin: -1rem;
+    /* El alto EXACTO lo mide el propio HUD (GarageApp) contra el espacio real que queda
+       bajo la barra de FleetLayout, y lo escribe como altura en linea. Aqui solo se da un
+       Alto de arranque razonable para el primer pintado; un `calc` con un offset fijo
+       dejaba la hoja mas alta que la pantalla y cortaba la franja de telemetria. */
+    height: calc(100dvh - 71px);
+    max-height: calc(100dvh - 71px);
+    width: calc(100% + 2rem);
+    position: relative;
+    overflow: hidden;
+    background: var(--swal-bg);
+  }
+
+  @media (max-width: 768px) {
+    .garage-hud-bleed {
+      height: calc(100dvh - 59px);
+      max-height: calc(100dvh - 59px);
+    }
+  }
+</style>

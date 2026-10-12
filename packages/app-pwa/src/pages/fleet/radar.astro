@@ -1,0 +1,23 @@
+---
+/**
+ * /fleet/radar — Radar V2V: los vehiculos cercanos se avisan posicion, rumbo, velocidad y
+ * peligros para evitar accidentes. Funciona sin cuenta (modo local): no lee D1, no guarda
+ * nada y la sesion no interviene. La pagina solo monta la isla de Svelte (client:only: el SSR
+ * de Svelte no funciona en workerd; ademas todo el radar necesita APIs del navegador).
+ */
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import RadarApp from '../../components/v2v/RadarApp.svelte';
+---
+
+<FleetLayout title="Radar V2V" section="radar">
+  <section data-testid="radar-page">
+    <h2 class="radar-title">Radar V2V</h2>
+    <p class="radar-sub">Red de control de navegación entre vehículos cercanos.</p>
+    <RadarApp client:only="svelte" />
+  </section>
+</FleetLayout>
+
+<style>
+  .radar-title { margin: 0 0 0.25rem; font-size: 1.5rem; }
+  .radar-sub { margin: 0 0 1rem; color: var(--swal-text-muted); }
+</style>

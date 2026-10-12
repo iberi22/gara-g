@@ -1,0 +1,347 @@
+---
+/**
+ * pages/fleet/geofences/edit/[id].astro — Editar una geocerca existente.
+ *
+ * Incluye mapa interactivo Leaflet para editar el polígono:
+ *   - Renderiza el polígono existente al cargar.
+ *   - Click en el mapa → añade un vértice.
+ *   - Click en un vértice → lo elimina.
+ *   - "Limpiar polígono" → vacía la lista de vértices.
+ *   - "Cerrar polígono" (auto en el form submit) → une último vértice con el primero.
+ *   - El textarea del form se mantiene sincronizado con el array [[lat,lng]].
+ */
+import FleetLayout from '../../../../layouts/FleetLayout.astro';
+import EntityForm from '../../../../components/EntityForm.astro';
+import PageHeader from '../../../../components/PageHeader.astro';
+import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../../lib/fleetSeed.js';
+import { getEntity, listEntities } from '../../../../lib/domain.js';
+import { instanceIdFor } from '../../../../garage/domain/tenant.js';
+import 'leaflet/dist/leaflet.css';
+import '../../../../styles/leaflet-taller.css';
+
+// Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
+// La semilla solo se escribe para el tenant demo.
+const instanceId = instanceIdFor(Astro.request, Astro.locals);
+if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData().catch(() => {});
+
+const url = Astro.url;
+const id = url.pathname.split('/').pop()!;
+
+let geofence: any = null;
+try {
+  geofence = await getEntity('geofence', id, instanceId);
+  if (!geofence) {
+    const all = await listEntities('geofence', instanceId);
+    geofence = all.find((g: any) => g.id === id) ?? null;
+  }
+} catch (e: any) {
+  console.error('[geofence/edit] getEntity error:', e?.message);
+  geofence = null;
+}
+
+if (!geofence) {
+  return Astro.redirect('/fleet/geofences?error=not_found');
+}
+
+const geofenceFields = [
+  { name: 'name', label: 'Nombre', type: 'text', required: true, placeholder: 'Zona Norte' },
+  {
+    name: 'type', label: 'Tipo', type: 'select', required: true,
+    options: [
+      { value: 'port', label: 'Puerto' },
+      { value: 'service', label: 'Taller / Servicio' },
+      { value: 'client', label: 'Cliente' },
+      { value: 'depot', label: 'Depósito / Centro' },
+      { value: 'restricted', label: 'Restringida' },
+    ],
+  },
+  {
+    name: 'polygon',
+    label: 'Coordenadas polígono',
+    type: 'text',
+    required: true,
+    placeholder: 'lat,lng lat,lng lat,lng …',
+    help: 'Edita el polígono visualmente con el mapa de abajo o pega pares lat,lng separados por espacio.',
+  },
+  { name: 'alertOnEnter', label: 'Alertar al entrar', type: 'checkbox' },
+  { name: 'alertOnExit', label: 'Alertar al salir', type: 'checkbox' },
+];
+
+// Serialize initial polygon for client-side Leaflet
+const initialPolygon = typeof geofence.polygon === 'string' ? geofence.polygon : '';
+---
+
+<FleetLayout title={`Editar ${geofence.name}`} section="geofences">
+  <section data-testid="geofence-edit-page">
+    <PageHeader
+      title={`Editar geocerca: ${geofence.name}`}
+      subtitle="Actualiza los datos de la zona"
+      icon="geofences"
+    />
+
+    {url.searchParams.get('error') === 'not_found' && (
+      <div class="g-toast g-toast-error">❌ Geocerca no encontrada.</div>
+    )}
+
+    <EntityForm
+      entity="geofence"
+      instanceId={instanceId}
+      initialData={geofence}
+      fields={geofenceFields}
+      cancelUrl="/fleet/geofences"
+    />
+
+    <div class="g-edit-map-section" data-testid="geofence-edit-map-section">
+      <h3 class="g-edit-map-title">Editor visual del polígono</h3>
+      <p class="g-edit-map-hint">
+        Click en el mapa para <strong>añadir vértices</strong>. Click en un vértice (círculo naranja) para
+        <strong>eliminarlo</strong>. El campo "Coordenadas polígono" del formulario se actualiza automáticamente.
+      </p>
+      <div class="g-edit-map-toolbar">
+        <button type="button" id="geofence-clear-btn" class="g-btn g-btn-secondary" data-testid="geofence-clear-btn">
+          🗑️ Limpiar polígono
+        </button>
+        <button type="button" id="geofence-recenter-btn" class="g-btn g-btn-secondary" data-testid="geofence-recenter-btn">
+          🎯 Centrar en polígono
+        </button>
+        <span id="geofence-vertex-count" class="g-vertex-count" data-testid="geofence-vertex-count">
+          0 vértices
+        </span>
+      </div>
+      <div
+        id="geofence-edit-map"
+        class="g-geofence-map"
+        data-testid="geofence-edit-map"
+        data-polygon={initialPolygon}
+        role="region"
+        aria-label="Editor de polígono de geocerca"
+      ></div>
+    </div>
+  </section>
+</FleetLayout>
+
+<!-- Leaflet va empaquetado (CSS en el frontmatter, JS con import en el script): sin CDN,
+     asi el editor funciona sin red en la PWA instalada. El poligono viaja en data-polygon. -->
+<script>
+  // @ts-nocheck — JS plano heredado del script inline; Leaflet llega del paquete.
+  import L from 'leaflet';
+  // === Editor visual de polígono ===
+  function parsePolygon(str) {
+    if (!str || typeof str !== 'string') return [];
+    return str
+      .trim()
+      .split(/\s+/)
+      .map((pair) => {
+        const parts = pair.split(',');
+        if (parts.length !== 2) return null;
+        const lat = Number(parts[0]);
+        const lng = Number(parts[1]);
+        return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+      })
+      .filter(Boolean);
+  }
+
+  function serializePolygon(latlngs) {
+    return latlngs.map((p) => p[0].toFixed(6) + ',' + p[1].toFixed(6)).join(' ');
+  }
+
+  let map = null;
+  let polyLayer = null;
+  let vertexMarkers = [];
+  let vertices = [];
+
+  // Buscar el form y el textarea del polígono (EntityForm los renderiza con id `form-geofence-{id}-polygon`)
+  function findFormEls() {
+    const form = document.querySelector('form.g-form[data-entity="geofence"]');
+    if (!form) return null;
+    const ta = form.querySelector('textarea[name="polygon"], input[name="polygon"]');
+    const submit = form.querySelector('button[type="submit"]');
+    return { form, ta, submit };
+  }
+
+  function renderPolygon() {
+    if (!map) return;
+    if (polyLayer) { map.removeLayer(polyLayer); polyLayer = null; }
+    vertexMarkers.forEach((m) => map.removeLayer(m));
+    vertexMarkers = [];
+
+    if (vertices.length >= 2) {
+      polyLayer = L.polygon(vertices, {
+        className: 'geo-edit',
+        weight: 2,
+        fillOpacity: 0.2,
+      }).addTo(map);
+    }
+
+    vertices.forEach((p, idx) => {
+      const marker = L.circleMarker(p, {
+        className: 'geo-vertex',
+        radius: 7,
+        weight: 2,
+      }).addTo(map);
+      marker.bindTooltip('Vértice ' + (idx + 1), { permanent: false });
+      marker.on('click', (e) => {
+        L.DomEvent.stopPropagation(e);
+        vertices.splice(idx, 1);
+        syncForm();
+        renderPolygon();
+      });
+      vertexMarkers.push(marker);
+    });
+
+    const countEl = document.getElementById('geofence-vertex-count');
+    if (countEl) {
+      countEl.textContent = vertices.length + (vertices.length === 1 ? ' vértice' : ' vértices');
+    }
+  }
+
+  function syncForm() {
+    const els = findFormEls();
+    if (!els || !els.ta) return;
+    els.ta.value = serializePolygon(vertices);
+    // Disparar evento input para que cualquier listener lo detecte
+    els.ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function initEditMap() {
+    const el = document.getElementById('geofence-edit-map');
+    if (!el || typeof L === 'undefined') return;
+    // Carga inicial: la llamada directa y `astro:page-load` corren las dos; Leaflet lanza
+    // "Map container is already initialized" y los botones quedarian con dos manejadores.
+    if (el.dataset.mapInit === '1') return;
+    el.dataset.mapInit = '1';
+
+    vertices = parsePolygon(el.dataset.polygon);
+
+    // Default Colombia si no hay vértices
+    const center = vertices.length
+      ? vertices.reduce((acc, p) => [acc[0] + p[0] / vertices.length, acc[1] + p[1] / vertices.length], [0, 0])
+      : [4.57, -74.29];
+
+    map = L.map(el, {
+      center,
+      zoom: vertices.length ? 11 : 6,
+      scrollWheelZoom: true,
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors',
+    }).addTo(map);
+
+    map.on('click', (e) => {
+      vertices.push([e.latlng.lat, e.latlng.lng]);
+      syncForm();
+      renderPolygon();
+    });
+
+    renderPolygon();
+
+    // Centrar si hay polígono
+    if (vertices.length) {
+      try {
+        map.fitBounds(vertices, { padding: [40, 40], maxZoom: 14 });
+      } catch (_) {}
+    }
+
+    // Toolbar
+    const clearBtn = document.getElementById('geofence-clear-btn');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        vertices = [];
+        syncForm();
+        renderPolygon();
+      });
+    }
+    const recenterBtn = document.getElementById('geofence-recenter-btn');
+    if (recenterBtn) {
+      recenterBtn.addEventListener('click', () => {
+        if (vertices.length >= 2 && polyLayer) {
+          map.fitBounds(polyLayer.getBounds(), { padding: [40, 40], maxZoom: 14 });
+        } else if (vertices.length === 1) {
+          map.setView(vertices[0], 13);
+        } else {
+          map.setView([4.57, -74.29], 6);
+        }
+      });
+    }
+  }
+
+  // SPA-safe (ViewTransitions): `DOMContentLoaded` no se re-dispara con el
+  // ClientRouter, así que llegar a esta página por navegación interna dejaba
+  // el mapa de edición sin vértices ni con los botones Clear/Recenter muertos.
+  document.addEventListener('astro:page-load', initEditMap);
+  initEditMap();
+</script>
+
+<style>
+    .g-toast { padding: 0.75rem 1rem; border-radius: 0; margin-bottom: 1rem; font-size: 0.875rem; }
+  .g-toast-error {
+    background: var(--swal-danger-bg);
+    border: 1px solid color-mix(in srgb, var(--swal-danger) 40%, transparent);
+    color: var(--swal-danger);
+  }
+
+  .g-edit-map-section {
+    margin-top: 1.5rem;
+    padding: 1.25rem;
+    background: var(--g-bg-elevated);
+    border: 1px solid var(--g-border-accent);
+    border-radius: var(--g-radius-lg);
+    max-width: 56rem;
+  }
+
+  .g-edit-map-title {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+    color: var(--g-text-primary);
+  }
+
+  .g-edit-map-hint {
+    margin: 0 0 0.75rem;
+    font-size: 0.8125rem;
+    color: var(--g-text-muted);
+    line-height: 1.4;
+  }
+
+  .g-edit-map-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .g-edit-map-toolbar .g-btn {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8125rem;
+    border-radius: var(--g-radius-md);
+    border: 1px solid var(--g-border-accent);
+    background: transparent;
+    color: var(--g-text-secondary);
+    cursor: pointer;
+  }
+  .g-edit-map-toolbar .g-btn:hover {
+    background: var(--g-bg-base);
+    color: var(--g-accent-cyan);
+  }
+
+  .g-vertex-count {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--g-text-disabled);
+    padding: 0.25rem 0.625rem;
+    background: var(--g-bg-base);
+    border-radius: var(--g-radius-md);
+    border: 1px solid var(--g-border-subtle);
+  }
+
+  .g-geofence-map {
+    width: 100%;
+    height: 500px;
+    border: 1px solid var(--g-border-accent);
+    border-radius: 0;
+    overflow: hidden;
+    background: var(--g-bg-base);
+  }
+</style>

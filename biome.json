@@ -1,0 +1,170 @@
+{
+  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "files": {
+    "ignore": [
+      "**/node_modules",
+      "**/.next",
+      "**/.turbo",
+      "**/dist",
+      "**/build",
+      "**/coverage",
+      "**/packages/*/dist/**",
+      "**/packages/*/coverage/**",
+      "contracts/typechain-types",
+      "packages/app/.next/**",
+      "**/chunks/**",
+      "**/server/**",
+      "contracts/**",
+      "_legacy/**",
+      "vitest.setup.js",
+      "packages/db/src/__tests__/**",
+      "packages/app-pwa/.astro/**",
+      "cores/swal-econ/**",
+      "private/**",
+      "packages/db/**",
+      "packages/functions/**",
+      "packages/shared/src/**",
+      "packages/app-pwa/src/lib/billing.ts",
+      "packages/app-pwa/src/lib/agentDomain.ts",
+      "packages/app-pwa/src/lib/billing.core.ts",
+      "packages/app-pwa/src/lib/fleetApi.ts",
+      "packages/app-pwa/src/lib/cloudflareVaultAdapter.ts",
+      "packages/app-pwa/src/lib/domain.gara.test.ts"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "style": {
+        "noParameterAssign": "error",
+        "useAsConstAssertion": "error",
+        "useDefaultParameterLast": "error",
+        "useEnumInitializers": "error",
+        "useSelfClosingElements": "error",
+        "useSingleVarDeclarator": "error",
+        "noUnusedTemplateLiteral": "error",
+        "useNumberNamespace": "error",
+        "noInferrableTypes": "error",
+        "noUselessElse": "error"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "jsxQuoteStyle": "double"
+    }
+  },
+  "overrides": [
+    {
+      "include": ["packages/app/**"],
+      "javascript": {
+        "globals": ["React"]
+      }
+    },
+    {
+      "include": ["**/*.test.ts", "**/*.spec.ts", "packages/db/src/__tests__/setup.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    },
+    {
+      "include": ["packages/functions/**", "packages/shared/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "warn"
+          }
+        }
+      }
+    },
+    {
+      "include": ["**/coverage/**", "**/packages/*/coverage/**"],
+      "linter": {
+        "enabled": false
+      }
+    },
+    {
+      "include": ["**/dist/**", "**/packages/*/dist/**"],
+      "linter": {
+        "enabled": false
+      }
+    },
+    {
+      "include": ["packages/functions/lib/**"],
+      "linter": {
+        "enabled": false
+      }
+    },
+    {
+      "include": ["packages/db/dist/**"],
+      "linter": {
+        "enabled": false
+      }
+    },
+    {
+      "include": ["**/.next/**", "packages/app/.next/**", "**/chunks/**", "**/server/**"],
+      "linter": {
+        "enabled": false
+      }
+    },
+    {
+      "include": ["**/stories/**", "**/*.stories.tsx", "**/*.stories.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noArrayIndexKey": "off",
+            "noExplicitAny": "off"
+          },
+          "correctness": {
+            "noUnusedFunctionParameters": "off"
+          }
+        }
+      }
+    },
+    {
+      "include": ["**/security.ts", "**/lib/security.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noControlCharactersInRegex": "off"
+          }
+        }
+      }
+    },
+    {
+      "include": ["packages/functions/src/**", "packages/shared/src/**"],
+      "linter": {
+        "enabled": false
+      }
+    },
+    {
+      "include": ["vitest.config.ts", "packages/shared/biome.json", "packages/db/biome.json"],
+      "linter": {
+        "enabled": false
+      }
+    },
+    {
+      "include": [
+        "artifacts/build-info/**",
+        "biome-errors-raw.json",
+        "biome-errors.json",
+        "contracts/typechain-types/**"
+      ],
+      "linter": {
+        "enabled": false
+      }
+    }
+  ]
+}

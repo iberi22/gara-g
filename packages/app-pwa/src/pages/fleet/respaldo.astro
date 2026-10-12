@@ -1,0 +1,13 @@
+---
+/**
+ * /fleet/respaldo — Respaldo cifrado de extremo a extremo, sin cuenta.
+ * Svelte va con client:only: el SSR de Svelte no funciona en workerd, y el codigo de respaldo
+ * y la clave solo existen en el navegador.
+ */
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import BackupPanel from '../../components/sync/BackupPanel.svelte';
+---
+
+<FleetLayout title="Respaldo cifrado" section="settings">
+  <BackupPanel client:only="svelte" />
+</FleetLayout>

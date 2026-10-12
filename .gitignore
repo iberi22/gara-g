@@ -1,0 +1,363 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+node_modules/
+
+# testing
+coverage/
+
+# next.js
+.next/
+out/
+packages/app/build.out
+
+# production
+build/
+dist/
+packages/functions/lib/
+packages/legacy/functions/lib/
+# packages/*/lib/  <-- Commented out because Flutter uses lib/ for source code
+
+
+# turborepo / caches
+.turbo/
+.cache/
+
+# misc
+.DS_Store
+*.pem
+.windsurf/
+.kiro/
+
+# debug
+pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example
+packages/*/.env*
+!packages/*/.env.example
+# wrangler / @cloudflare/vite-plugin local vars (DEV_ADMIN_SESSION, secrets)
+.dev.vars*
+!.dev.vars.example
+
+# vercel
+.vercel
+**/.vercel/
+
+# firebase
+.firebase/
+**/.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# hardhat
+artifacts/
+cache/
+typechain*/
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# monorepo nested build outputs
+**/.next/
+**/out/
+**/build/
+**/dist/
+**/.turbo/
+**/.cache/
+apps/*/.next/
+apps/*/out/
+packages/*/.next/
+packages/*/out/
+
+# editors and IDEs
+.vscode/
+.idea/
+.fleet/
+*.iml
+
+# logs
+logs/
+*.log
+
+# test artifacts
+.nyc_output/
+playwright-report/
+test-results/
+.playwright/
+cypress/videos/
+cypress/screenshots/
+cypress/downloads/
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# linters/caches
+.eslintcache
+.stylelintcache
+.parcel-cache
+
+# pnpm store
+.pnpm-store/
+
+# Netlify
+.netlify/
+
+# direnv
+.envrc
+.direnv/
+
+# Firebase credentials (never commit)
+service?account*.json
+test_key.json
+*serviceAccount*.json
+*firebase-adminsdk*.json
+*firebase-service?account*.json
+
+# Audit reports
+audit-reports/
+
+# Executables
+GoogleCloudSDKInstaller.exe
+
+# Additional files to ignore
+packages/*/.next/
+packages/*/node_modules/
+packages/*/.turbo/
+packages/*/dist/
+packages/*/build/
+packages/*/*.log
+packages/*/coverage/
+packages/*/.coverage/
+packages/*/.nyc_output/
+packages/*/.eslintcache/
+packages/*/.stylelintcache/
+packages/*/.cache/
+# Vendored/third-party bundles
+_vendor_openzeppelin_unused/
+**/_vendor_openzeppelin_unused/
+
+# Contract build artifacts
+contracts/artifacts/
+contracts/cache/
+contracts/coverage/
+contracts/typechain*/
+# Sharp image library prebuilt binaries
+packages/*/node_modules/sharp/build/
+packages/*/node_modules/sharp/vendor/
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+*.egg-info/
+.eggs/
+
+# IDE files
+*.swp
+*.swo
+*.swn
+
+# System files
+.DS_Store
+Desktop.ini
+Thumbs.db
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Diagnostic reports
+pnpm-debug.log*
+
+# Optional pnpm cache directory
+.pnpm-store
+
+# Optional eslint cache
+.eslintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'pnpm pack'
+*.tgz
+
+# dotenv environment variables file
+.env
+
+# Firebase emulator data
+firebase-export-*
+firebase-debug.log*
+
+# Playwright
+.playwright/
+
+# Jest
+jest-test-results.json
+
+# VS Code
+.vscode-test/
+
+# Turborepo
+.turbo/
+.vercel/
+
+# Hardhat
+artifacts/
+cache/
+coverage/
+typechain/
+
+# Contract deployment files
+.deployed/
+
+# Database files
+*.db
+*.sqlite
+
+# Lock files (except for root)
+**/package-lock.json
+**/yarn.lock
+**/pnpm-lock.yaml
+!pnpm-lock.yaml
+
+# Design token build files
+packages/shared/src/design-tokens/*.css
+packages/shared/src/design-tokens/*.js
+packages/shared/src/design-tokens/*.json
+
+# Temporary build files
+*.tmp
+*.temp
+
+# Backup files
+*.bak
+*.backup
+
+# Merge files
+*.orig
+
+# Swap files
+*.swp
+*.swo
+
+# Vim files
+*.un~
+[._]*.s[a-w][a-z]
+[._]s[a-w][a-z]
+
+# Emacs files
+\#*
+/.emacs.desktop
+/.emacs.desktop.lock
+.*~
+\#*\#
+
+# Mac files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Windows files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Firebase emulator UI
+.firebase/
+.gemini/settings.json
+.gemini/settings.json
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+android/.gradle
+android/captures/
+ios/.symlinks
+ios/Pods/
+
+# Flutter auto-generated (regenerable en build)
+**/frb_generated.*
+.mocks.dart
+mobile-app/test/helpers/mocks.mocks.dart
+mobile-app/lib/src/rust/frb_generated.dart
+mobile-app/native/src/frb_generated.rs
+
+# Rust
+**/target/
+Cargo.lock
+
+# Log files
+biome-errors-raw.json
+biome-errors.json
+pglite-debug.log
+
+releases/
+
+# Astro cache
+.astro/
+.vercel/
+
+# SWAL template orphans (not part of gara-g canonical, keep for reference)
+# aui.ts, llm.ts, mesh.ts y AuiRenderer.svelte NO van aqui: AuiInterface.svelte (versionado) los
+# importa, y con ellos ignorados un clon limpio no compila (Could not resolve
+# './AuiRenderer.svelte'); el deploy solo funcionaba desde un disco que los tenia.
+packages/app-pwa/src/lib/agentDomain.ts
+packages/app-pwa/src/lib/domain.ts
+packages/app-pwa/src/lib/domain.gara.test.ts
+packages/app-pwa/src/lib/surreal.ts
+packages/app-pwa/src/lib/worker-ai.example.ts
+packages/app-pwa/src/components/CreditMeter.svelte
+packages/app-pwa/workers/
+_legacy/
+
+# hermes / xavier / local caches (keep .hermes/environment.json)
+.hermes/*
+!.hermes/environment.json
+# Los paquetes del monorepo tambien guardan su receta local
+packages/*/.hermes/*
+!packages/*/.hermes/environment.json
+.atl/
+.wrangler/
+packages/app-pwa/.wrangler/
+xavier_memory.db
+xavier_memory.db-*
+packages/app-pwa/src/lib/__vault_legacy/
+
+# Real Cloudflare config: kept in the private infra repo, copied in before a deploy
+# (private/infra/install.mjs). Templates: wrangler.example.toml,
+# packages/app-pwa/config/staging-resources.example.json. See scripts/infra-config.mjs.
+/wrangler.toml
+packages/app-pwa/config/staging-resources.json
+
+# Private overlay (lives in the private infra repo)
+private/

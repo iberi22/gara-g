@@ -1,0 +1,9 @@
+{
+  "d1_database_id": "11111111-1111-1111-1111-111111111111",
+  "d1_database_name": "gara-staging",
+  "r2_bucket_name": "your-gara-staging-bucket",
+  "kv": {
+    "SESSION": "11111111111111111111111111111111",
+    "SWAL_KV": "22222222222222222222222222222222"
+  }
+}

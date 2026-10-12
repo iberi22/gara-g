@@ -1,0 +1,18 @@
+packages:
+  - 'packages/*'
+  # @swal/ui, @swal/vault and @swal/edge-mesh come from npm.
+  # private/ (owner-only overlay: cloud module, econ core, legacy, infra) is NOT part of this
+  # workspace; it has its own (private/pnpm-workspace.yaml).
+
+overrides:
+  diff: ">=8.0.3"
+  esbuild: ">=0.25.0"
+  fast-uri: ">=3.1.6"
+  js-yaml@<4: ">=3.15.1"
+  js-yaml@>=4: ">=4.3.1"
+  qs: ">=6.16.0"
+  serialize-javascript: ">=7.0.5"
+  sharp: "^0.35.3"
+  stream-json: ">=3.5.0"
+  ts-deepmerge: ">=8.0.0"
+  uuid: ">=11.1.1"
