@@ -5,6 +5,7 @@
   "description": "GARA-G: local-first fleet and vehicle management PWA (works offline, no backend required).",
   "license": "AGPL-3.0-only",
   "type": "module",
+  "packageManager": "pnpm@10.34.7",
   "scripts": {
     "test": "pnpm test:canon",
     "test:canon": "pnpm --filter gara-g-app-pwa test",

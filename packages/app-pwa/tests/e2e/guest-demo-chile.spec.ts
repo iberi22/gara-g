@@ -82,9 +82,10 @@ for (const vp of VIEWPORTS) {
         expect(overflow).toBeLessThanOrEqual(1);
       }
 
-      // Volver al garage sigue en modo local.
+      // Volver al garage sigue en modo local. La vuelta va por el ClientRouter y
+      // rehidrata el garage 3D (WebGL por software en CI): timeout amplio.
       await page.getByTestId('demo-fleet-back').click();
-      await expect(page).toHaveURL(/\/fleet\/garage$/);
+      await slow(page).toHaveURL(/\/fleet\/garage$/);
 
       expect(loginRedirects, 'redirecciones a /login en el recorrido invitado').toEqual([]);
       expect(pageErrors, 'errores de pagina').toEqual([]);
