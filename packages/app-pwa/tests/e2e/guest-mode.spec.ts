@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test';
 
+// Dev compila bajo demanda y el garage 3D hidrata WebGL por software: margen amplio.
+const slow = expect.configure({ timeout: 30_000 });
+
 /**
  * Modo invitado (sin cuenta). Sin sesion ni cookies: es lo que ve quien llega desde la landing.
  * El contenido del garage local es del frente del almacen local; aqui basta con que la pagina
@@ -65,9 +68,12 @@ test.describe('Modo invitado', () => {
     await page.getByTestId('exit-local').click();
     await expect(page).toHaveURL(/\/\?inicio=1/);
     expect((await context.cookies()).find((c) => c.name === 'gara_mode')).toBeUndefined();
-    // Sin modo local y sin sesion, el garage ya no abre.
+    // Sin modo local y sin sesion, el garage ya no abre: la pagina SSR sale por
+    // PUBLIC_DEMO, pero al hidratar el cliente pide /api/garage/vehicles, recibe
+    // 401 y redirige a /login (ver garage/api.ts). Eso tarda (WebGL por software),
+    // asi que aqui vale el timeout amplio, no el de 5 s del CI.
     await page.goto('/fleet/garage');
-    await expect(page).toHaveURL(/\/login/);
+    await slow(page).toHaveURL(/\/login/);
   });
 
   test('el menu muestra con candado lo que necesita cuenta, y el aviso se descarta por pestaña', async ({ page, context }) => {
