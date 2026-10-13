@@ -15,6 +15,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { MARKETS } from '../src/lib/market';
+import { OBD2Simulator } from '../src/lib/obd2';
 
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), 'utf8');
 
@@ -45,6 +47,17 @@ describe('geografia del entregable (Chile)', () => {
     expect(s).toMatch(/longitude: MARKET\.mapCenter\.lng/);
     expect(s).toMatch(/MARKET\.mapCenter\.lat \+ /);
     expect(s).toMatch(/MARKET\.mapCenter\.lng \+ /);
+  });
+
+  it('cada registro del simulador cae dentro de la region del mercado (comportamiento)', () => {
+    const sim = new OBD2Simulator({ intervalMs: 0 });
+    for (let i = 0; i < 25; i++) {
+      const record = sim.generateRecord();
+      // Deriva < 0,01 grados (~1 km) alrededor del centro: nunca sobre otro pais.
+      expect(Math.abs(record.latitude - MARKETS.CL.mapCenter.lat)).toBeLessThan(0.01);
+      expect(Math.abs(record.longitude - MARKETS.CL.mapCenter.lng)).toBeLessThan(0.01);
+      expect(record.latitude).toBeLessThan(-21.5);
+    }
   });
 
   it('el ejemplo de coordenadas de geocercas sale de demoPolygon, no de un literal', () => {

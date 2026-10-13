@@ -20,6 +20,26 @@ export interface OBD2SimulatorOptions {
 }
 
 /**
+ * Numero en [0,1) del generador del RUNTIME (`crypto.getRandomValues`), no de `Math.random`.
+ *
+ * El registro de telemetria que arma el simulador se cifra y se firma para replicarse por la
+ * malla, asi que el analisis de flujo de datos marca `Math.random` como aleatoriedad insegura
+ * en contexto de seguridad (CodeQL: alertas altas en el simulador). Ninguno de estos valores es
+ * un secreto, pero no hay razon para usar un generador no criptografico teniendo el del
+ * runtime. Disponible en navegador, workerd y Node.
+ */
+function rand01(): number {
+  const buf = new Uint32Array(1);
+  globalThis.crypto.getRandomValues(buf);
+  return buf[0] / 2 ** 32;
+}
+
+/** Deriva de +-0,005 grados (~500 m) del simulador alrededor de un punto de referencia. */
+function jitter(): number {
+  return (rand01() - 0.5) * 0.01;
+}
+
+/**
  * Safe detection of Web Bluetooth support without throwing.
  */
 export function isBluetoothSupported(): boolean {
@@ -235,11 +255,11 @@ export class OBD2Simulator {
   }
 
   public generateRecord(): OBD2TelemetryRecord {
-    // Slight random drift for realistic simulation
-    this.currentSpeed = Math.max(0, Math.min(160, this.currentSpeed + Math.floor(Math.random() * 9) - 4));
-    this.currentRpm = Math.max(800, Math.min(6000, this.currentRpm + Math.floor(Math.random() * 201) - 100));
-    this.currentTemp = Math.max(70, Math.min(110, this.currentTemp + Math.floor(Math.random() * 3) - 1));
-    this.currentFuel = Math.max(5, Math.min(100, this.currentFuel - (Math.random() > 0.8 ? 1 : 0)));
+    // Slight random drift for realistic simulation (todo por `rand01`, ver arriba).
+    this.currentSpeed = Math.max(0, Math.min(160, this.currentSpeed + Math.floor(rand01() * 9) - 4));
+    this.currentRpm = Math.max(800, Math.min(6000, this.currentRpm + Math.floor(rand01() * 201) - 100));
+    this.currentTemp = Math.max(70, Math.min(110, this.currentTemp + Math.floor(rand01() * 3) - 1));
+    this.currentFuel = Math.max(5, Math.min(100, this.currentFuel - (rand01() > 0.8 ? 1 : 0)));
     this.odometer += Math.round(this.currentSpeed / 3600);
 
     const record: OBD2TelemetryRecord = {
@@ -250,9 +270,9 @@ export class OBD2Simulator {
       coolantTemp: this.currentTemp,
       fuelLevel: this.currentFuel,
       // Deriva de +-0,005 grados (~500 m) alrededor del centro del mercado.
-      latitude: MARKET.mapCenter.lat + (Math.random() - 0.5) * 0.01,
-      longitude: MARKET.mapCenter.lng + (Math.random() - 0.5) * 0.01,
-      troubleCodes: Math.random() > 0.9 ? ['P0300'] : [],
+      latitude: MARKET.mapCenter.lat + jitter(),
+      longitude: MARKET.mapCenter.lng + jitter(),
+      troubleCodes: rand01() > 0.9 ? ['P0300'] : [],
       odometer: this.odometer,
     };
 
