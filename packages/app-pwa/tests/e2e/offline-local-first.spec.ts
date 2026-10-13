@@ -161,16 +161,17 @@ test.describe('app shell offline de las rutas de flota', () => {
     //    503) y el documento no puede fallar con ERR_INTERNET_DISCONNECTED.
     await context.setOffline(true);
     for (const route of routes) {
-      const documentUrl = new URL(route, base).toString();
+      const expectedPath = new URL(route, base).pathname;
       const failed: string[] = [];
       const onFailed = (req: Request) => {
-        if (req.resourceType() === 'document' && req.url().startsWith(documentUrl)) {
+        if (req.resourceType() === 'document' && req.url().includes(expectedPath)) {
           failed.push(req.url());
         }
       };
       page.on('requestfailed', onFailed);
-      const res = await page.reload({ waitUntil: 'domcontentloaded' });
+      const res = await page.goto(route, { waitUntil: 'domcontentloaded' });
       expect(res?.status(), `offline ${route}: el SW debe servir el shell, no 503`).toBe(200);
+      expect(new URL(page.url()).pathname, `offline ${route}: navego a la ruta`).toBe(expectedPath);
       await expect(page.getByTestId('fleet-sidebar'), `offline ${route}`).toBeVisible();
       expect(failed, `offline ${route}: el documento no debe fallar la red`).toEqual([]);
       page.off('requestfailed', onFailed);

@@ -194,19 +194,26 @@ async function networkOnly(request) {
 async function navigateNetworkFirst(request) {
   const cache = await caches.open(PAGES_CACHE);
   const key = pageKey(request.url);
+  let response;
   try {
-    const response = await fetch(request);
-    if (isCacheablePage(response, request)) {
-      await cache.put(key, sanitizePage(response.clone()));
-      await trimCache(cache, MAX_PAGES);
-    }
-    return response;
+    response = await fetch(request);
   } catch {
     const cached = await cache.match(key);
     if (cached) return cached;
     const shell = await caches.match(OFFLINE_FALLBACK);
     return shell || htmlError(503, 'Offline — sin conexión');
   }
+  // La escritura en cache va aparte del fetch: si falla (cuota llena), la
+  // respuesta viva que el servidor acaba de dar sigue sirviendo.
+  if (isCacheablePage(response, request)) {
+    try {
+      await cache.put(key, sanitizePage(response.clone()));
+      await trimCache(cache, MAX_PAGES);
+    } catch {
+      /* no se pudo guardar el shell; la respuesta viva no se descarta */
+    }
+  }
+  return response;
 }
 
 /** Assets inmutables: cache primero, con escritura al vuelo. */
