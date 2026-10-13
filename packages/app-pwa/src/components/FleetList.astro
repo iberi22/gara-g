@@ -111,13 +111,13 @@ try {
     </div>
     <div class="swal-card-frame">
       <article class="swal-card-inner stat-mini" data-testid="mini-fuel-cost">
-        <div class="mini-value"><span id="mini-fuel-cost">${(serverStats.totalFuelCost / 1_000_000).toFixed(2)}</span><span class="mini-unit">M</span></div>
+        <div class="mini-value" id="mini-fuel-cost">{formatMoney(serverStats.totalFuelCost, MARKET)}</div>
         <div class="mini-label swal-kicker">Costo combustible {MARKET.currency}</div>
       </article>
     </div>
     <div class="swal-card-frame">
       <article class="swal-card-inner stat-mini" data-testid="mini-maint-cost">
-        <div class="mini-value"><span id="mini-maint-cost">${(serverStats.totalMaintCost / 1_000_000).toFixed(2)}</span><span class="mini-unit">M</span></div>
+        <div class="mini-value" id="mini-maint-cost">{formatMoney(serverStats.totalMaintCost, MARKET)}</div>
         <div class="mini-label swal-kicker">Costo mantenimiento {MARKET.currency}</div>
       </article>
     </div>
@@ -146,9 +146,25 @@ try {
   </div>
 </section>
 
-<script is:inline define:vars={{ marketLocale: MARKET.locale }}>
+<script>
+  // Client-side: fetch live stats from API and update DOM.
+  //
+  // Importa los MISMOS formateadores del mercado que el SSR (arriba): el sondeo del cliente
+  // escribia los KPI de dinero a la colombiana ('$' + millones.toFixed(2) + 'M' -> "$9.81M")
+  // mientras el resto de la tarjeta ya salia en es-CL. Ahora los dos caminos comparten
+  // `formatMoney`/`formatNumber` de lib/market.ts y no hay forma de que se separen.
+  //
+  // El script va empaquetado (no `is:inline`) para poder importar; con ViewTransitions se
+  // re-vincula en cada astro:page-load y el guard por elemento evita correr en otras paginas.
+  import { MARKET, formatMoney, formatNumber } from '../lib/market.js';
+
+  let busy = false;
+
   // Client-side: fetch live stats from API and update DOM
   async function refreshStats() {
+    // El arranque y el primer astro:page-load pueden coincidir: el segundo no repite el GET.
+    if (busy || !document.getElementById('fleet-dashboard')) return;
+    busy = true;
     try {
       const res = await fetch('/api/fleet/stats');
       if (!res.ok) throw new Error('API unavailable');
@@ -168,9 +184,9 @@ try {
       set('stat-critical', s.criticalAlerts);
       set('stat-active', s.activeVehicles);
       set('stat-maint', s.maintenanceVehicles);
-      set('mini-mileage', Number(s.totalMileage).toLocaleString(marketLocale));
-      set('mini-fuel-cost', '$' + (s.totalFuelCost / 1_000_000).toFixed(2));
-      set('mini-maint-cost', '$' + (s.totalMaintCost / 1_000_000).toFixed(2));
+      set('mini-mileage', formatNumber(s.totalMileage, MARKET));
+      set('mini-fuel-cost', formatMoney(s.totalFuelCost, MARKET));
+      set('mini-maint-cost', formatMoney(s.totalMaintCost, MARKET));
       set('mini-geofences', s.geofences);
       set('mini-documents', s.documents);
       set('mini-maintenance', s.maintenance);
@@ -193,9 +209,12 @@ try {
       // API unavailable — keep server-side seed values (already rendered)
       const errBanner = document.getElementById('seed-error');
       if (errBanner) errBanner.style.display = 'flex';
+    } finally {
+      busy = false;
     }
   }
 
+  document.addEventListener('astro:page-load', refreshStats);
   refreshStats();
 </script>
 

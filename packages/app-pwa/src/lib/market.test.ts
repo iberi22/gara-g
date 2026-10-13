@@ -21,6 +21,8 @@ import {
   formatNumber,
   formatVolume,
   formatEfficiency,
+  demoPolygon,
+  localizeText,
   marketFor,
   normalizeKindKey,
   resolveMarketId,
@@ -161,5 +163,77 @@ describe('vocabulario legal', () => {
     expect(MARKETS.CL.cityPlaceholder).toContain('Antofagasta');
     expect(MARKETS.CL.vehicleIdPlaceholder).toBe('ABCD-12');
     expect(MARKETS.CO.cityPlaceholder).toContain('Bogotá');
+  });
+})
+
+describe('geografia por defecto', () => {
+  it('los mapas abren sobre el pais del mercado, no sobre Colombia', () => {
+    // Chile: Antofagasta. El simulador OBD2, el mapa de rastreo y el de geocercas parten de aqui.
+    expect(MARKETS.CL.mapCenter.lat).toBeCloseTo(-23.65, 2);
+    expect(MARKETS.CL.mapCenter.lng).toBeCloseTo(-70.4, 2);
+    expect(MARKETS.CL.mapCenter.zoom).toBeGreaterThan(0);
+    // Colombia conserva el centro que ya tenia (Bogota).
+    expect(MARKETS.CO.mapCenter.lat).toBeCloseTo(4.6097, 3);
+    expect(MARKETS.CO.mapCenter.lng).toBeCloseTo(-74.0817, 3);
+  });
+
+  it('demoPolygon devuelve un poligono del mercado, con 4 vertices', () => {
+    for (const market of [MARKETS.CL, MARKETS.CO]) {
+      const points = demoPolygon(market).split(' ');
+      expect(points).toHaveLength(4);
+      for (const point of points) {
+        const [lat, lng] = point.split(',').map(Number);
+        expect(Number.isFinite(lat), point).toBe(true);
+        expect(Number.isFinite(lng), point).toBe(true);
+      }
+    }
+    // El de Chile no es el de Bogota (era el defecto N3 de la QA).
+    expect(demoPolygon(MARKETS.CL)).not.toBe(demoPolygon(MARKETS.CO));
+    expect(demoPolygon(MARKETS.CL)).not.toContain('-74.');
+  });
+
+  it('las geocercas demo caen dentro de la region del mercado', () => {
+    // Chile: el norte (Antofagasta / El Loa / Atacama), lat -28,5..-21,5 y lng -71..-68.
+    for (const g of MARKETS.CL.demoGeofences) {
+      for (const point of g.polygon.split(' ')) {
+        const [lat, lng] = point.split(',').map(Number);
+        expect(lat, g.name).toBeLessThan(-21.5);
+        expect(lat, g.name).toBeGreaterThan(-28.5);
+        expect(lng, g.name).toBeLessThan(-68);
+        expect(lng, g.name).toBeGreaterThan(-71);
+      }
+    }
+  });
+})
+
+describe('localizeText: el vocabulario que no se puede reescribir campo a campo', () => {
+  it('en Chile "volqueta" es "tolva", en singular y en plural y en cualquier sitio del texto', () => {
+    expect(localizeText('Volqueta', MARKETS.CL)).toBe('Tolva');
+    expect(localizeText('Camion de estacas', MARKETS.CL)).toBe('Camion de estacas');
+    expect(localizeText('Kenworth T800 Volqueta', MARKETS.CL)).toBe('Kenworth T800 Tolva');
+    expect(localizeText('Llantas traseras volqueta (8u)', MARKETS.CL)).toBe(
+      'Llantas traseras tolva (8u)',
+    );
+    expect(localizeText('Llantas traseras volquetas (8u)', MARKETS.CL)).toBe(
+      'Llantas traseras tolvas (8u)',
+    );
+    expect(localizeText('Maquinaria amarilla y volquetas', MARKETS.CL)).toBe(
+      'Maquinaria amarilla y tolvas',
+    );
+    expect(localizeText('Sirve igual para una moto que para treinta volquetas.', MARKETS.CL)).toBe(
+      'Sirve igual para una moto que para treinta tolvas.',
+    );
+  });
+
+  it('en Colombia el texto se queda como esta escrito', () => {
+    expect(localizeText('Camiones, volquetas y maquinaria amarilla', MARKETS.CO)).toBe(
+      'Camiones, volquetas y maquinaria amarilla',
+    );
+    expect(localizeText('T800 Volqueta', MARKETS.CO)).toBe('T800 Volqueta');
+  });
+
+  it('sin vocabulario (o con el valor repetido) no toca el texto', () => {
+    expect(localizeText('', MARKETS.CL)).toBe('');
+    expect(localizeText('texto sin esos terminos', MARKETS.CL)).toBe('texto sin esos terminos');
   });
 })
