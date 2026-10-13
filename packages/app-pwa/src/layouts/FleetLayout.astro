@@ -241,6 +241,10 @@ const navView = navItems.map((item) => {
           </div>
         </aside>
       )}
+      <aside class="offline-banner" data-testid="offline-banner" role="status" aria-live="polite">
+        <span class="offline-banner-dot" aria-hidden="true"></span>
+        <p class="offline-banner-text">Sin conexión — mostrando los datos guardados en este dispositivo.</p>
+      </aside>
       <div class="fleet-content">
         <div class="fleet-skeleton" data-testid="loading-skeleton" aria-hidden="true">
           <div class="skeleton-bar"></div>
@@ -603,6 +607,29 @@ const navView = navItems.map((item) => {
     place-items: center;
   }
   .guest-banner-close:hover { color: var(--swal-text); }
+  /* Aviso de sin conexion: el HTML de la ruta viene de la cache del service
+     worker y los datos, de IndexedDB. Lo muestra initOfflineBanner poniendo
+     data-offline en <html> (sobrevive a la navegacion del ClientRouter). */
+  .offline-banner {
+    display: none;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--swal-danger-muted);
+    border-bottom: 1px solid var(--swal-border);
+    border-left: 3px solid var(--swal-danger);
+    color: var(--swal-text);
+    font-size: 0.8125rem;
+  }
+  html[data-offline='1'] .offline-banner { display: flex; }
+  .offline-banner-text { margin: 0; }
+  .offline-banner-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--swal-danger);
+    flex: 0 0 auto;
+  }
   .fleet-content {
     flex: 1;
     padding: 1rem;
@@ -941,8 +968,41 @@ const navView = navItems.map((item) => {
     }
   }
 
+  // Aviso de sin conexion: se recalcula en cada page-load porque el nodo del
+  // layout se sustituye con el ClientRouter, pero `navigator.onLine` y <html>
+  // sobreviven. `data-bound` evita duplicar los listeners online/offline.
+  function syncOfflineBanner() {
+    document.documentElement.setAttribute('data-offline', navigator.onLine ? '0' : '1');
+  }
+  function initOfflineBanner() {
+    syncOfflineBanner();
+    if (!window.__garaOfflineBound) {
+      window.__garaOfflineBound = true;
+      window.addEventListener('online', syncOfflineBanner);
+      window.addEventListener('offline', syncOfflineBanner);
+    }
+  }
+
+  // Logout: purga la cache del service worker (incluido el HTML de las rutas)
+  // antes de que la cookie de sesion se borre, para que el siguiente usuario de
+  // este navegador no abra offline el panel del anterior.
+  function initLogoutPurge() {
+    var form = document.querySelector('form[action="/api/auth/logout"]');
+    if (!form || form.hasAttribute('data-bound')) return;
+    form.setAttribute('data-bound', '1');
+    form.addEventListener('submit', function () {
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage('PURGE_CACHES');
+      }
+    });
+  }
+
   document.addEventListener('astro:page-load', initSidebar);
   document.addEventListener('astro:page-load', initGuestBanner);
+  document.addEventListener('astro:page-load', initOfflineBanner);
+  document.addEventListener('astro:page-load', initLogoutPurge);
   initSidebar();
   initGuestBanner();
+  initOfflineBanner();
+  initLogoutPurge();
 </script>
