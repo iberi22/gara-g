@@ -86,7 +86,7 @@ function leaderPath(target: CalloutTarget, index: number): string {
 }
 </script>
 
-<div class="part-callouts-root" aria-label="Llamadas de las piezas mas urgentes">
+<div class="part-callouts-root" role="group" aria-label="Llamadas de las piezas mas urgentes">
   {#if targets.some((t) => pointOf(t))}
     <svg class="leader-layer" aria-hidden="true">
       {#each targets as target, index (target.slotId)}
