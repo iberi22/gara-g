@@ -44,20 +44,18 @@ This document follows the IEEE 830 style to specify the functional requirements 
 - **Current Behavior:** Overrides default locale settings specifically for the Chilean market.
 - **Source:** `packages/app-pwa/src/lib/market.ts`
 
-**REQ-010:** The system shall format currency automatically to CLP when the Chile localization is active. [PLANNED]
-
 ### 2.6 Offline Usage
-**REQ-011:** The system shall provide core functionality locally on the user's device without a continuous internet connection.
+**REQ-010:** The system shall provide core functionality locally on the user's device without a continuous internet connection.
 - **Current Behavior:** Identifies if a path is allowed to be accessed entirely offline in guest mode.
 - **Source:** `packages/app-pwa/src/lib/appMode.ts`
 
-**REQ-012:** The system shall cache UI assets for instant loading regardless of network status. [PLANNED]
+**REQ-011:** The system shall cache UI assets for instant loading regardless of network status. [PLANNED]
 
 ### 2.7 Sync and Backup
-**REQ-013:** The system shall synchronize local modifications to cloud storage using end-to-end encryption.
+**REQ-012:** The system shall synchronize local modifications to cloud storage using end-to-end encryption.
 - **Current Behavior:** Encrypts outgoing backups via AES-256-GCM before transmission.
 - **Source:** `packages/app-pwa/src/lib/e2ee/crypto.ts`
 
-**REQ-014:** The system shall handle synchronization lifecycle and conflict resolution using Yjs.
-- **Current Behavior:** Implements the synchronization client that pushes local changes to the remote instance.
+**REQ-013:** The system shall handle synchronization lifecycle by exporting, merging, and importing local data dumps.
+- **Current Behavior:** Implements the synchronization client that uses `exportLocalData`, `importLocalData`, and `mergeLocalDumps` to manage backups.
 - **Source:** `packages/app-pwa/src/lib/e2ee/syncClient.ts`
