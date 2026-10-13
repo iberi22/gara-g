@@ -78,6 +78,8 @@ function val(name: string): string | number {
       }
 
       if (f.type === 'select') {
+        const stored = String(val(f.name) ?? '');
+        const covered = Boolean(f.options?.some((o) => String(o.value) === stored));
         return (
           <div class={`g-field ${f.fullWidth ? 'g-field-full' : ''}`} data-field={f.name}>
             <label for={`${formId}-${f.name}`} class="swal-kicker">
@@ -93,10 +95,18 @@ function val(name: string): string | number {
             >
               <option value="">— Seleccionar —</option>
               {f.options?.map((o) => (
-                <option value={o.value} selected={String(val(f.name)) === String(o.value)}>
+                <option value={o.value} selected={stored === String(o.value)}>
                   {o.label}
                 </option>
               ))}
+              {/* Valor guardado que las opciones actuales no ofrecen (p. ej. una clase de
+                  licencia del otro mercado): con required el formulario quedaría imposible de
+                  enviar. Se ofrece tal cual para poder conservarlo o cambiarlo. */}
+              {stored !== '' && !covered && (
+                <option value={stored} selected>
+                  {stored} — valor guardado
+                </option>
+              )}
             </select>
             {f.help && <small class="g-help">{f.help}</small>}
           </div>

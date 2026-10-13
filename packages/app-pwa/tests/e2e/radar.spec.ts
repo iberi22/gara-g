@@ -1,6 +1,11 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { useAdminSession } from './helpers/auth';
+import { isFleetOnly } from './helpers/features';
+
+// FLEET_ONLY: el radar V2V queda fuera de la entrega (su ruta responde 404 desde el
+// middleware). Las aserciones de que está oculto viven en fleet-only-scope.spec.ts.
+test.skip(isFleetOnly(), 'Radar V2V oculto en entrega flota-only (FLEET_ONLY)');
 
 /**
  * Radar V2V (/fleet/radar). Sin cuenta: es lo que ve quien usa el modo local.

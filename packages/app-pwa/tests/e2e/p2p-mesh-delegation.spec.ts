@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { PUBLIC_DEMO } from './helpers/features';
 
 test.describe('P2P Mesh Multi-Node Handshake, CRDT Convergence & Offline Operator Flow E2E', () => {
   test('should synchronize operational fields across P2P mesh while sanitizing financial records for machine operator node', async ({ browser }) => {
@@ -230,6 +231,9 @@ test.describe('P2P Mesh Multi-Node Handshake, CRDT Convergence & Offline Operato
 
     // 3. Switch context to offline mode
     await context.setOffline(true);
+    // `setOffline` cambia la red del navegador de forma asincrona: `navigator.onLine` no se
+    // actualiza en el mismo tick, y bajo carga (2 workers) la lectura temprana daba false.
+    await expect.poll(() => page.evaluate(() => navigator.onLine), { timeout: 10_000 }).toBe(false);
 
     // 4. Verify offline access and cache integrity
     const cacheStatus = await page.evaluate(async () => {
@@ -247,16 +251,21 @@ test.describe('P2P Mesh Multi-Node Handshake, CRDT Convergence & Offline Operato
     expect(cacheStatus.cachedShellFound).toBe(true);
   });
 
-  test('should gracefully redirect unauthenticated requests to Cloudflare SSR /fleet route to /login', async ({ page }) => {
+  test('unauthenticated /fleet sigue la política de PUBLIC_DEMO del entorno', async ({ page }) => {
     // Attempt navigation to protected Cloudflare SSR route without session cookie
     await page.goto('/fleet', { waitUntil: 'domcontentloaded' });
 
-    // Verify redirect to login route
+    if (PUBLIC_DEMO) {
+      // El modo demo del entorno sirve /fleet* sin sesión: no hay redirect a /login.
+      expect(page.url()).not.toContain('/login');
+      await expect(page.getByTestId('fleet-sidebar')).toBeVisible();
+      return;
+    }
+
+    // Apagado, el auth gate manda a /login con la tarjeta de acceso.
     expect(page.url()).toContain('/login');
     const title = await page.title();
     expect(title).toMatch(/Iniciar sesión|Login|GARA-G/i);
-
-    // Verify login card UI element is rendered
     const loginCard = page.locator('.login-card');
     await expect(loginCard).toBeVisible();
   });

@@ -14,6 +14,11 @@ import { existsSync } from 'node:fs';
 import { type Page, chromium, expect, test } from '@playwright/test';
 import { GUEST_COOKIE, GUEST_COOKIE_VALUE } from '../../src/lib/appMode';
 import { authCookieUrl, useAdminSession } from './helpers/auth';
+import { isFleetOnly } from './helpers/features';
+
+// FLEET_ONLY: el Mercado queda fuera de la entrega (sus rutas responden 404 desde el
+// middleware). Las aserciones de que están ocultas viven en fleet-only-scope.spec.ts.
+test.skip(isFleetOnly(), 'Mercado oculto en entrega flota-only (FLEET_ONLY)');
 
 const slow = expect.configure({ timeout: 30_000 });
 
@@ -102,6 +107,8 @@ test.describe('mercado sin cuenta', () => {
 
 test.describe('mercado sin sesion ni modo local', () => {
   test('el vendedor redirige al login', async ({ page }) => {
+    // Solo se ejecuta con FLEET_ONLY apagado (el resto del fichero se salta); con el
+    // interruptor encendido /fleet/mercado/vender responde 404 antes de llegar aquí.
     await page.goto('/fleet/mercado/vender');
     await expect(page).toHaveURL(/\/login/);
   });

@@ -149,7 +149,7 @@ jobs:
         run: bash scripts/check-public-tree.sh
 
   e2e:
-    name: E2E (chromium, offline + guest)
+    name: 'E2E (chromium: offline + guest + entrega flota-only)'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -194,12 +194,29 @@ jobs:
         env:
           BASE_URL: 'http://localhost:4321'
           CI: 'true'
+          # El mismo valor que arranca el dev server: los specs de auth-gate/smoke
+          # leen el modo real por esta variable (tests/e2e/helpers/features.ts).
+          PUBLIC_DEMO: 'true'
         run: >
           pnpm exec playwright test --project=chromium
           tests/e2e/offline-local-first.spec.ts
           tests/e2e/guest-mode.spec.ts
           tests/e2e/guest-garage.spec.ts
           tests/e2e/guest-demo-chile.spec.ts
+      # Proyecto `fleet`: la entrega flota-only en cada PR. FLEET_ONLY (por defecto
+      # encendido) oculta Mercado/radar/anunciantes/wallet/DePIN/V2V: sus páginas y
+      # APIs responden 404 y no quedan puntos de entrada. Junto al menú lateral, la
+      # política de PUBLIC_DEMO y el smoke de sesión. ~1-2 min con 1 worker medido en
+      # local. La suite COMPLETA no corre aquí: ~10 min en local con 2 workers, y CI
+      # usa 1 worker, así que supera el presupuesto de 10 min del job; se ejecuta a
+      # mano con `pnpm test:full`.
+      - name: Run Playwright (entrega flota-only, fleet)
+        working-directory: packages/app-pwa
+        env:
+          BASE_URL: 'http://localhost:4321'
+          CI: 'true'
+          PUBLIC_DEMO: 'true'
+        run: pnpm exec playwright test --project=fleet
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v7

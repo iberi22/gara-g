@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { useAdminSession } from './helpers/auth';
+import { PUBLIC_DEMO } from './helpers/features';
 
 /**
  * test/e2e/smoke.spec.ts — E2E Smoke Test Suite for GARA-G Core Journey
@@ -14,10 +15,14 @@ const DEFAULT_INSTANCE_ID = 'gara-g-default-instance';
 
 test.describe('E2E Smoke Workflow: Login -> Vehicle -> Document -> Logout', () => {
   test('1. Unauthenticated access to protected fleet routes is redirected to login (fail-closed)', async ({ page }) => {
-    // Attempt accessing protected /fleet without session cookie
+    // El modo demo del entorno (PUBLIC_DEMO) abre /fleet* sin sesión a propósito: en ese
+    // despliegue no hay redirect. Apagado, el middleware falla cerrado y manda a /login.
     const response = await page.goto('/fleet');
-
-    // Auth gate / middleware must fail closed and redirect to /login
+    if (PUBLIC_DEMO) {
+      expect(page.url()).not.toContain('/login');
+      expect(response?.status()).toBe(200);
+      return;
+    }
     expect(page.url()).toContain('/login');
     if (response) {
       expect([200, 302, 303, 307, 308]).toContain(response.status());
@@ -71,7 +76,7 @@ test.describe('E2E Smoke Workflow: Login -> Vehicle -> Document -> Logout', () =
     expect(page.url()).toContain(`instanceId=${DEFAULT_INSTANCE_ID}`);
   });
 
-  test('5. Logout session clears cookie and redirects to login endpoint', async ({ page, context, baseURL }) => {
+  test('5. Logout clears the session cookie and /fleet reacts según PUBLIC_DEMO', async ({ page, context, baseURL }) => {
     await useAdminSession(context);
 
     // /api/auth/logout SOLO exporta POST (ver src/pages/api/auth/logout.ts:16):
@@ -87,8 +92,16 @@ test.describe('E2E Smoke Workflow: Login -> Vehicle -> Document -> Logout', () =
     expect(logout.status()).toBe(200);
     expect(logout.headers()['set-cookie'] || '').toMatch(/session=;/);
 
-    // Attempt returning to /fleet and confirm redirect to /login
+    const sessionCookie = (await context.cookies()).find((c) => c.name === 'session');
+    expect(sessionCookie, 'la cookie de sesión se borró con el logout').toBeUndefined();
+
     await page.goto('/fleet');
-    await expect(page).toHaveURL(/\/login/);
+    if (PUBLIC_DEMO) {
+      // Con el modo demo del entorno /fleet* sigue siendo público: no hay redirect,
+      // pero la sesión ya se invalidó (la cookie se comprueba arriba).
+      await expect(page).not.toHaveURL(/\/login/);
+    } else {
+      await expect(page).toHaveURL(/\/login/);
+    }
   });
 });

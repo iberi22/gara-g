@@ -3,6 +3,7 @@ import { mkdirSync, rmdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ADMIN_SESSION_TOKEN, DEV_ADMIN_USER_ID } from './auth';
+import { MARKET } from '../../../src/lib/market';
 
 /**
  * helpers/seed.ts — Flota demo en el tenant de la SESION.
@@ -106,12 +107,16 @@ async function seedDemoFleetLocked(
   test.setTimeout(300_000);
 
   // Estado limpio: el seed es la fuente de verdad de las cuentas del dashboard.
+  // El endpoint borra por query (?id=), no por path (/entity/:id): con el path la limpieza
+  // devolvía 404 y la semilla se acumulaba (3 flotas más por corrida sobre un server reusado).
   for (const entity of ['fleet', 'vehicle', 'driver', 'maintenance', 'fuelLog', 'document', 'geofence', 'alert']) {
-    await mapPool(await list(entity), (row) => request.delete(`/api/fleet/${entity}/${row.id}`, { headers }));
+    await mapPool(await list(entity), (row) => request.delete(`/api/fleet/${entity}?id=${row.id}`, { headers }));
   }
 
+  // Nombres y regiones del mercado activo: la demo no puede inventar un pais
+  // distinto al del despliegue (src/lib/market.ts).
   const fleets = await mapPool(
-    [['Bogotá Norte', 'Bogotá D.C.'], ['Medellín Sur', 'Antioquia'], ['Cali Logística', 'Valle del Cauca']],
+    MARKET.demoFleets.map((f) => [f.name, f.region]),
     ([name, region]) => create('fleet', { name, organizationId: 'org-demo', region, tags: ['demo'], managerId: 'mgr-1' }),
   );
 
@@ -138,17 +143,21 @@ async function seedDemoFleetLocked(
   // Del resto, ninguna fila depende de otra: se escriben todas juntas.
   const writes: Array<() => Promise<unknown>> = [];
 
+  // Clases de licencia del mercado activo: la semilla no puede escribir categorias que el
+  // desplegable no ofrezca (la edicion del conductor las rechazaba: campo requerido sin opcion).
+  const licenseAt = (i: number) => MARKET.licenseClasses[i % MARKET.licenseClasses.length].value;
+  const truck = MARKET.truckLicenseClass;
   const drivers: Array<[string, string, string, string, number]> = [
-    ['Carlos Méndez', '79.456.123', 'C1', 'active', 0],
-    ['Lucía Ramírez', '52.847.612', 'B1', 'active', 2],
-    ['Andrés Quintero', '71.245.891', 'C2', 'suspended', 3],
-    ['María López', '43.621.547', 'C1', 'active', 5],
-    ['Pedro Salazar', '16.789.234', 'C3', 'active', 6],
+    ['Carlos Méndez', '79.456.123', truck, 'active', 0],
+    ['Lucía Ramírez', '52.847.612', licenseAt(1), 'active', 2],
+    ['Andrés Quintero', '71.245.891', truck, 'suspended', 3],
+    ['María López', '43.621.547', licenseAt(2), 'active', 5],
+    ['Pedro Salazar', '16.789.234', licenseAt(3), 'active', 6],
   ];
   for (const [name, cedula, licenseCategory, status, v] of drivers) {
     writes.push(() =>
       create('driver', {
-        name, cedula, licenseCategory, licenseExpiry: '2027-08-15', phone: '+57 310 4567890',
+        name, cedula, licenseCategory, licenseExpiry: '2027-08-15', phone: `${MARKET.phonePrefix} 310 4567890`,
         status, fleetId: vehicles[v].fleetId, vehicleId: vehicles[v].id,
       }),
     );
@@ -175,11 +184,11 @@ async function seedDemoFleetLocked(
       create('fuelLog', {
       vehicleId: veh.id, driverId: drivers[i % drivers.length][1], date: iso(-i * 2),
       km: Math.floor(Number(veh.mileage ?? 0) * 0.6) + i * 100, gallons, cost: gallons * 14500,
-      station: ['Terpel', 'Primax', 'Mobil'][i % 3], kmPerGallon: 25 + (i % 30),
+      station: MARKET.demoFuelStations[i % MARKET.demoFuelStations.length], kmPerGallon: 25 + (i % 30),
       }),
     );
   }
-  const kinds = ['SOAT', 'Tecnomecánica', 'Tarjeta de propiedad', 'Póliza todo riesgo'];
+  const kinds = [...MARKET.documentKinds];
   for (let i = 0; i < 8; i++) {
     const veh = vehicles[i % vehicles.length];
     writes.push(() =>
@@ -190,29 +199,32 @@ async function seedDemoFleetLocked(
       }),
     );
   }
-  const fences: Array<[string, string, string, number]> = [
-    ['Centro de Distribución Bogotá', '4.7110,-74.0721 4.6510,-74.0721 4.6510,-74.1421 4.7110,-74.1421', 'depot', 0],
-    ['Cliente Norte - Centro Comercial', '4.7350,-74.0500 4.7250,-74.0500 4.7250,-74.0400 4.7350,-74.0400', 'client', 0],
-    ['Taller Autorizado Medellín', '6.2476,-75.5658 6.2376,-75.5658 6.2376,-75.5758 6.2476,-75.5758', 'service', 1],
-    ['Puerto de Buenaventura', '3.8801,-77.0311 3.8601,-77.0311 3.8601,-77.0511 3.8801,-77.0511', 'port', 2],
-  ];
-  for (const [name, polygon, type, f] of fences) {
+  // Geocercas de la demo del mercado activo (nombre, poligono y alertas).
+  for (let i = 0; i < MARKET.demoGeofences.length; i++) {
+    const g = MARKET.demoGeofences[i];
     writes.push(() =>
-      create('geofence', { name, polygon, type, fleetId: fleets[f].id, alertOnEnter: true, alertOnExit: true }),
+      create('geofence', {
+        name: g.name,
+        polygon: g.polygon,
+        type: g.type,
+        fleetId: fleets[i % fleets.length].id,
+        alertOnEnter: g.alertOnEnter,
+        alertOnExit: g.alertOnExit,
+      }),
     );
   }
   const alerts: Array<[string, string, string]> = [
     ['speed', 'high', 'Exceso de velocidad: 130 km/h en zona 80'],
     ['geofence', 'medium', 'Salida no autorizada de geocerca Centro de Distribución'],
     ['maintenance', 'low', 'Mantenimiento programado vence en 5 días'],
-    ['document', 'high', 'SOAT próximo a vencer - ABC-001'],
+    ['document', 'high', `${MARKET.documentKinds[0]} próximo a vencer - ABC-001`],
     ['fuel', 'low', 'Nivel de combustible bajo (15%)'],
     ['engine', 'critical', 'Código DTC P0420 - Catalizador ineficiente'],
     ['driver', 'medium', 'Conductor sin licencia vigente detectado'],
     ['speed', 'medium', 'Velocidad sostenida sobre límite por 5 min'],
     ['geofence', 'low', 'Entrada a zona restringida fuera de horario'],
     ['maintenance', 'medium', 'Frenos - Pastillas desgastadas (>80%)'],
-    ['document', 'low', 'Tecnomecánica vence en 30 días - DEF-102'],
+    ['document', 'low', `${MARKET.documentKinds[1]} vence en 30 días - DEF-102`],
     ['engine', 'high', 'Temperatura refrigerante elevada (105°C)'],
   ];
   for (let i = 0; i < alerts.length; i++) {

@@ -24,6 +24,17 @@ const baseURL = process.env.BASE_URL || (isCI ? 'https://gara-g.pages.dev' : 'ht
 
 const SEEDED_SPECS = /fleet-(dashboard|tracking-analytics)\.spec\.ts$/;
 
+// Alcance que CI verifica en cada PR: la entrega flota-only (FLEET_ONLY + PUBLIC_DEMO + menú y
+// smoke de sesión). El resto de la suite sigue disponible con `pnpm test:full` (playwright test),
+// pero no corre en CI: medido en local, la suite completa tarda ~10 min con 2 workers en dev, y
+// CI usa 1 worker (más lento), por encima del presupuesto de 10 min del job (ver ci.yml).
+const FLEET_SCOPE_SPECS = [
+  /fleet-only-scope\.spec\.ts$/,
+  /navigation\.spec\.ts$/,
+  /auth-gate\.spec\.ts$/,
+  /smoke\.spec\.ts$/,
+];
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
@@ -59,7 +70,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: SEEDED_SPECS,
+      testIgnore: [SEEDED_SPECS, ...FLEET_SCOPE_SPECS],
       dependencies: ['chromium-seeded'],
       use: { ...devices['Desktop Chrome'], launchOptions: executablePath ? { executablePath } : {} },
     },
@@ -70,6 +81,14 @@ export default defineConfig({
       // (que borra y recrea) pisa a los demas. Van primero y solos: el proyecto principal depende de este.
       name: 'chromium-seeded',
       testMatch: SEEDED_SPECS,
+      use: { ...devices['Desktop Chrome'], launchOptions: executablePath ? { executablePath } : {} },
+    },
+    {
+      // Entrega flota-only: rutas ocultas 404 y sin puntos de entrada, menú lateral, política de
+      // PUBLIC_DEMO y smoke de sesión. Es lo que corre CI en cada PR (`--project=fleet`).
+      name: 'fleet',
+      testMatch: FLEET_SCOPE_SPECS,
+      dependencies: ['chromium-seeded'],
       use: { ...devices['Desktop Chrome'], launchOptions: executablePath ? { executablePath } : {} },
     },
   ],

@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { MARKET } from '../../src/lib/market';
 
 test.describe('Driver Table CRUD Operations', () => {
   test.beforeEach(async ({ page }) => {
@@ -24,9 +25,9 @@ test.describe('Driver Table CRUD Operations', () => {
     // Fill out driver creation form
     await page.locator('[data-testid="input-name"]').fill('Alejandro Morales');
     await page.locator('[data-testid="input-cedula"]').fill('1020304050');
-    await page.locator('[data-testid="input-licenseCategory"]').selectOption('C2');
+    await page.locator('[data-testid="input-licenseCategory"]').selectOption(MARKET.truckLicenseClass);
     await page.locator('[data-testid="input-licenseExpiry"]').fill('2029-06-30');
-    await page.locator('[data-testid="input-phone"]').fill('+573109876543');
+    await page.locator('[data-testid="input-phone"]').fill(`${MARKET.phonePrefix} 3109876543`);
     await page.locator('[data-testid="input-status"]').selectOption('active');
     await page.locator('[data-testid="input-fleetId"]').fill('fleet-bogota');
     await page.locator('[data-testid="input-vehicleId"]').fill('veh-202');
