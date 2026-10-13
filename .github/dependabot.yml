@@ -28,6 +28,15 @@ updates:
       interval: "monthly"
     # One grouped PR per ecosystem instead of one per bump.
     open-pull-requests-limit: 2
+    # DEFERRED 2026-10-13 (chore/deps-2026-10-13): typescript major (6/7)
+    # held at ^5.9.2 because `astro check` (@astrojs/check 0.9.10) refuses
+    # TypeScript 7 ("does not currently support TypeScript 7.0") and
+    # svelte2tsx (via @astrojs/svelte 9) only allows TS ^4 || ^5 || ^6.
+    # Revisit when @astrojs/check supports TS 7 (ts-content-mapper stable).
+    # Patch/minor 5.x updates still flow through the group below.
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     labels:
       - "dependencies"
     groups:
