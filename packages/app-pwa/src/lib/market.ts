@@ -115,8 +115,8 @@ export interface MarketConfig {
 /**
  * Chile — mercado por defecto de esta entrega (flota de camiones tolva, mineria y
  * construccion, Calama/Antofagasta). CLP no usa decimales. Las licencias son las clases
- * profesionales del reglamento chileno: A4 transporte de personas, **A5 camiones simples y
- * articulados** (es la que aplica a una tolva), y las no profesionales B a F.
+ * profesionales de la Ley 18.290 art. 12 (Ley 19.495): A1-A3 transporte de personas, A4 carga
+ * simple de mas de 3.500 kg y **A5 toda carga, simple o articulada** (cubre la tolva); B a F no profesionales.
  */
 const CL: MarketConfig = {
   id: 'CL',
@@ -142,16 +142,16 @@ const CL: MarketConfig = {
   driverIdHelp: 'RUT con digito verificador (modulo 11).',
 
   licenseClasses: [
-    { value: 'A1', label: 'A1 — Motocicletas hasta 200 cc' },
-    { value: 'A2', label: 'A2 — Motocicletas sobre 200 cc' },
-    { value: 'A3', label: 'A3 — Triciclos y motos con carro o remolque' },
-    { value: 'A4', label: 'A4 — Automóviles, camionetas y ambulancias' },
-    { value: 'A5', label: 'A5 — Camiones simples y articulados (tolvas)' },
-    { value: 'B', label: 'B — Automóviles y camionetas particulares' },
-    { value: 'C', label: 'C — Automóviles y camionetas de carga' },
-    { value: 'D', label: 'D — Buses' },
-    { value: 'E', label: 'E — Buses articulados' },
-    { value: 'F', label: 'F — Tractores y maquinaria automotriz' },
+    { value: 'A1', label: 'A1 — Taxis' },
+    { value: 'A2', label: 'A2 — Taxis, ambulancias y transporte de personas (10 a 17 asientos)' },
+    { value: 'A3', label: 'A3 — Taxis, buses y transporte de personas sin límite de asientos' },
+    { value: 'A4', label: 'A4 — Vehículos de carga simple de más de 3.500 kg' },
+    { value: 'A5', label: 'A5 — Todo vehículo de carga, simple o articulado (tracto-camión, tolva)' },
+    { value: 'B', label: 'B — Particulares: hasta 9 asientos o carga hasta 3.500 kg' },
+    { value: 'C', label: 'C — Motocicletas y vehículos motorizados de dos o tres ruedas' },
+    { value: 'D', label: 'D — Maquinaria automotriz (tractores, grúas, retroexcavadoras)' },
+    { value: 'E', label: 'E — Vehículos de tracción animal' },
+    { value: 'F', label: 'F — Vehículos de Carabineros, FF.AA., PDI y Bomberos' },
   ],
   truckLicenseClass: 'A5',
 
