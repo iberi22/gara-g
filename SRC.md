@@ -1,19 +1,19 @@
 # GARA-G Source Map
 
-**Purpose:** A source map to help engineers and agents locate code in minutes. Deploy targets must be stated correctly.
+**Purpose:** A source map to help engineers and agents locate code in minutes.
 *Rule:* Cloud-only code is not in the public tree.
 
 ## Packages and Ownership
-- `packages/app-pwa`: PWA Astro 7 + Svelte 5 (la app)
-- `packages/mobile-app`: app Flutter (piloto)
-- `packages/mobile-app-native`: núcleo nativo (Rust)
-- `packages/shared`: tipos y design tokens compartidos
+- `packages/app-pwa`: Astro 7 + Svelte 5 PWA (the app)
+- `packages/mobile-app`: Flutter pilot app
+- `packages/mobile-app-native`: Rust native core
+- `packages/shared`: Shared types and design tokens
 
 ## Key Entry Points
 - **Pages:** `packages/app-pwa/src/pages/`
 - **API Routes:** `packages/app-pwa/src/pages/api/`
 - **Garage Domain:** `packages/app-pwa/src/garage/`
-- **E2EE:** `packages/app-pwa/src/mesh/`
+- **E2EE:** `packages/app-pwa/src/lib/e2ee/`
 
 ## Test Layout
 - **E2E Tests:** `packages/app-pwa/tests/e2e/`
