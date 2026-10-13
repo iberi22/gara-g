@@ -31,8 +31,8 @@ export interface MarketplaceOffer {
 }
 
 export const DEFAULT_OPT_IN_PREFERENCES: OptInPreferences = {
-  enabled: true,
-  categories: ['telemetry', 'traffic_density', 'road_hazards', 'new_listings', 'deals'],
+  enabled: false,
+  categories: [],
   minPayoutGara: 10.0,
   maxDistanceKm: 50.0,
   schedule: {

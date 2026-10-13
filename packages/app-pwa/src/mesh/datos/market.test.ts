@@ -23,6 +23,7 @@ async function owner(m: Market, region = BOGOTA) {
   await m.start();
   await m.setRegion(region);
   m.setVehicles([hilux()]);
+  await m.setPrefs({ enabled: true, categories: [...DEFAULT_MARKET_PREFS.categories, ...['offer:lubricentro', 'offer:repuestos', 'offer:taller', 'offer:llanteria', 'offer:revision', 'offer:seguro']] });
 }
 
 describe('mercado de punta a punta sobre LocalMeshHub', () => {
@@ -226,7 +227,7 @@ describe('mercado de punta a punta sobre LocalMeshHub', () => {
 
 describe('demanda en el mercado', () => {
   const consent = (m: Market) =>
-    m.setPrefs({ categories: [...DEFAULT_MARKET_PREFS.categories, demandCategoryKey('lubricentro'), demandCategoryKey('llanteria')] });
+    m.setPrefs({ enabled: true, categories: [...DEFAULT_MARKET_PREFS.categories, demandCategoryKey('lubricentro'), demandCategoryKey('llanteria')] });
 
   /** Fabrica de puertos desechables que registra cada uno y si se cerro. */
   function ephemeralFactory(hub: LocalMeshHub) {

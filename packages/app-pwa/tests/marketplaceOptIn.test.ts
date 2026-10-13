@@ -17,6 +17,8 @@ describe('Marketplace Opt-In & KV Adapter Unit Tests', () => {
     const adapter = new MarketplaceKVAdapter();
     const prefs = await adapter.getPreferences('user_1');
     expect(prefs).toEqual(DEFAULT_OPT_IN_PREFERENCES);
+    expect(prefs.enabled).toBe(false);
+    expect(prefs.categories).toEqual([]);
 
     const updated = await adapter.savePreferences('user_1', {
       minPayoutGara: 25.0,
@@ -64,16 +66,24 @@ describe('Marketplace Opt-In & KV Adapter Unit Tests', () => {
       maxDistanceKm: 20.0,
     };
 
-    expect(isOfferMatchingOptIn(offer, prefs)).toBe(true);
+    expect(isOfferMatchingOptIn(offer, prefs)).toBe(false);
+
+    const enabledPrefs: OptInPreferences = {
+      ...prefs,
+      enabled: true,
+      categories: ['telemetry']
+    };
+
+    expect(isOfferMatchingOptIn(offer, enabledPrefs)).toBe(true);
 
     // Below min payout
-    expect(isOfferMatchingOptIn({ ...offer, payoutGara: 5.0 }, prefs)).toBe(false);
+    expect(isOfferMatchingOptIn({ ...offer, payoutGara: 5.0 }, enabledPrefs)).toBe(false);
 
     // Category mismatch
-    expect(isOfferMatchingOptIn({ ...offer, category: 'unknown' }, prefs)).toBe(false);
+    expect(isOfferMatchingOptIn({ ...offer, category: 'unknown' }, enabledPrefs)).toBe(false);
 
     // Exceeds max distance
-    expect(isOfferMatchingOptIn({ ...offer, distanceKm: 30.0 }, prefs)).toBe(false);
+    expect(isOfferMatchingOptIn({ ...offer, distanceKm: 30.0 }, enabledPrefs)).toBe(false);
   });
 });
 

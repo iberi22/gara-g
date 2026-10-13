@@ -17,6 +17,7 @@ import type { Need, OwnerVehicle } from './vehicles';
 
 const consentAll = {
   ...DEFAULT_MARKET_PREFS,
+  enabled: true,
   categories: [...DEFAULT_MARKET_PREFS.categories, ...['taller', 'repuestos', 'aseguradora', 'lubricentro', 'llanteria'].map((c) => demandCategoryKey(c as never))],
 };
 const ctx = (over: Partial<DemandContext> = {}): DemandContext => ({
