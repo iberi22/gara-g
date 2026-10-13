@@ -12,6 +12,9 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { geofenceTypeLabel } from '../../lib/alertLabels';
   import { escapeHtml } from '../../lib/html.js';
+  // Centro del mapa, punto de prueba y poligono de ejemplo: del mercado activo (Antofagasta
+  // en Chile). Antes eran constantes de Bogota en las tres cosas.
+  import { demoPolygon, MARKET } from '../../lib/market.js';
   import '../../styles/leaflet-taller.css';
   import {
     pointInPolygon,
@@ -48,10 +51,16 @@
   let leafletLib: any = $state(null);
   let polygonLayersMap: Map<string, any> = new Map();
 
+  const defaultPolygon = demoPolygon(MARKET);
+  /** Baricentro del poligono de ejemplo: el punto de prueba arranca DENTRO del poligono. */
+  const defaultPoints = defaultPolygon.split(' ').map((p) => p.split(',').map(Number));
+  const defaultTestLat = defaultPoints.reduce((a, p) => a + p[0] / defaultPoints.length, 0);
+  const defaultTestLng = defaultPoints.reduce((a, p) => a + p[1] / defaultPoints.length, 0);
+
   // Form state using Svelte 5 runes
   let formName = $state('');
   let formType = $state<GeofenceType>('workzone');
-  let formPolygonStr = $state('4.735,-74.05 4.725,-74.05 4.725,-74.04 4.735,-74.04');
+  let formPolygonStr = $state(defaultPolygon);
   let formAlertOnEnter = $state(true);
   let formAlertOnExit = $state(true);
   let editingId = $state<string | null>(null);
@@ -63,8 +72,8 @@
   let listHeading: HTMLHeadingElement | null = $state(null);
 
   // Test point verification state
-  let testLat = $state(4.730);
-  let testLng = $state(-74.045);
+  let testLat = $state(defaultTestLat);
+  let testLng = $state(defaultTestLng);
   let testResult = $state<string | null>(null);
 
   // Clase CSS por tipo (src/styles/leaflet-taller.css): el color sale de un token --swal-*,
@@ -97,8 +106,8 @@
 
       if (mapElement && !mapInstance) {
         mapInstance = L.map(mapElement, {
-          center: [4.57, -74.29],
-          zoom: 6,
+          center: [MARKET.mapCenter.lat, MARKET.mapCenter.lng],
+          zoom: MARKET.mapCenter.zoom,
           scrollWheelZoom: true,
         });
 
@@ -231,7 +240,7 @@
     editingId = null;
     formName = '';
     formType = 'workzone';
-    formPolygonStr = '4.735,-74.05 4.725,-74.05 4.725,-74.04 4.735,-74.04';
+    formPolygonStr = defaultPolygon;
     formAlertOnEnter = true;
     formAlertOnExit = true;
     formError = '';
@@ -331,7 +340,7 @@
             id="geo-polygon"
             bind:value={formPolygonStr}
             rows={3}
-            placeholder="4.735,-74.05 4.725,-74.05 4.725,-74.04 4.735,-74.04"
+            placeholder={defaultPolygon}
             required
             class="w-full px-2 py-1 text-xs font-mono border rounded bg-background"
           ></textarea>

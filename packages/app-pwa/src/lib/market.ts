@@ -44,6 +44,18 @@ export interface MarketDemoGeofence {
   alertOnExit: boolean;
 }
 
+/**
+ * Centro y zoom por defecto de los mapas cuando no hay datos que encuadrar (la flota chilena
+ * todavia no emite telemetria). Antes eran constantes de Bogota repartidas por LiveMap, el
+ * mapa y el editor de geocercas y el simulador OBD2.
+ */
+export interface MarketMapCenter {
+  lat: number;
+  lng: number;
+  /** Zoom de vista de region (el que usaba el mapa de geocercas de Bogota). */
+  zoom: number;
+}
+
 export interface MarketConfig {
   id: MarketId;
   /** Nombre del mercado, para mensajes y documentacion. */
@@ -110,6 +122,17 @@ export interface MarketConfig {
   phonePrefix: string;
   /** Puntos de paso de la demo del copiloto AUI (components/AuiInterface.svelte). */
   demoCheckpoints: readonly string[];
+
+  /** Centro y zoom de los mapas cuando no hay nada que encuadrar. */
+  mapCenter: MarketMapCenter;
+  /**
+   * Terminos que cambian de nombre entre mercados en los textos que se escriben UNA sola vez y
+   * no se pueden reescribir campo a campo: prosa de la portada, nombres de modelo del
+   * fabricante ("T800 Volqueta"), repuestos y etiquetas del catalogo. La clave es la forma
+   * escrita en el dato, del plural largo al singular corto, para no dejar restos. Ver
+   * `localizeText`.
+   */
+  vocabulary: Readonly<Record<string, string>>;
 }
 
 /**
@@ -215,6 +238,15 @@ const CL: MarketConfig = {
   ],
   phonePrefix: '+56 9',
   demoCheckpoints: ['Faena Mina Sur', 'Patio La Negra', 'Ruta 25 km 45', 'Base Logística Calama'],
+  // Antofagasta, la base de la flota demo. El mismo punto de `demoGeofences[0]`.
+  mapCenter: { lat: -23.65, lng: -70.4, zoom: 6 },
+  // En Chile el camion de volco es "tolva" (o "camion tolva"), no "volqueta".
+  vocabulary: {
+    Volquetas: 'Tolvas',
+    volquetas: 'tolvas',
+    Volqueta: 'Tolva',
+    volqueta: 'tolva',
+  },
 };
 
 /**
@@ -316,6 +348,10 @@ const CO: MarketConfig = {
   ],
   phonePrefix: '+57',
   demoCheckpoints: ['Km 45 Vía al Mar', 'Base Logística Norte', 'Taller Central'],
+  // Bogota, el centro que ya usaban los mapas de la app en Colombia.
+  mapCenter: { lat: 4.6097, lng: -74.0817, zoom: 6 },
+  // Colombia es el mercado donde estos terminos nacieron: nada que traducir.
+  vocabulary: {},
 };
 
 export const MARKETS: Readonly<Record<MarketId, MarketConfig>> = { CL, CO };
@@ -353,6 +389,29 @@ export function marketFor(id?: unknown): MarketConfig {
 
 /** Mercado activo de la app. Todo lo que se muestra sale de aqui. */
 export const MARKET: MarketConfig = marketFor();
+
+/**
+ * Ejemplo de poligono de geocerca del mercado: el de su primera geocerca demo. Es el que usan
+ * la ayuda del formulario y el editor para no proponer coordenadas de otro pais.
+ */
+export function demoPolygon(market: MarketConfig = MARKET): string {
+  return market.demoGeofences[0]?.polygon ?? '';
+}
+
+/**
+ * Reemplaza el vocabulario del mercado en un texto escrito una sola vez (prosa de la portada,
+ * nombres de modelo del fabricante, repuestos). Las claves de `vocabulary` van del plural largo
+ * al singular corto: "Volquetas" se sustituye antes que "Volqueta" y no queda ningun resto.
+ * Un mercado sin vocabulario (Colombia) devuelve el texto tal cual: no se inventa nada.
+ */
+export function localizeText(text: string, market: MarketConfig = MARKET): string {
+  let out = text;
+  for (const [from, to] of Object.entries(market.vocabulary)) {
+    if (from === to || from === '') continue;
+    out = out.split(from).join(to);
+  }
+  return out;
+}
 
 // ── Formateadores ─────────────────────────────────────────────────────────────
 // Todos reciben el mercado como ultimo parametro (por defecto el activo) para que los

@@ -8,7 +8,7 @@
  */
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { FLEET_ONLY_HIDDEN_LANDING_FEATURES, isFleetOnly } from '../lib/features';
-import { MARKET } from '../lib/market';
+import { MARKET, localizeText } from '../lib/market';
 
 export const prerender = false;
 
@@ -58,7 +58,7 @@ const allGroups: Group[] = [
     id: 'flota',
     tag: '02 · Camiones y maquinaria',
     title: 'Para flotas y maquinaria de obra',
-    intro: 'Camiones, volquetas y maquinaria amarilla, con horómetro cuando el kilometraje no sirve.',
+    intro: localizeText('Camiones, volquetas y maquinaria amarilla, con horómetro cuando el kilometraje no sirve.', MARKET),
     items: [
       {
         id: 'flotas',
@@ -102,7 +102,7 @@ const allGroups: Group[] = [
     id: 'todos',
     tag: '03 · Para todos',
     title: 'Lo que viene con la app',
-    intro: 'Sirve igual para una moto que para treinta volquetas.',
+    intro: localizeText('Sirve igual para una moto que para treinta volquetas.', MARKET),
     items: [
       {
         id: 'interfaces',
@@ -166,7 +166,10 @@ const allFaqs: Array<{ q: string; a: string; mercado?: boolean }> = [
   },
   {
     q: '¿Funciona sin internet?',
-    a: 'Todavía no. Necesita conexión para abrir las páginas. Lo que sí hace la app instalada es guardar en el equipo sus archivos estáticos (estilos, scripts, íconos) para cargar más rápido.',
+    // #10 entrego la app shell: lo que ya visitaste abre sin conexion y los datos locales
+    // siguen ahi. La FAQ decia "Todavia no", que ya era falso (y lo medido en la QA-2 lo
+    // desmiente: 8 rutas recargan desde el Service Worker con el aviso "Sin conexion").
+    a: 'Sí, para lo que ya visitaste: la app instalada guarda sus páginas y tus datos en el equipo, así que puedes abrirlas y seguir trabajando sin conexión, y lo que registres se sincroniza cuando vuelvas a tener internet. La primera visita a cada página y la generación con IA sí necesitan conexión.',
   },
 ];
 

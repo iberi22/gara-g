@@ -10,17 +10,40 @@ import {
   VEHICLE_CATALOG,
   getAllMakes,
   getModelsForMake,
+  vehicleTypeLabel,
   type VehicleModel,
 } from '../../lib/vehicleCatalog.js';
-import { MARKET, documentKindLabel, formatMoney, formatNumber } from '../../lib/market.js';
+import {
+  MARKET,
+  documentKindLabel,
+  formatMoney,
+  formatNumber,
+  localizeText,
+} from '../../lib/market.js';
 
 // Los nombres de los documentos obligatorios salen del mercado: en Chile el campo guardado
 // como 'SOAT' se muestra "SOAP" y 'Tecnomecánica' como "Revisión Técnica (PRT)".
 const SOAP_LABEL = documentKindLabel('SOAT', MARKET);
 const RT_LABEL = documentKindLabel('Tecnomecánica', MARKET);
 
-// Serializar para uso en cliente (script de abajo)
-const catalogJson = JSON.stringify(VEHICLE_CATALOG);
+// Serializar para uso en cliente (script de abajo).
+//
+// Los NOMBRES DE MODELO y de repuesto salen en el vocabulario del mercado (en Chile "T800
+// Volqueta" se lee "T800 Tolva"): son textos de fabricante escritos una sola vez, no un campo
+// que se pueda reescribir en la plantilla. La calculadora de abajo trabaja sobre esta misma
+// copia, asi que sus opciones y sus busquedas internas siguen coincidiendo.
+const catalogView = VEHICLE_CATALOG.map((make) => ({
+  ...make,
+  models: make.models.map((model) => ({
+    ...model,
+    model: localizeText(model.model, MARKET),
+    commonParts: model.commonParts.map((part) => ({
+      ...part,
+      name: localizeText(part.name, MARKET),
+    })),
+  })),
+}));
+const catalogJson = JSON.stringify(catalogView);
 
 const allMakes = getAllMakes();
 const totalModels = VEHICLE_CATALOG.reduce((acc, m) => acc + m.models.length, 0);
@@ -79,12 +102,12 @@ const totalRepuestos = VEHICLE_CATALOG.reduce(
             <span class="make-count">{make.models.length} modelos</span>
           </header>
           {make.models.map((model) => (
-            <article class="model-card swal-card-frame" data-model={`${make.name} ${model.model}`}>
+            <article class="model-card swal-card-frame" data-model={`${make.name} ${localizeText(model.model, MARKET)}`}>
               <div class="swal-card-inner">
               <header class="model-header">
                 <div class="model-title-row">
-                  <h4 class="model-name">{model.model}</h4>
-                  <span class="model-type"><span class="swal-tick"></span>{model.type}</span>
+                  <h4 class="model-name">{localizeText(model.model, MARKET)}</h4>
+                  <span class="model-type"><span class="swal-tick"></span>{vehicleTypeLabel(model.type, MARKET)}</span>
                 </div>
                 <div class="model-specs">
                   <span><strong>{model.yearsAvailable.join(', ')}</strong> fab.</span>
@@ -135,7 +158,7 @@ const totalRepuestos = VEHICLE_CATALOG.reduce(
                     <tbody>
                       {model.commonParts.map((part) => (
                         <tr>
-                          <td>{part.name}</td>
+                          <td>{localizeText(part.name, MARKET)}</td>
                           <td><span class="part-cat">{part.category}</span></td>
                           <td>{formatNumber(part.lifeKm, MARKET)} km</td>
                           <td>{formatMoney(part.avgCostCOP, MARKET)}</td>
@@ -167,7 +190,7 @@ const totalRepuestos = VEHICLE_CATALOG.reduce(
           <label class="form-label">
             <span>Modelo</span>
             <select id="calc-model" data-testid="calc-model" class="form-select">
-              {getModelsForMake(allMakes[0]).map((md) => <option value={md}>{md}</option>)}
+              {getModelsForMake(allMakes[0]).map((md) => <option value={localizeText(md, MARKET)}>{localizeText(md, MARKET)}</option>)}
             </select>
           </label>
           <label class="form-label">

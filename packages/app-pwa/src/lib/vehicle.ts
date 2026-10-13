@@ -13,6 +13,7 @@
 // (delegado a `domain.ts` → MemoryAdapter).
 
 import { isMachineryType, normalizeVehicleType } from './vehicleCatalog';
+import { localizeText } from './market.js';
 import {
   createEntity,
   listEntities,
@@ -177,7 +178,11 @@ export function validateVehicleFields(
 
   // ── type (opcional, pero si viene debe ser del catalogo) ────────────────────
   if (!blank(v.type) && normalizeVehicleType(String(v.type)) === undefined) {
-    errors.push('type desconocido (ver tipos del catalogo: moto, sedan, camion, volqueta, excavadora...)');
+    errors.push(
+      localizeText(
+        'type desconocido (ver tipos del catalogo: moto, sedan, camion, volqueta, excavadora...)',
+      ),
+    );
   }
   // La maquinaria amarilla no tiene VIN de 17 ni placa de carro: serie y placa son libres
   // y opcionales (mucha maquinaria de obra no transita por via).

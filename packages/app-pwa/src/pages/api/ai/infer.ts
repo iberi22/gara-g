@@ -13,6 +13,7 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import type { AuiSpec } from '../../../lib/aui';
+import { TIER_LABEL } from '../../../lib/domain.config';
 import { cloud } from '../../../cloud';
 
 const { isMeshOnlyMode } = cloud.billing;
@@ -50,11 +51,11 @@ export const POST: APIRoute = async ({ request }) => {
       return jsonResponse({ error: 'prompt requerido' }, 400);
     }
 
-    // 1. Socio Gate check: Inferencia AI cloud sólo disponible para tiers de pago (payg, socio, etc.)
+    // 1. Gate de tier: la inferencia AI cloud solo esta en los tiers de pago (payg).
     if (tierId === 'free' || tierId === 'mesh-only' || isMeshOnlyMode(mode)) {
       return jsonResponse(
         {
-          error: 'Inferencia AI requiere cuenta tipo Socio (payg o payg-managed)',
+          error: `Inferencia AI requiere una cuenta ${TIER_LABEL} (payg o payg-managed)`,
           detail: 'El tier gratuito o mesh-only no incluye cuota de inferencia cloud.',
           tierId,
         },

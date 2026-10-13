@@ -38,6 +38,8 @@ for (const m of maintenance as any[]) {
   if (e) e.maint += m.cost || 0;
 }
 // El monto se formatea con la moneda del mercado (CLP en Chile: sin decimales).
+// El KPI usaba `$${(total / 1_000_000).toFixed(2)}M`, que en CLP se lee como un importe
+// colombiano ($9.81M) y no cuadraba con la tabla de abajo, que ya salia en formato del mercado.
 const cop = (n: number) => formatMoney(n, MARKET);
 const costRows = Array.from(costByVehicle.values()).map((c) => ({
   ...c,
@@ -109,21 +111,21 @@ const costTypeChartSvg = barChartSVG(costTypePoints, {
       <article class="kpi swal-card-frame">
         <div class="swal-card-inner">
           <div class="kpi-label swal-kicker">Costo combustible total</div>
-          <div class="kpi-value">{`$${(totalFuel / 1_000_000).toFixed(2)}M`}</div>
+          <div class="kpi-value">{cop(totalFuel)}</div>
           <div class="kpi-sub">{MARKET.currency} · {fuelLogs.length} cargas</div>
         </div>
       </article>
       <article class="kpi swal-card-frame">
         <div class="swal-card-inner">
           <div class="kpi-label swal-kicker">Costo mantenimiento</div>
-          <div class="kpi-value">{`$${(totalMaint / 1_000_000).toFixed(2)}M`}</div>
+          <div class="kpi-value">{cop(totalMaint)}</div>
           <div class="kpi-sub">{MARKET.currency} · {maintenance.length} servicios</div>
         </div>
       </article>
       <article class="kpi swal-card-frame">
         <div class="swal-card-inner">
           <div class="kpi-label swal-kicker">Costo total operativo</div>
-          <div class="kpi-value">{`$${((totalFuel + totalMaint) / 1_000_000).toFixed(2)}M`}</div>
+          <div class="kpi-value">{cop(totalFuel + totalMaint)}</div>
           <div class="kpi-sub">{MARKET.currency} · toda la flota</div>
         </div>
       </article>
@@ -169,7 +171,7 @@ const costTypeChartSvg = barChartSVG(costTypePoints, {
                     style={`width: ${(t.cost / maxMaintCost) * 100}%`}
                   ></span>
                 </span>
-                <span class="dist-value">{t.count} servicios · {`$${(t.cost / 1_000_000).toFixed(2)}M`}</span>
+                <span class="dist-value">{t.count} servicios · {cop(t.cost)}</span>
               </div>
             ))}
           </div>

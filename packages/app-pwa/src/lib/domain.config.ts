@@ -108,9 +108,21 @@ export const domainConfig = {
   // payg: infra 100% + AI*1.10 + 5% handling, sin fee por vehiculo/entidad
   billing: {
     tier: 'payg' as const, // 'free' | 'mesh-only' | 'payg' | 'payg-managed' (legacy 'socio' -> 'payg')
+    //
+    // Nombre VISIBLE del tier de facturacion. El identificador sigue siendo `payg` y "socio"
+    // solo sobrevive en nombres internos (socioGate.ts, isSocioUser, la bandera demo) que no se
+    // muestran: la interfaz no debe ofrecer ni nombrar un tier "Socio", que ya no existe.
+    // Lo importan la insignia del conmutador, el gate de la AUI y ProBadge.
+    tierLabel: 'PAYG',
     mode: 'swal-managed' as const, // 'mesh-only' | 'self-managed' | 'swal-managed'
   },
 } as const;
+
+/**
+ * Nombre visible del tier de facturacion ("PAYG"). Fuente unica para las insignias y los
+ * textos del gate: el literal no se repite en ningun componente.
+ */
+export const TIER_LABEL: string = domainConfig.billing.tierLabel;
 
 /**
  * Tenant canónico de la app. Todo el código lo importa de aquí en vez de repetir

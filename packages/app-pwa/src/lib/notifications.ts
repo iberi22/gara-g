@@ -29,6 +29,13 @@ export interface AlertLike {
   vehicleId?: string;
 }
 
+/** Titulo canonico de una notificacion de alerta: "Alerta <tipo> — severidad <nivel>".
+ *  `notificationTitleLabel` (lib/alertLabels.ts) es quien lo traduce al mostrarlo, asi que el
+ *  formato vive aqui y no se repite en quien construye notificaciones (fan-out y demo). */
+export function alertNotificationTitle(kind?: string, severity?: string): string {
+  return `Alerta ${kind ?? 'general'} — severidad ${severity ?? 'info'}`;
+}
+
 /** Construye el payload de notificación a partir de una alerta. Puro. */
 export function alertToNotification(
   alert: AlertLike,
@@ -36,7 +43,7 @@ export function alertToNotification(
 ): NotificationFields {
   return {
     kind: 'alert',
-    title: `Alerta ${alert.kind ?? 'general'} — severidad ${alert.severity ?? 'info'}`,
+    title: alertNotificationTitle(alert.kind, alert.severity),
     body: alert.message ?? '',
     severity: alert.severity ?? 'info',
     readAt: null,

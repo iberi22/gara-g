@@ -24,16 +24,18 @@
  * de duplicarlas. Las fechas se calculan contra `today`, para que la demo siempre tenga
  * documentos por vencer.
  *
- * El unico import es `./rut.ts` (extension explicita: el script de semilla lo carga con Node
- * a pelo, sin Vite). La matematica del RUT vive alli y no se duplica aqui.
+ * El unico import de datos es `./rut.ts` (extension explicita: el script de semilla lo carga con
+ * Node a pelo, sin Vite); `./notifications.ts` se usa solo para el titulo canonico de las
+ * notificaciones de alerta, que es puro y no arrastra dependencias.
  */
 import { computeRutDv, formatRutBody } from './rut.ts';
+import { alertNotificationTitle } from './notifications.ts';
 
 export const CHILE_DEMO_INSTANCE_ID = 'flota-demo-chile';
 export const CHILE_DEMO_FLEET_PATH = '/fleet/garage/flota-demo-chile';
 
 export interface DemoRow {
-  entity: 'fleet' | 'vehicle' | 'driver' | 'maintenance' | 'fuelLog' | 'document' | 'geofence' | 'alert';
+  entity: 'fleet' | 'vehicle' | 'driver' | 'maintenance' | 'fuelLog' | 'document' | 'geofence' | 'alert' | 'notification';
   id: string;
   data: Record<string, unknown>;
 }
@@ -182,6 +184,8 @@ const pad = (n: number) => String(n).padStart(2, '0');
 export function buildChileDemo(today: Date = new Date()): DemoRow[] {
   const day0 = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
   const date = (offsetDays: number) => new Date(day0 + offsetDays * DAY).toISOString().slice(0, 10);
+  /** Fecha y hora ISO determinista (la usan las notificaciones, que llevan createdAt). */
+  const iso = (offsetDays: number) => new Date(day0 + offsetDays * DAY).toISOString();
   const rows: DemoRow[] = [];
   const fleetId = 'cl-fleet-01';
   const vehId = (i: number) => `cl-veh-${pad(i + 1)}`;
@@ -380,6 +384,24 @@ export function buildChileDemo(today: Date = new Date()): DemoRow[] {
       entity: 'alert',
       id: `cl-alr-${pad(i + 1)}`,
       data: { vehicleId: vehId(a.v), fleetId, kind: a.kind, severity: a.severity, message: a.message, acknowledged: false, demo: true },
+    });
+    // Espejo en el centro de notificaciones: la demo sembraba 6 alertas y `notification = 0`, asi
+    // que el panel anunciaba "6 ALERTAS SIN RECONOCER" y /fleet/notifications decia
+    // "Sin notificaciones". Las no leidas (readAt: null) cuadran con las alertas sin reconocer.
+    // El titulo usa el formato canonico que `notificationTitleLabel` sabe traducir.
+    rows.push({
+      entity: 'notification',
+      id: `cl-not-${pad(i + 1)}`,
+      data: {
+        userId: null,
+        kind: 'alert',
+        title: alertNotificationTitle(a.kind, a.severity),
+        body: a.message,
+        severity: a.severity,
+        readAt: null,
+        createdAt: iso(-i),
+        demo: true,
+      },
     });
   });
 
