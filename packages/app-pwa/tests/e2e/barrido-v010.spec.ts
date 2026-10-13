@@ -3,6 +3,7 @@ import { test, expect, type Page } from './fixtures';
 import { test as plain, expect as plainExpect } from '@playwright/test';
 import { seedDemoFleet } from './helpers/seed';
 import { ADMIN_SESSION_TOKEN, DEV_ADMIN_USER_ID, authCookieUrl } from './helpers/auth';
+import { FLEET_ONLY } from './helpers/features';
 
 /**
  * Barrido final v0.1.0: cada pagina, a 360 px, en tema claro y oscuro, con sesion de admin y como
@@ -89,15 +90,15 @@ test.describe('Barrido v0.1.0 — admin', () => {
     '/fleet/fuel-logs',
     '/fleet/game',
     '/fleet/garage',
-    '/fleet/garage/anunciantes',
+    // Módulos fuera de la entrega flota-only: el 404 se comprueba en fleet-only-scope.spec.ts.
+    ...(FLEET_ONLY ? [] : ['/fleet/garage/anunciantes']),
     '/fleet/garage/engine-lab',
     '/fleet/garage/lab',
     '/fleet/geofences',
     '/fleet/maintenance',
-    '/fleet/mercado',
-    '/fleet/mercado/vender',
+    ...(FLEET_ONLY ? [] : ['/fleet/mercado', '/fleet/mercado/vender']),
     '/fleet/notifications',
-    '/fleet/radar',
+    ...(FLEET_ONLY ? [] : ['/fleet/radar']),
     '/fleet/respaldo',
     '/fleet/tracking',
     '/fleet/users',
@@ -199,14 +200,14 @@ plain.describe('Barrido v0.1.0 — invitado', () => {
     '/fleet/garage',
     '/fleet/catalog',
     '/fleet/ajustes',
-    '/fleet/mercado',
-    '/fleet/mercado/vender',
-    '/fleet/radar',
+    // Módulos fuera de la entrega flota-only: con FLEET_ONLY responden 404 (ver fleet-only-scope.spec.ts).
+    ...(FLEET_ONLY ? [] : ['/fleet/mercado', '/fleet/mercado/vender', '/fleet/radar']),
     '/fleet/respaldo',
     '/fleet/cuenta-requerida',
   ];
   // Rutas que necesitan cuenta: el invitado llega a /fleet/cuenta-requerida (200), nunca a un 401 en consola.
-  const blocked = ['/fleet', '/fleet/vehicles', '/fleet/game', '/fleet/aui', '/fleet/garage/anunciantes'];
+  // /fleet/garage/anunciantes queda fuera de la entrega (404) cuando FLEET_ONLY está encendido.
+  const blocked = ['/fleet', '/fleet/vehicles', '/fleet/game', '/fleet/aui', ...(FLEET_ONLY ? [] : ['/fleet/garage/anunciantes'])];
 
   async function asGuest(page: Page, theme: 'light' | 'dark') {
     const url = authCookieUrl();

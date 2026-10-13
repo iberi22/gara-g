@@ -1,6 +1,7 @@
 import { test, expect, type Page } from './fixtures';
 import { seedDemoFleet } from './helpers/seed';
 import { loginAsE2EUser } from './helpers/login';
+import { MARKET } from '../../src/lib/market';
 
 // Tenant de la sesion: los enlaces de editar ya no llevan ?instanceId= (bf4e14a3), asi que
 // una fila creada en otro tenant no se podia editar. La flota demo se crea en el de la sesion.
@@ -245,9 +246,9 @@ test.describe('Fleet Forms Audit & Validation Suite', () => {
     // 3. Llenar formulario
     await form.locator('input[name="name"]').fill(name);
     await form.locator('input[name="cedula"]').fill(cedula);
-    await form.locator('select[name="licenseCategory"]').selectOption('C2');
+    await form.locator('select[name="licenseCategory"]').selectOption(MARKET.truckLicenseClass);
     await form.locator('input[name="licenseExpiry"]').fill('2029-12-31');
-    await form.locator('input[name="phone"]').fill('+57 300 8887766');
+    await form.locator('input[name="phone"]').fill(`${MARKET.phonePrefix} 300 8887766`);
     await form.locator('select[name="status"]').selectOption('active');
 
     // 4. Enviar formulario

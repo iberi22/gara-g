@@ -29,7 +29,7 @@
   let formData: DriverData = {
     name: '',
     cedula: '',
-    licenseCategory: 'C1',
+    licenseCategory: MARKET.truckLicenseClass,
     licenseExpiry: new Date(Date.now() + 365 * 86400 * 1000).toISOString().slice(0, 10),
     phone: '',
     status: 'active',
@@ -54,7 +54,7 @@
     formData = {
       name: '',
       cedula: '',
-      licenseCategory: 'C1',
+      licenseCategory: MARKET.truckLicenseClass,
       licenseExpiry: new Date(Date.now() + 365 * 86400 * 1000).toISOString().slice(0, 10),
       phone: '',
       status: 'active',
@@ -76,7 +76,7 @@
     formData = {
       name: driver.name || '',
       cedula: driver.cedula || '',
-      licenseCategory: driver.licenseCategory || 'C1',
+      licenseCategory: driver.licenseCategory || MARKET.truckLicenseClass,
       licenseExpiry: driver.licenseExpiry || '',
       phone: driver.phone || '',
       status: driver.status || 'active',

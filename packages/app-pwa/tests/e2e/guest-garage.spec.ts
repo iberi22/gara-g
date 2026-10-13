@@ -28,8 +28,10 @@ const SAMPLE = {
 };
 
 test.describe('garage en modo invitado', () => {
-  // El primer arranque en dev compila three.js y las islas: margen amplio.
-  test.setTimeout(180_000);
+  // El primer arranque en dev compila three.js y las islas, y el garage 3D corre con WebGL
+  // por software: con 2 workers en la misma maquina cada test pasa de los 100 s. Margen para
+  // que una carga puntual no lo convierta en rojo (no es un bug: medido, aislado tarda ~1,7 min).
+  test.setTimeout(300_000);
   test.use({ actionTimeout: 60_000 });
   let forbidden: string[];
   let errors: string[];

@@ -10,7 +10,9 @@ test.describe('Document Vault Upload with R2 Mocking E2E', () => {
   });
 
   test('should verify PWA page load and title', async ({ page }) => {
-    await expect(page).toHaveTitle(/gara-g\.pages\.dev|Gara-G DePIN Mobility Network PWA|SWAL-GARA|Document Vault|Plataforma Descentralizada/i);
+    // El fixture inyecta la sesión admin, así que '/' entra en la app: el título es el del
+    // panel de flota. El patrón anterior enumeraba títulos de la landing/DePIN ya retirados.
+    await expect(page).toHaveTitle(/GARA-G|Gara-G|Panel de flota/i);
     const body = page.locator('body');
     await expect(body).toBeVisible();
   });

@@ -8,7 +8,9 @@ test.describe('GeofenceMap (Leaflet) & Point-in-Polygon E2E', () => {
   });
 
   test('renders geofence map component and vector polygons', async ({ page }) => {
-    await page.goto('/fleet/geofences?instanceId=demo-flota');
+    // Las páginas leen el tenant de la SESIÓN (bf4e14a3): la flota demo la siembra el
+    // beforeEach en ese mismo tenant. ?instanceId= ya no se usa (y en escritura se rechaza).
+    await page.goto('/fleet/geofences');
 
     // Verify page container exists
     const pageContainer = page.locator('[data-testid="geofences-page"]');
@@ -23,7 +25,7 @@ test.describe('GeofenceMap (Leaflet) & Point-in-Polygon E2E', () => {
   });
 
   test('crear geocerca vía EntityForm (datos verificados por API)', async ({ page }) => {
-    await page.goto('/fleet/geofences?instanceId=demo-flota');
+    await page.goto('/fleet/geofences');
 
     // La UI real usa EntityForm (input-name/type/polygon).
     // El widget #geo-name del spec viejo no existe (evidencia: geofences/index.astro).
@@ -41,7 +43,7 @@ test.describe('GeofenceMap (Leaflet) & Point-in-Polygon E2E', () => {
       timeout: 15000,
     });
 
-    const res = await page.request.get('/api/fleet/geofence?instanceId=demo-flota');
+    const res = await page.request.get('/api/fleet/geofence');
     expect(res.ok()).toBe(true);
     const body = await res.json();
     const names = (body.data ?? []).map((g: any) => g.name);

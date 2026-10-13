@@ -176,8 +176,14 @@ test.describe('Mobile interactions', () => {
   test('click en backdrop cierra el drawer', async ({ page }) => {
     await page.goto('/fleet');
     await page.getByTestId('hamburger').click();
-    await page.getByTestId('sidebar-backdrop').click();
     const shell = page.locator('.fleet-shell');
+    await expect(shell).toHaveAttribute('data-sidebar-open', 'true');
+    // El centro del backdrop cae debajo del propio cajón (280px de ancho): se pulsa el
+    // área visible a la derecha del drawer, que es la zona que el usuario toca para cerrar.
+    const viewport = page.viewportSize()!;
+    await page.getByTestId('sidebar-backdrop').click({
+      position: { x: viewport.width - 8, y: viewport.height / 2 },
+    });
     await expect(shell).toHaveAttribute('data-sidebar-open', 'false');
   });
 
