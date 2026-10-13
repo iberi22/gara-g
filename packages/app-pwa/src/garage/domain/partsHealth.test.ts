@@ -248,6 +248,25 @@ describe('coincidencia mantenimiento -> pieza', () => {
     });
     expect(parts.every((p) => p.healthPct === null)).toBe(true);
   });
+
+  it('un modelo de moto fuera del catalogo usa intervalos genericos (estimado)', () => {
+    const parts = computePartStates({
+      family: 'moto',
+      make: 'MarcaInventada',
+      model: 'ModeloX',
+      odometerKm: 1000,
+    });
+    const chain = parts.find((p) => p.slotId === 'drive');
+    const oil = parts.find((p) => p.slotId === 'engine_oil');
+    const plugs = parts.find((p) => p.slotId === 'spark_plugs');
+
+    expect(chain?.lifeKm).toBe(500);
+    expect(chain?.label).toContain('estimado');
+    expect(oil?.lifeKm).toBe(3000);
+    expect(oil?.label).toContain('estimado');
+    expect(plugs?.lifeKm).toBe(6000);
+    expect(plugs?.label).toContain('estimado');
+  });
 });
 
 describe('overallHealthPct: promedio ponderado con frenos y llantas al doble', () => {
