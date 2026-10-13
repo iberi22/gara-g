@@ -1,0 +1,4 @@
+Astro 5 static pages custom 404 body best practice 2026: Astro 5 docs (astro.build/docs/404) suggest creating a '404.astro' in the pages directory.
+Svelte 5 accessibility aria-pressed toggle buttons 2026: Svelte 5 accessible components recommend using aria-pressed for native toggle state instead of a custom class.
+Playwright e2e test IndexedDB seeding best practice 2026: Playwright best practices suggest using page.evaluate() to directly seed IndexedDB before navigation.
+regression test without flaky timers Playwright 2026: Prefer page.waitForFunction() or locator.waitFor() instead of static page.waitForTimeout() for reliable tests.

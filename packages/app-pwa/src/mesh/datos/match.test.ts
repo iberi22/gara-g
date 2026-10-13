@@ -4,7 +4,12 @@ import { DEFAULT_MARKET_PREFS } from './market';
 import { approx, cellDistanceKm, matchOffers } from './match';
 import { BOGOTA, DAY, MEDELLIN, NOW, hilux, moto, offer } from './testkit';
 
-const ctx = { now: NOW, ownerCell: BOGOTA, prefs: DEFAULT_MARKET_PREFS };
+const ENABLED_PREFS = {
+  ...DEFAULT_MARKET_PREFS,
+  enabled: true,
+  categories: ['offer:lubricentro', 'offer:repuestos', 'offer:taller', 'offer:llanteria', 'offer:revision', 'offer:seguro'],
+};
+const ctx = { now: NOW, ownerCell: BOGOTA, prefs: ENABLED_PREFS };
 
 describe('matchOffers', () => {
   it('explica el por que: "tu Hilux necesita cambio de aceite en ~800 km"', () => {
@@ -92,7 +97,7 @@ describe('matchOffers', () => {
   });
 
   it('el horario no oculta la bandeja', () => {
-    const noche = { ...DEFAULT_MARKET_PREFS, schedule: { startHour: 1, endHour: 2, daysOfWeek: [0] } };
+    const noche = { ...ENABLED_PREFS, schedule: { startHour: 1, endHour: 2, daysOfWeek: [0] } };
     expect(matchOffers([offer()], [hilux()], { ...ctx, prefs: noche })).toHaveLength(1);
   });
 

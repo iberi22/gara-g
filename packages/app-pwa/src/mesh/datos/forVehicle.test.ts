@@ -3,7 +3,12 @@ import { DEFAULT_MARKET_PREFS } from './market';
 import { AGE_HINT_YEARS, CATALOG, itemsForVehicle, offerCoversItem, planForVehicles, vehicleAge, vehicleTitle } from './forVehicle';
 import { BOGOTA, MEDELLIN, NOW, hilux, moto, offer } from './testkit';
 
-const ctx = { now: NOW, ownerCell: BOGOTA, prefs: DEFAULT_MARKET_PREFS };
+const ENABLED_PREFS = {
+  ...DEFAULT_MARKET_PREFS,
+  enabled: true,
+  categories: ['offer:lubricentro', 'offer:repuestos', 'offer:taller', 'offer:llanteria', 'offer:revision', 'offer:seguro'],
+};
+const ctx = { now: NOW, ownerCell: BOGOTA, prefs: ENABLED_PREFS };
 const excavadora = (over: Parameters<typeof hilux>[0] = {}) => hilux({ id: 'v-exc', name: 'Excavadora', cls: 'maquinaria', make: 'Caterpillar', model: '320', year: 2015, usage: 'h', needs: [{ key: 'aceite', remaining: 20, unit: 'h' }], ...over });
 const camion = () => hilux({ id: 'v-cam', name: 'Camión', cls: 'pesado', make: 'Chevrolet', model: 'NPR', year: 2012, needs: [] });
 

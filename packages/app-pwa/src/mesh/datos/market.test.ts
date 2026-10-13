@@ -23,6 +23,7 @@ async function owner(m: Market, region = BOGOTA) {
   await m.start();
   await m.setRegion(region);
   m.setVehicles([hilux()]);
+  await m.setPrefs({ enabled: true, categories: [...DEFAULT_MARKET_PREFS.categories, ...['offer:lubricentro', 'offer:repuestos', 'offer:taller', 'offer:llanteria', 'offer:revision', 'offer:seguro']] });
 }
 
 describe('mercado de punta a punta sobre LocalMeshHub', () => {

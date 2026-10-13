@@ -119,7 +119,11 @@ describe('Todo para tus vehiculos', () => {
     vehicles: [hilux(), moto()],
     inbox: [] as unknown[],
     region: BOGOTA,
-    prefs: DEFAULT_MARKET_PREFS,
+    prefs: {
+      ...DEFAULT_MARKET_PREFS,
+      enabled: true,
+      categories: ['offer:lubricentro', 'offer:repuestos', 'offer:taller', 'offer:llanteria', 'offer:revision', 'offer:seguro']
+    },
     ...over,
   });
   const asInbox = (...os: ReturnType<typeof offer>[]) => os.map((o) => ({ offer: o, score: 1, why: 'Porque sí.', reasons: ['Porque sí.'], distanceKm: 0, from: 'abcdef1234567890' }));
