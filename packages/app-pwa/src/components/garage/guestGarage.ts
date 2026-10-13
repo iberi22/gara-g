@@ -10,6 +10,7 @@
  * guardar, o los errores por campo.
  */
 import { LOCAL_INSTANCE_ID } from '../../lib/appMode';
+import { MARKET } from '../../lib/market';
 import { CHILE_DEMO_SAMPLE_VEHICLE } from '../../lib/demoChile';
 import {
   type DomainRecord,
@@ -220,7 +221,7 @@ export function resolveVehicleDraft(input: VehicleFormInput, now: Date = new Dat
   }
 
   const plate = (input.plate ?? '').trim().toUpperCase();
-  if (unit === 'km' && !plate && !errors.type && !errors.modelKey) errors.plate = 'Escribe la placa.';
+  if (unit === 'km' && !plate && !errors.type && !errors.modelKey) errors.plate = `Escribe la ${MARKET.vehicleIdLabel.toLowerCase()}.`;
 
   const year = toNumber(input.year);
   const maxYear = now.getFullYear() + 1;
@@ -368,7 +369,7 @@ export function resolveVehicleEdit(
   const plate = (input.plate ?? '').trim().toUpperCase();
   if (!make) errors.make = 'Escribe la marca.';
   if (!model) errors.model = 'Escribe el modelo.';
-  if (unit === 'km' && !plate) errors.plate = 'Escribe la placa.';
+  if (unit === 'km' && !plate) errors.plate = `Escribe la ${MARKET.vehicleIdLabel.toLowerCase()}.`;
   const year = toNumber(input.year);
   const maxYear = now.getFullYear() + 1;
   if (year === undefined || !Number.isInteger(year) || year < 1950 || year > maxYear) {

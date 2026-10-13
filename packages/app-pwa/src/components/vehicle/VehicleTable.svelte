@@ -11,7 +11,7 @@
    *
    * Features:
    *   - columnas: plate / vin / make / model / year / fleetId / status badge / photoUrl thumbnail / acciones
-   *   - form modal validado: VIN 17-char A-Z0-9 sin I/O/Q, plate Colombia/Mercosur/Chile,
+   *   - form modal validado: VIN 17-char A-Z0-9 sin I/O/Q, patente/placa (Chile ABCD-12),
    *     year 1900..next, make/model/fleetId obligatorios
    *   - filtro por fleetId (dropdown con fleets registrados en la MISMA instance)
    *   - data-testid en TODOS los botones/inputs/filas para e2e
@@ -23,6 +23,7 @@
    *   - instanceId: string — namespace para isolation (default: domainConfig.instanceId).
    */
   import { onMount } from 'svelte';
+  import { MARKET, documentKindLabel } from '../../lib/market';
   import {
     createVehicle,
     listVehicles,
@@ -286,14 +287,14 @@
       {/if}
       <div class="form-grid">
         <label for="vform-plate">
-          <span>Placa <small>(Chile ABCD-12 · carro ABC123 · moto ABC12D · Mercosur ABC1D23)</small></span>
+          <span>{MARKET.vehicleIdLabel} <small>({MARKET.vehicleIdPlaceholder})</small></span>
           <input
             id="vform-plate"
             type="text"
             data-testid="vehicle-form-plate"
             bind:value={formPlate}
             required
-            placeholder="ABC-123"
+            placeholder={MARKET.vehicleIdPlaceholder}
             class:invalid={!livePlateOk()}
           />
         </label>
@@ -386,7 +387,7 @@
           />
         </label>
         <label for="vform-soat">
-          <span>Vencimiento SOAT</span>
+          <span>Vencimiento {documentKindLabel('SOAT', MARKET)}</span>
           <input
             id="vform-soat"
             type="date"
@@ -395,7 +396,7 @@
           />
         </label>
         <label for="vform-tecno">
-          <span>Vencimiento Tecnomecánica</span>
+          <span>Vencimiento {documentKindLabel('Tecnomecánica', MARKET)}</span>
           <input
             id="vform-tecno"
             type="date"
@@ -428,7 +429,7 @@
       <thead>
         <tr>
           <th>Foto</th>
-          <th>Placa</th>
+          <th>{MARKET.vehicleIdLabel}</th>
           <th>VIN</th>
           <th>Marca</th>
           <th>Modelo</th>
@@ -488,10 +489,10 @@
                   {v.status}
                 </span>
                 {#if v.soatExpiry}
-                  <small class="meta">SOAT {formatDate(v.soatExpiry)}</small>
+                  <small class="meta">{documentKindLabel('SOAT', MARKET)} {formatDate(v.soatExpiry)}</small>
                 {/if}
                 {#if v.tecnoExpiry}
-                  <small class="meta">Tecno {formatDate(v.tecnoExpiry)}</small>
+                  <small class="meta">{documentKindLabel('Tecno', MARKET)} {formatDate(v.tecnoExpiry)}</small>
                 {/if}
               </td>
               <td class="actions">

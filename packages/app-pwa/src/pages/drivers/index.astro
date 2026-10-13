@@ -2,6 +2,7 @@
 import { instanceIdFor } from '../../garage/domain/tenant.js';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import DriverTable from '../../components/driver/DriverTable.svelte';
+import { MARKET } from '../../lib/market.js';
 
 // Tenant de la sesion validada (fuera de produccion tambien admite ?instanceId=): nunca uno fijo.
 const instanceId = instanceIdFor(Astro.request, Astro.locals);
@@ -12,7 +13,7 @@ const instanceId = instanceIdFor(Astro.request, Astro.locals);
     <div class="flex items-center justify-between border-b border-[var(--g-border-accent)] pb-4">
       <div>
         <h1 class="text-2xl font-bold text-[var(--g-text-primary)]">Conductores GARA-G</h1>
-        <p class="text-sm text-[var(--g-text-muted)] mt-1">Gestión de conductores, licencias, cédulas y asignación de vehículos</p>
+        <p class="text-sm text-[var(--g-text-muted)] mt-1">Gestión de conductores, licencias, {MARKET.driverIdLabel.toLowerCase()}s y asignación de vehículos</p>
       </div>
       <div>
         <a href="/fleet" class="g-btn flex items-center gap-2">

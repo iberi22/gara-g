@@ -11,17 +11,23 @@
  * Todo es inventado a proposito: el cliente cargara sus datos reales despues.
  *   - Patentes en formato chileno `ABCD-12` con prefijo `ZZ`, una serie que el Registro
  *     Civil aun no emite, para no coincidir con un camion real.
- *   - RUT con digito verificador valido (modulo 11) pero en el rango 30.000.000+, por
- *     encima de los RUN emitidos a personas; los nombres llevan el apellido "Ejemplo".
+ *   - RUT con digito verificador valido (modulo 11, lib/rut.ts) pero en el rango
+ *     30.000.000+, por encima de los RUN emitidos a personas; los nombres llevan el apellido
+ *     "Ejemplo".
+ *   - VINs de 17 caracteres con WMI `ZZZ` (serie ficticia) y DIGITO VERIFICADOR ISO 3779
+ *     correcto: sin I, O ni Q, que es lo que exige `isValidVin` (garage/telemetry/ingest.ts).
+ *     Antes se escribian a mano (`DEMOCL0IV18T41005` traia I y O) y la API de telemetria
+ *     respondia 400 al monitorear el camion. Ahora se calculan con `withVinCheckDigit`.
  *   - Empresas, faenas y talleres con nombres genericos marcados como demo.
  *
  * Ids deterministas (`cl-<entidad>-NN`): volver a sembrar actualiza las mismas filas en vez
  * de duplicarlas. Las fechas se calculan contra `today`, para que la demo siempre tenga
  * documentos por vencer.
  *
- * Sin imports a proposito: el script de semilla lo carga con Node (type stripping) y no
- * pasa por Vite.
+ * El unico import es `./rut.ts` (extension explicita: el script de semilla lo carga con Node
+ * a pelo, sin Vite). La matematica del RUT vive alli y no se duplica aqui.
  */
+import { computeRutDv, formatRutBody } from './rut.ts';
 
 export const CHILE_DEMO_INSTANCE_ID = 'flota-demo-chile';
 export const CHILE_DEMO_FLEET_PATH = '/fleet/garage/flota-demo-chile';
@@ -37,22 +43,51 @@ const LITERS_PER_GALLON = 3.785;
 /** Precio de referencia del diesel en la demo (CLP por litro). Inventado, redondo. */
 const DIESEL_CLP_PER_LITER = 1_050;
 
-/** Digito verificador de un RUT chileno (modulo 11). */
+/** Digito verificador de un RUT chileno (modulo 11). Ver lib/rut.ts. */
 export function rutDv(body: number): string {
-  let sum = 0;
-  let mul = 2;
-  for (let n = body; n > 0; n = Math.floor(n / 10)) {
-    sum += (n % 10) * mul;
-    mul = mul === 7 ? 2 : mul + 1;
-  }
-  const r = 11 - (sum % 11);
-  return r === 11 ? '0' : r === 10 ? 'K' : String(r);
+  return computeRutDv(body);
 }
 
-/** `30123456` -> `30.123.456-7`. */
+/** `30123456` -> `30.123.456-7`. Ver lib/rut.ts. */
 export function formatRut(body: number): string {
-  const s = String(body).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-  return `${s}-${rutDv(body)}`;
+  return formatRutBody(body);
+}
+
+// ── VINs de la demo (ISO 3779) ────────────────────────────────────────────────
+
+/** Transliteracion del VIN (49 CFR 565): las letras valen su numero; I, O y Q no existen. */
+const VIN_TRANSLIT: Record<string, number> = {
+  A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, G: 7, H: 8,
+  J: 1, K: 2, L: 3, M: 4, N: 5, P: 7, R: 9,
+  S: 2, T: 3, U: 4, V: 5, W: 6, X: 7, Y: 8, Z: 9,
+};
+/** Pesos por posicion. El 0 de la posicion 9 es el digito verificador: no pesa. */
+const VIN_WEIGHTS = [8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2];
+
+/**
+ * Digito verificador de un VIN de 17 caracteres (posicion 9). `''` si el VIN no es valido:
+ * largo distinto de 17, caracteres fuera de A-Z0-9 o alguna de las letras vetadas I, O, Q.
+ */
+export function vinCheckDigit(vin: string): string {
+  if (vin.length !== 17 || /[^A-HJ-NPR-Z0-9]/.test(vin)) return '';
+  let sum = 0;
+  for (let i = 0; i < 17; i++) {
+    const ch = vin[i];
+    const value = ch >= '0' && ch <= '9' ? Number(ch) : VIN_TRANSLIT[ch];
+    if (value === undefined) return '';
+    sum += value * VIN_WEIGHTS[i];
+  }
+  const r = sum % 11;
+  return r === 10 ? 'X' : String(r);
+}
+
+/**
+ * Rellena el digito verificador (posicion 9) de una plantilla de 17 caracteres que trae un
+ * `?` en ese lugar: `ZZZKW19T?KA000001` -> `ZZZKW19T7KA000001`.
+ */
+export function withVinCheckDigit(template: string): string {
+  const body = `${template.slice(0, 8)}0${template.slice(9)}`;
+  return `${body.slice(0, 8)}${vinCheckDigit(body)}${body.slice(9)}`;
 }
 
 interface TruckSpec {
@@ -60,31 +95,36 @@ interface TruckSpec {
   make: string;
   model: string;
   year: number;
-  vin: string;
   mileage: number;
   color: string;
   capacity: string;
   status: 'active' | 'maintenance' | 'inactive';
-  /** km por galon, para los registros de combustible. */
-  kmpg: number;
+  /** Plantilla de VIN de 17 caracteres; el `?` de la posicion 9 se reemplaza por el DV. */
+  vinTemplate: string;
+  /** km por litro de diesel, para los registros de combustible (unidad de Chile). */
+  kmpl: number;
   /** Dias hasta el vencimiento del SOAP / revision tecnica / permiso de circulacion. */
   soap: number;
   rt: number;
   permiso: number;
 }
 
-/** Diez camiones tolva de marcas habituales en faenas chilenas. Patentes ficticias (serie ZZ). */
+/**
+ * Diez camiones tolva de marcas habituales en faenas chilenas. Patentes ficticias (serie ZZ).
+ * El VIN se arma con WMI `ZZZ` (serie que no emite ningun fabricante), la version/marca en el
+ * VDS, el codigo de ano ISO 3779 y un serial correlativo; el digito verificador se calcula.
+ */
 const TRUCKS: TruckSpec[] = [
-  { plate: 'ZZBC-11', make: 'Kenworth', model: 'T800 Volqueta', year: 2019, vin: 'DEMOCL0KW19T80001', mileage: 186_400, color: '#b3261e', capacity: '20 m³', status: 'active', kmpg: 6.2, soap: 140, rt: 9, permiso: 170 },
-  { plate: 'ZZBD-12', make: 'Mercedes-Benz', model: 'Actros 3344 K', year: 2021, vin: 'DEMOCL0MB21A33402', mileage: 142_300, color: '#eceeef', capacity: '18 m³', status: 'active', kmpg: 6.8, soap: 140, rt: 64, permiso: 170 },
-  { plate: 'ZZBF-13', make: 'Volvo', model: 'FMX 500 8x4', year: 2020, vin: 'DEMOCL0VO20FMX503', mileage: 231_900, color: '#1f3a5f', capacity: '22 m³', status: 'active', kmpg: 5.9, soap: 140, rt: 21, permiso: 170 },
-  { plate: 'ZZBG-14', make: 'Scania', model: 'G 460 XT 8x4', year: 2022, vin: 'DEMOCL0SC22G46004', mileage: 98_750, color: '#f2c200', capacity: '20 m³', status: 'active', kmpg: 6.6, soap: 140, rt: 120, permiso: 170 },
-  { plate: 'ZZBH-15', make: 'Iveco', model: 'Trakker 410 6x4', year: 2018, vin: 'DEMOCL0IV18T41005', mileage: 287_100, color: '#2e6b3f', capacity: '14 m³', status: 'maintenance', kmpg: 6.0, soap: -4, rt: 33, permiso: 170 },
-  { plate: 'ZZBJ-16', make: 'Mack', model: 'Granite GU813', year: 2019, vin: 'DEMOCL0MK19G81306', mileage: 204_600, color: '#7a7d80', capacity: '16 m³', status: 'active', kmpg: 5.7, soap: 140, rt: 88, permiso: 170 },
-  { plate: 'ZZBK-17', make: 'International', model: '7600 Volqueta', year: 2021, vin: 'DEMOCL0IN21760007', mileage: 121_250, color: '#eceeef', capacity: '16 m³', status: 'active', kmpg: 6.4, soap: 140, rt: 150, permiso: 170 },
-  { plate: 'ZZBL-18', make: 'Freightliner', model: '114SD 8x4', year: 2020, vin: 'DEMOCL0FL20S11408', mileage: 176_800, color: '#c45a12', capacity: '20 m³', status: 'active', kmpg: 6.1, soap: 140, rt: 14, permiso: 170 },
-  { plate: 'ZZBP-19', make: 'Volvo', model: 'FMX 460 6x4', year: 2023, vin: 'DEMOCL0VO23FMX409', mileage: 54_300, color: '#1f3a5f', capacity: '14 m³', status: 'active', kmpg: 7.0, soap: 140, rt: 175, permiso: 170 },
-  { plate: 'ZZBR-20', make: 'Scania', model: 'P 410 XT 6x4', year: 2017, vin: 'DEMOCL0SC17P41010', mileage: 312_400, color: '#f2c200', capacity: '14 m³', status: 'inactive', kmpg: 5.8, soap: 140, rt: 40, permiso: 170 },
+  { plate: 'ZZBC-11', make: 'Kenworth', model: 'T800 Volqueta', year: 2019, vinTemplate: 'ZZZKW19T?KA000001', mileage: 186_400, color: '#b3261e', capacity: '20 m³', status: 'active', kmpl: 2.6, soap: 140, rt: 9, permiso: 170 },
+  { plate: 'ZZBD-12', make: 'Mercedes-Benz', model: 'Actros 3344 K', year: 2021, vinTemplate: 'ZZZMB21A?MA000002', mileage: 142_300, color: '#eceeef', capacity: '18 m³', status: 'active', kmpl: 2.9, soap: 140, rt: 64, permiso: 170 },
+  { plate: 'ZZBF-13', make: 'Volvo', model: 'FMX 500 8x4', year: 2020, vinTemplate: 'ZZZVL20F?LA000003', mileage: 231_900, color: '#1f3a5f', capacity: '22 m³', status: 'active', kmpl: 2.4, soap: 140, rt: 21, permiso: 170 },
+  { plate: 'ZZBG-14', make: 'Scania', model: 'G 460 XT 8x4', year: 2022, vinTemplate: 'ZZZSC22G?NA000004', mileage: 98_750, color: '#f2c200', capacity: '20 m³', status: 'active', kmpl: 2.8, soap: 140, rt: 120, permiso: 170 },
+  { plate: 'ZZBH-15', make: 'Iveco', model: 'Trakker 410 6x4', year: 2018, vinTemplate: 'ZZZEV18T?JA000005', mileage: 287_100, color: '#2e6b3f', capacity: '14 m³', status: 'maintenance', kmpl: 2.5, soap: -4, rt: 33, permiso: 170 },
+  { plate: 'ZZBJ-16', make: 'Mack', model: 'Granite GU813', year: 2019, vinTemplate: 'ZZZMK19G?KA000006', mileage: 204_600, color: '#7a7d80', capacity: '16 m³', status: 'active', kmpl: 2.4, soap: 140, rt: 88, permiso: 170 },
+  { plate: 'ZZBK-17', make: 'International', model: '7600 Volqueta', year: 2021, vinTemplate: 'ZZZNT21V?MA000007', mileage: 121_250, color: '#eceeef', capacity: '16 m³', status: 'active', kmpl: 2.7, soap: 140, rt: 150, permiso: 170 },
+  { plate: 'ZZBL-18', make: 'Freightliner', model: '114SD 8x4', year: 2020, vinTemplate: 'ZZZFL20S?LA000008', mileage: 176_800, color: '#c45a12', capacity: '20 m³', status: 'active', kmpl: 2.5, soap: 140, rt: 14, permiso: 170 },
+  { plate: 'ZZBP-19', make: 'Volvo', model: 'FMX 460 6x4', year: 2023, vinTemplate: 'ZZZVL23F?PA000009', mileage: 54_300, color: '#1f3a5f', capacity: '14 m³', status: 'active', kmpl: 3.0, soap: 140, rt: 175, permiso: 170 },
+  { plate: 'ZZBR-20', make: 'Scania', model: 'P 410 XT 6x4', year: 2017, vinTemplate: 'ZZZSC17P?HA000010', mileage: 312_400, color: '#f2c200', capacity: '14 m³', status: 'inactive', kmpl: 2.4, soap: 140, rt: 40, permiso: 170 },
 ];
 
 /** Vehiculo de ejemplo del garage en modo invitado: el primer camion de la flota demo. */
@@ -97,7 +137,7 @@ export const CHILE_DEMO_SAMPLE_VEHICLE = {
   usage: TRUCKS[0].mileage,
 };
 
-/** Ocho conductores ficticios (apellido "Ejemplo"). Licencia profesional clase A4. */
+/** Ocho conductores ficticios (apellido "Ejemplo"). Licencia profesional clase A5 (camiones). */
 const DRIVERS: Array<{ name: string; rut: number; licenseDays: number; truck: number | null; phone: string }> = [
   { name: 'Rodrigo Ejemplo Muñoz', rut: 30_111_201, licenseDays: 410, truck: 0, phone: '+56 9 0000 0101' },
   { name: 'Carolina Ejemplo Soto', rut: 30_111_202, licenseDays: 25, truck: 1, phone: '+56 9 0000 0102' },
@@ -168,7 +208,7 @@ export function buildChileDemo(today: Date = new Date()): DemoRow[] {
       id: vehId(i),
       data: {
         plate: t.plate,
-        vin: t.vin,
+        vin: withVinCheckDigit(t.vinTemplate),
         make: t.make,
         model: t.model,
         year: t.year,
@@ -179,7 +219,8 @@ export function buildChileDemo(today: Date = new Date()): DemoRow[] {
         capacity: t.capacity,
         mileage: t.mileage,
         color: t.color,
-        // La app guarda SOAT/tecnomecanica en estos dos campos; en Chile son SOAP y revision tecnica.
+        // La app guarda SOAT/tecnomecanica en estos dos campos; en Chile son SOAP y revision
+        // tecnica (PRT). El nombre del campo NO cambia: renombrarlo rompe las filas guardadas.
         soatExpiry: date(t.soap),
         tecnoExpiry: date(t.rt),
         demo: true,
@@ -196,7 +237,7 @@ export function buildChileDemo(today: Date = new Date()): DemoRow[] {
         // El esquema llama `cedula` al documento de identidad; en Chile es el RUT.
         cedula: formatRut(d.rut),
         rut: formatRut(d.rut),
-        licenseCategory: 'A4',
+        licenseCategory: 'A5',
         licenseExpiry: date(d.licenseDays),
         phone: d.phone,
         status: d.licenseDays < 0 ? 'inactive' : 'active',
@@ -254,7 +295,8 @@ export function buildChileDemo(today: Date = new Date()): DemoRow[] {
     }
   });
 
-  // --- Combustible: 3 cargas por camion activo, en litros (y galones, que es lo que usa la app) ---
+  // --- Combustible: 3 cargas por camion activo. El modelo guarda `gallons` (asi nacio la app)
+  // y la semilla chilena escribe ademas `liters`, que es lo que muestra la interfaz en Chile. ---
   let f = 0;
   TRUCKS.forEach((t, i) => {
     if (t.status === 'inactive') return;
@@ -273,7 +315,8 @@ export function buildChileDemo(today: Date = new Date()): DemoRow[] {
           cost: liters * DIESEL_CLP_PER_LITER,
           currency: 'CLP',
           station: k === 1 ? 'Estación Demo Ruta 25 (Calama)' : 'Estación Demo La Negra',
-          kmPerGallon: t.kmpg,
+          kmPerLiter: t.kmpl,
+          kmPerGallon: Math.round((t.kmpl * LITERS_PER_GALLON) * 10) / 10,
           demo: true,
         },
       });
@@ -310,7 +353,7 @@ export function buildChileDemo(today: Date = new Date()): DemoRow[] {
       id: `cl-doc-${pad(++d)}`,
       data: {
         driverId: drvId(i),
-        kind: 'Licencia profesional clase A4',
+        kind: 'Licencia profesional clase A5',
         expiry: date(dr.licenseDays),
         status: status(dr.licenseDays),
         r2Key: null,
@@ -329,7 +372,7 @@ export function buildChileDemo(today: Date = new Date()): DemoRow[] {
     { v: 0, kind: 'document', severity: 'warning', message: 'Revisión técnica de ZZBC-11 vence en 9 días' },
     { v: 7, kind: 'document', severity: 'warning', message: 'Revisión técnica de ZZBL-18 vence en 14 días' },
     { v: 2, kind: 'geofence', severity: 'medium', message: 'ZZBF-13 salió de la Faena Demo Cerro Norte fuera de turno' },
-    { v: 1, kind: 'driver', severity: 'warning', message: 'Licencia A4 de Carolina Ejemplo Soto vence en 25 días' },
+    { v: 1, kind: 'driver', severity: 'warning', message: 'Licencia A5 de Carolina Ejemplo Soto vence en 25 días' },
     { v: 5, kind: 'maintenance', severity: 'low', message: 'ZZBJ-16: cambio de aceite a los 15.000 km se acerca' },
   ];
   ALERTS.forEach((a, i) => {

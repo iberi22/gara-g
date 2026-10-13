@@ -3,6 +3,7 @@
   import { getClientMode } from '../../lib/appMode';
   import { parseBackupCode } from '../../lib/e2ee/crypto';
   import { createSyncClient, type SyncResult } from '../../lib/e2ee/syncClient';
+  import { MARKET } from '../../lib/market';
 
   const sync = createSyncClient();
 
@@ -142,7 +143,7 @@
     applyAuto();
   });
 
-  const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : 'todavía no');
+  const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString(MARKET.locale, { dateStyle: 'medium', timeStyle: 'short' }) : 'todavía no');
 </script>
 
 <div class="bk" data-testid="backup-panel">

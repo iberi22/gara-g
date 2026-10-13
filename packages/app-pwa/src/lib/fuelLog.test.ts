@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createEntity, listEntities, getMemoryAdapter } from './domain';
-import { computeKmPerGallon, type FuelLogData, type FuelLogRecord } from './fuelLog';
+import { computeKmPerGallon, computeKmPerLiter, type FuelLogData, type FuelLogRecord } from './fuelLog';
+import { LITERS_PER_GALLON } from './market';
 
 describe('Fuel Log Domain & kmPerGallon Calculation Tests', () => {
   const instanceId = 'test-fuel-instance';
@@ -91,6 +92,8 @@ describe('Fuel Log Domain & kmPerGallon Calculation Tests', () => {
 
     // Second log for veh_001: (10350 - 10000) / 10 = 350 / 10 = 35.0 km/gal
     expect(log2?.kmPerGallon).toBe(35);
+    // ...y su equivalente en km/L, que es la unidad que muestra la interfaz en Chile.
+    expect(log2?.kmPerLiter).toBeCloseTo(35 / LITERS_PER_GALLON, 2);
 
     // Single log for veh_002 -> 0
     expect(logOther?.kmPerGallon).toBe(0);
@@ -159,5 +162,34 @@ describe('Fuel Log Domain & kmPerGallon Calculation Tests', () => {
 
     // logC: (20800 - 20400) / 10 = 40 km/gal
     expect(logC?.kmPerGallon).toBe(40);
+  });
+
+  it('una fila con `liters` (semilla chilena) calcula lo mismo que su equivalente en galones', () => {
+    const base = (id: string, km: number, volume: Record<string, number>): FuelLogRecord =>
+      ({
+        id,
+        instance_id: instanceId,
+        created_at: '',
+        updated_at: '',
+        vehicleId: 'veh_cl',
+        driverId: 'drv_cl',
+        date: id === 'a' ? '2026-09-01' : '2026-09-10',
+        km,
+        cost: 0,
+        station: 'Copec Calama',
+        ...volume,
+      }) as FuelLogRecord;
+
+    const inLiters = computeKmPerLiter([
+      base('a', 10000, { liters: 100 }),
+      base('b', 10400, { liters: 100 }),
+    ]);
+    expect(inLiters.find((l) => l.id === 'b')?.kmPerLiter).toBeCloseTo(4, 2);
+
+    const inGallons = computeKmPerLiter([
+      base('a', 10000, { gallons: 100 / LITERS_PER_GALLON }),
+      base('b', 10400, { gallons: 100 / LITERS_PER_GALLON }),
+    ]);
+    expect(inGallons.find((l) => l.id === 'b')?.kmPerLiter).toBeCloseTo(4, 2);
   });
 });

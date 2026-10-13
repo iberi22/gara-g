@@ -17,6 +17,7 @@ import type { ManualInfo, VehicleNotes } from '../../garage/assistant/store';
 import type { TechNote } from '../../garage/assistant/prompt';
 import type { GarageVehicle, HistoryEvent, PartState } from '../../garage/contracts';
 import { formatCOP, formatKm } from '../garage/formatters';
+import { MARKET, formatNumber } from '../../lib/market';
 import DossierChat from './DossierChat.svelte';
 import DossierManuals from './DossierManuals.svelte';
 
@@ -113,18 +114,18 @@ const fichaRows = $derived.by(() => {
     ['Marca y modelo', title],
   ];
   if (vehicle.year) rows.push(['Año', String(vehicle.year)]);
-  if (vehicle.plate) rows.push(['Placa', vehicle.plate]);
+  if (vehicle.plate) rows.push([MARKET.vehicleIdLabel, vehicle.plate]);
   if (vehicle.vin) rows.push([isMachine ? 'Serie' : 'VIN', vehicle.vin]);
   rows.push([isMachine ? 'Horómetro' : 'Odómetro', formatKm(vehicle.odometerKm, unit)]);
   if (catalog) {
-    rows.push(['Motor', `${catalog.engineCC.toLocaleString('es-CO')} cc · ${catalog.powerHP} hp · ${catalog.fuelType}`]);
-    if (catalog.payloadKg) rows.push(['Carga útil', `${catalog.payloadKg.toLocaleString('es-CO')} kg`]);
+    rows.push(['Motor', `${formatNumber(catalog.engineCC)} cc · ${catalog.powerHP} hp · ${catalog.fuelType}`]);
+    if (catalog.payloadKg) rows.push(['Carga útil', `${formatNumber(catalog.payloadKg)} kg`]);
     rows.push(['Revisión general', `cada ${formatKm(catalog.revisionPeriodKm, unit)}`]);
     rows.push(['Cambio de aceite', `cada ${formatKm(catalog.oilChangeKm, unit)}`]);
   }
-  rows.push(['Largo × ancho × alto', `${dims.lengthMm.toLocaleString('es-CO')} × ${dims.widthMm.toLocaleString('es-CO')} × ${dims.heightMm.toLocaleString('es-CO')} mm`]);
-  rows.push([isMachine && (vehicle.spec.body === 'excavator' || vehicle.spec.body === 'dozer') ? 'Oruga en el suelo' : 'Entre ejes', `${dims.wheelbaseMm.toLocaleString('es-CO')} mm`]);
-  if (dims.seatHeightMm) rows.push(['Altura de sillín', `${dims.seatHeightMm.toLocaleString('es-CO')} mm`]);
+  rows.push(['Largo × ancho × alto', `${formatNumber(dims.lengthMm)} × ${formatNumber(dims.widthMm)} × ${formatNumber(dims.heightMm)} mm`]);
+  rows.push([isMachine && (vehicle.spec.body === 'excavator' || vehicle.spec.body === 'dozer') ? 'Oruga en el suelo' : 'Entre ejes', `${formatNumber(dims.wheelbaseMm)} mm`]);
+  if (dims.seatHeightMm) rows.push(['Altura de sillín', `${formatNumber(dims.seatHeightMm)} mm`]);
   if (!isMachine || (vehicle.spec.tireFront.rimIn > 0 && vehicle.spec.body !== 'roller')) {
     const t = (x: typeof vehicle.spec.tireFront) => `${x.widthMm}/${x.aspectPct}R${x.rimIn}`;
     rows.push(['Llantas', `${t(vehicle.spec.tireFront)} / ${t(vehicle.spec.tireRear)}`]);

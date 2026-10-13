@@ -37,9 +37,10 @@ test.describe('Analytics — KPIs y distribución', () => {
     await expect(page.getByTestId('cost-table')).toBeVisible();
     await expect(page.getByTestId('maint-distribution')).toBeVisible();
 
-    // Debe contener moneda COP ($) y términos de costo
+    // Debe contener la moneda del mercado (CLP, Chile) y términos de costo
     const body = await page.locator('body').textContent();
-    expect(body).toContain('COP');
+    expect(body).toContain('CLP');
+    expect(body).not.toContain('COP');
     expect(body).toContain('Costo combustible');
     expect(body).toContain('Costo mantenimiento');
     expect(body).toContain('Eficiencia promedio');

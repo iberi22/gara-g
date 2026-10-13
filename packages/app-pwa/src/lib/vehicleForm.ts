@@ -9,7 +9,12 @@
  * Placa y VIN no van como `required` en el HTML: la maquinaria amarilla no tiene placa de
  * carro ni VIN de 17 caracteres. La API los sigue exigiendo para los vehiculos de via
  * (validateVehicleFields) y responde con el motivo exacto.
+ *
+ * Las etiquetas y los ejemplos salen de `lib/market.ts`: en Chile el campo se llama
+ * "Patente" y el ejemplo es ABCD-12; en Colombia, "Placa" y ABC123. El NOMBRE del campo
+ * (`plate`) no cambia: renombrarlo rompe las filas ya guardadas y la API.
  */
+import { MARKET } from './market';
 import { VEHICLE_TYPE_LABELS } from './vehicleCatalog';
 
 export interface SelectOption {
@@ -43,7 +48,13 @@ export interface FormField {
 export function vehicleFormFields(fleetOptions: SelectOption[]): FormField[] {
   return [
     { name: 'type', label: 'Tipo', type: 'select', required: true, options: VEHICLE_TYPE_OPTIONS },
-    { name: 'plate', label: 'Placa (opcional en maquinaria)', type: 'text', placeholder: 'ABCD-12, ABC123 o MC1234', help: 'Obligatoria en carros, motos y camiones.' },
+    {
+      name: 'plate',
+      label: `${MARKET.vehicleIdLabel} (opcional en maquinaria)`,
+      type: 'text',
+      placeholder: MARKET.vehicleIdPlaceholder,
+      help: MARKET.vehicleIdHelp,
+    },
     { name: 'vin', label: 'VIN (17) o serie de la máquina', type: 'text', placeholder: '1HGCM82633A004352 o CAT0320GKZ1234' },
     { name: 'make', label: 'Marca', type: 'text', required: true, placeholder: 'Toyota, Kenworth, Caterpillar' },
     { name: 'model', label: 'Modelo', type: 'text', required: true, placeholder: 'Hilux, T800 Volqueta, 320' },

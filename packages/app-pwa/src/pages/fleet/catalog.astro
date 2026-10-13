@@ -10,9 +10,14 @@ import {
   VEHICLE_CATALOG,
   getAllMakes,
   getModelsForMake,
-  formatCOP,
   type VehicleModel,
 } from '../../lib/vehicleCatalog.js';
+import { MARKET, documentKindLabel, formatMoney, formatNumber } from '../../lib/market.js';
+
+// Los nombres de los documentos obligatorios salen del mercado: en Chile el campo guardado
+// como 'SOAT' se muestra "SOAP" y 'Tecnomecánica' como "Revisión Técnica (PRT)".
+const SOAP_LABEL = documentKindLabel('SOAT', MARKET);
+const RT_LABEL = documentKindLabel('Tecnomecánica', MARKET);
 
 // Serializar para uso en cliente (script de abajo)
 const catalogJson = JSON.stringify(VEHICLE_CATALOG);
@@ -87,27 +92,27 @@ const totalRepuestos = VEHICLE_CATALOG.reduce(
                   <span><strong>{model.engineCC}cc</strong></span>
                   <span><strong>{model.powerHP} HP</strong></span>
                   {model.payloadKg && (
-                    <span><strong>{model.payloadKg.toLocaleString('es-CO')} kg</strong> carga</span>
+                    <span><strong>{formatNumber(model.payloadKg, MARKET)} kg</strong> carga</span>
                   )}
                 </div>
               </header>
 
               <div class="model-cost">
                 <div class="cost-item">
-                  <span class="cost-label">SOAT anual est.</span>
-                  <span class="cost-value">{formatCOP(model.soatDefaultCOP)}</span>
+                  <span class="cost-label">{SOAP_LABEL} anual est.</span>
+                  <span class="cost-value">{formatMoney(model.soatDefaultCOP, MARKET)}</span>
                 </div>
                 <div class="cost-item">
-                  <span class="cost-label">Tecnomecánica</span>
-                  <span class="cost-value">{formatCOP(model.tecnoManualCOP)}</span>
+                  <span class="cost-label">{RT_LABEL}</span>
+                  <span class="cost-value">{formatMoney(model.tecnoManualCOP, MARKET)}</span>
                 </div>
                 <div class="cost-item">
                   <span class="cost-label">Revisión cada</span>
-                  <span class="cost-value">{model.revisionPeriodKm.toLocaleString('es-CO')} km</span>
+                  <span class="cost-value">{formatNumber(model.revisionPeriodKm, MARKET)} km</span>
                 </div>
                 <div class="cost-item">
                   <span class="cost-label">Cambio aceite</span>
-                  <span class="cost-value">{model.oilChangeKm.toLocaleString('es-CO')} km</span>
+                  <span class="cost-value">{formatNumber(model.oilChangeKm, MARKET)} km</span>
                 </div>
               </div>
 
@@ -132,8 +137,8 @@ const totalRepuestos = VEHICLE_CATALOG.reduce(
                         <tr>
                           <td>{part.name}</td>
                           <td><span class="part-cat">{part.category}</span></td>
-                          <td>{part.lifeKm.toLocaleString('es-CO')} km</td>
-                          <td>{formatCOP(part.avgCostCOP)}</td>
+                          <td>{formatNumber(part.lifeKm, MARKET)} km</td>
+                          <td>{formatMoney(part.avgCostCOP, MARKET)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -438,7 +443,7 @@ const totalRepuestos = VEHICLE_CATALOG.reduce(
   }
 </style>
 
-<script lang="ts" define:vars={{ catalogJson }}>
+<script lang="ts" define:vars={{ catalogJson, marketLocale: MARKET.locale, soapLabel: SOAP_LABEL, rtLabel: RT_LABEL }}>
   // SPA-safe (ViewTransitions): re-vincula en cada astro:page-load.
   // Guard por elemento (no global: al volver por SPA el DOM es nuevo).
   function initCatalog() {
@@ -501,14 +506,17 @@ const totalRepuestos = VEHICLE_CATALOG.reduce(
       const tecno = md.tecnoManualCOP;
 
       calcResult.className = remainingRev < 0 || remainingOil < 0 ? 'calc-result active overdue' : 'calc-result active';
+      // Formato con el locale del mercado (es-CL) y los nombres de documento del mercado.
+      const num = (n) => n.toLocaleString(marketLocale);
+      const money = (n) => `$${n.toLocaleString(marketLocale)}`;
       calcResult.innerHTML = `
         <div class="calc-grid">
-          <div><strong>Próxima revisión:</strong> <span style="color: var(--swal-accent-text)">${nextRev.toLocaleString('es-CO')} km</span>
-            <br/><small style="color: var(--swal-text-faint)">${remainingRev < 0 ? `⚠️ VENCIDO hace ${Math.abs(remainingRev).toLocaleString('es-CO')} km` : `faltan ${remainingRev.toLocaleString('es-CO')} km`}</small></div>
-          <div><strong>Próx. cambio aceite:</strong> <span style="color: var(--swal-accent-text)">${nextOil.toLocaleString('es-CO')} km</span>
-            <br/><small style="color: var(--swal-text-faint)">${remainingOil < 0 ? `⚠️ VENCIDO hace ${Math.abs(remainingOil).toLocaleString('es-CO')} km` : `faltan ${remainingOil.toLocaleString('es-CO')} km`}</small></div>
-          <div><strong>SOAT est.:</strong> <span style="color: var(--swal-accent-text)">$${soat.toLocaleString('es-CO')}</span></div>
-          <div><strong>Tecnomecánica:</strong> <span style="color: var(--swal-accent-text)">$${tecno.toLocaleString('es-CO')}</span></div>
+          <div><strong>Próxima revisión:</strong> <span style="color: var(--swal-accent-text)">${num(nextRev)} km</span>
+            <br/><small style="color: var(--swal-text-faint)">${remainingRev < 0 ? `⚠️ VENCIDO hace ${num(Math.abs(remainingRev))} km` : `faltan ${num(remainingRev)} km`}</small></div>
+          <div><strong>Próx. cambio aceite:</strong> <span style="color: var(--swal-accent-text)">${num(nextOil)} km</span>
+            <br/><small style="color: var(--swal-text-faint)">${remainingOil < 0 ? `⚠️ VENCIDO hace ${num(Math.abs(remainingOil))} km` : `faltan ${num(remainingOil)} km`}</small></div>
+          <div><strong>${soapLabel} est.:</strong> <span style="color: var(--swal-accent-text)">${money(soat)}</span></div>
+          <div><strong>${rtLabel}:</strong> <span style="color: var(--swal-accent-text)">${money(tecno)}</span></div>
         </div>
       `;
     }

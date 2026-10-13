@@ -12,6 +12,7 @@ import type { VehicleModel } from '../../lib/vehicleCatalog';
 import type { GarageVehicle, HistoryEvent } from '../contracts';
 import { formatTireSize } from '../templates/common/units';
 import type { ManualChunk } from './manualText';
+import { MARKET, formatNumber } from '../../lib/market';
 
 export interface TechNote {
   label: string;
@@ -39,7 +40,8 @@ export interface ChatMessage {
 export const MAX_MESSAGES = 12;
 export const MAX_MESSAGE_CHARS = 2000;
 
-const n = (v: number | undefined): string => (v === undefined ? 'sin dato' : Math.round(v).toLocaleString('es-CO'));
+const n = (v: number | undefined): string =>
+  v === undefined ? 'sin dato' : formatNumber(Math.round(v), MARKET);
 
 /**
  * Mensajes del cliente ya saneados: solo roles user/assistant, texto recortado, los
@@ -68,7 +70,7 @@ function fichaLines(input: AssistantContextInput): string[] {
   const unit = v.usageUnit;
   const d = v.spec.dims;
   const lines = [
-    `Vehiculo: ${[v.make, v.model, v.year].filter(Boolean).join(' ') || v.name}${v.plate ? ` (placa ${v.plate})` : ''}.`,
+    `Vehiculo: ${[v.make, v.model, v.year].filter(Boolean).join(' ') || v.name}${v.plate ? ` (${MARKET.vehicleIdLabel.toLowerCase()} ${v.plate})` : ''}.`,
     `Tipo 3D: ${v.spec.family}/${v.spec.body}. Medidas (mm): largo ${n(d.lengthMm)}, ancho ${n(d.widthMm)}, alto ${n(d.heightMm)}, entre ejes ${n(d.wheelbaseMm)}${d.seatHeightMm ? `, altura de sillin ${n(d.seatHeightMm)}` : ''}.`,
   ];
   if (v.spec.family === 'moto' || v.spec.family === 'car' || v.spec.family === 'heavy') {
@@ -86,7 +88,7 @@ function fichaLines(input: AssistantContextInput): string[] {
         ` Intervalos de referencia: revision cada ${n(catalog.revisionPeriodKm)} ${u}, aceite cada ${n(catalog.oilChangeKm)} ${u}.`,
     );
     lines.push(
-      `Repuestos de referencia (vida util / costo aprox. COP): ${catalog.commonParts
+      `Repuestos de referencia (vida util / costo aprox. ${MARKET.currency}): ${catalog.commonParts
         .map((p) => `${p.name} ${n(p.lifeKm)} ${u} / $${n(p.avgCostCOP)}`)
         .join('; ')}.`,
     );

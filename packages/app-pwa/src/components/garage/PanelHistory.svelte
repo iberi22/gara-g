@@ -7,6 +7,7 @@
  */
 import type { HistoryEvent, HistoryKind } from '../../garage/contracts';
 import { formatCOP, formatKm, formatTimeAgo } from './formatters';
+import { MARKET } from '../../lib/market';
 
 interface Props {
   events: HistoryEvent[];
@@ -54,7 +55,7 @@ function getKindIcon(kind: HistoryKind): string {
   <div class="summary-card swal-card-frame is-active">
     <div class="summary-info swal-card-inner">
       <span class="summary-label swal-kicker"><span class="swal-tick" aria-hidden="true"></span> GASTO REGISTRADO // {filteredEvents.length} EVENTOS</span>
-      <span class="summary-amount">{formatCOP(totalCostCOP)} COP</span>
+      <span class="summary-amount">{formatCOP(totalCostCOP)} {MARKET.currency}</span>
     </div>
   </div>
 

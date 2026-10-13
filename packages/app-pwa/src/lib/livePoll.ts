@@ -1,6 +1,7 @@
 /**
  * livePoll.ts — Pure helper functions & poller manager for live telemetry tracking.
  */
+import { formatNumber } from './market';
 
 export interface RawTelemetry {
   id?: string;
@@ -91,7 +92,7 @@ export function getLatestTelemetryByVin(
       longitude: lng,
       timestamp: ts,
       formattedSpeed: `${speed} km/h`,
-      formattedRpm: rpm.toLocaleString('es-CO'),
+      formattedRpm: formatNumber(rpm),
       formattedTemp: `${coolantTemp}°C`,
       formattedFuel: `${fuelLevel}%`,
       formattedLat: lat.toFixed(4),

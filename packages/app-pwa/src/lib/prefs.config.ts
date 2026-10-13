@@ -12,6 +12,7 @@
  * version anterior se re-resuelven y el usuario vuelve a ver el onboarding.
  */
 import type { PrefsSchema } from './swal-prefs';
+import { MARKET } from './market';
 
 export const GARA_PREFS_SCHEMA: PrefsSchema = {
   version: 1,
@@ -25,7 +26,7 @@ export const GARA_PREFS_SCHEMA: PrefsSchema = {
     { id: 'drivers', label: 'Conductores', group: 'Operación', default: true, help: 'Licencias, vencimientos y asignación.' },
     { id: 'maintenance', label: 'Mantenimiento', group: 'Operación', default: true },
     { id: 'fuel', label: 'Combustible', group: 'Operación', default: true },
-    { id: 'documents', label: 'Documentos', group: 'Operación', default: true, help: 'SOAT, tecnomecánica y otros documentos con vencimiento.' },
+    { id: 'documents', label: 'Documentos', group: 'Operación', default: true, help: `${MARKET.documentKinds[0]}, ${MARKET.documentKinds[1]} y otros documentos con vencimiento.` },
 
     { id: 'tracking', label: 'Tracking', group: 'Monitoreo', default: true, help: 'Ubicación en vivo en el mapa.' },
     { id: 'geofences', label: 'Geocercas', group: 'Monitoreo', default: true },

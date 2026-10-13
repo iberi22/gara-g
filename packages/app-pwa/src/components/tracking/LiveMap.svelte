@@ -6,6 +6,11 @@
   import { onMount, onDestroy } from 'svelte';
   import { createLivePoller, type TelemetryLiveRow } from '../../lib/livePoll.js';
   import { escapeHtml } from '../../lib/html.js';
+  import { MARKET } from '../../lib/market.js';
+
+  /** Etiqueta de la patente/placa y locale de las horas, del mercado activo. */
+  const vehicleIdLabel = MARKET.vehicleIdLabel;
+  const locale = MARKET.locale;
   import '../../styles/leaflet-taller.css';
 
   interface Props {
@@ -17,7 +22,7 @@
 
   let rows = $state<TelemetryLiveRow[]>(initialRows);
   let isPolling = $state<boolean>(true);
-  let lastRefreshed = $state<string>(new Date().toLocaleTimeString('es-CO'));
+  let lastRefreshed = $state<string>(new Date().toLocaleTimeString(locale));
   let selectedVin = $state<string>(filterVin);
 
   let mapElement: HTMLDivElement | null = $state(null);
@@ -80,14 +85,14 @@
         rows = newRows;
         isPolling = true;
         loadError = '';
-        lastRefreshed = new Date().toLocaleTimeString('es-CO');
+        lastRefreshed = new Date().toLocaleTimeString(locale);
         renderMarkersOnMap();
       },
       onError: (err) => {
         console.warn('Live telemetry polling error:', err);
         isPolling = false;
         loadError = err instanceof Error ? err.message : String(err);
-        lastFailedAt = new Date().toLocaleTimeString('es-CO');
+        lastFailedAt = new Date().toLocaleTimeString(locale);
       },
     });
 
@@ -109,14 +114,14 @@
     return `
         <div class="lm-popup">
           <h4 class="lm-popup-title">
-            Placa: <strong>${escapeHtml(row.plate)}</strong>
+            ${escapeHtml(vehicleIdLabel)}: <strong>${escapeHtml(row.plate)}</strong>
           </h4>
           <p class="lm-popup-row"><strong>VIN:</strong> ${escapeHtml(row.vin)}</p>
           <p class="lm-popup-row"><strong>Velocidad:</strong> ${row.formattedSpeed}</p>
           <p class="lm-popup-row"><strong>RPM:</strong> ${row.formattedRpm}</p>
           <p class="lm-popup-row"><strong>Temp Motor:</strong> ${row.formattedTemp}</p>
           <p class="lm-popup-row"><strong>Combustible:</strong> ${row.formattedFuel}</p>
-          <p class="lm-popup-note">Última pos: ${new Date(row.timestamp).toLocaleTimeString('es-CO')}</p>
+          <p class="lm-popup-note">Última pos: ${new Date(row.timestamp).toLocaleTimeString(locale)}</p>
         </div>
       `;
   }
@@ -262,7 +267,7 @@
     <table class="w-full text-left border-collapse text-xs">
       <thead>
         <tr class="border-b bg-muted/50 text-muted-foreground">
-          <th class="p-2 font-medium">Placa</th>
+          <th class="p-2 font-medium">{vehicleIdLabel}</th>
           <th class="p-2 font-medium">VIN</th>
           <th class="p-2 font-medium">Velocidad</th>
           <th class="p-2 font-medium">RPM</th>
@@ -286,7 +291,7 @@
                 {row.formattedLat}, {row.formattedLng}
               </td>
               <td class="p-2 text-muted-foreground">
-                {new Date(row.timestamp).toLocaleTimeString('es-CO')}
+                {new Date(row.timestamp).toLocaleTimeString(locale)}
               </td>
             </tr>
           {/each}

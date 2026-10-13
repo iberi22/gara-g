@@ -4,7 +4,7 @@
  *
  * Traslada el bloque de título de la referencia: ceja "MARCA // VERSIÓN" con punto naranja,
  * titular del vehículo en mayúsculas con font-size fluido (clamp) sin truncar, subtítulo
- * condensado (placa · año · odómetro), tres datos con etiquetas claras y sin elipsis ("SALUD",
+ * condensado (patente/placa · año · odómetro), tres datos con etiquetas claras y sin elipsis ("SALUD",
  * "ODÓM.", "PRÓXIMO"), pista de controles de órbita y tarjeta "ACABADO Y COLOR" colapsable en
  * móvil para reservar espacio al escenario 3D.
  *
@@ -101,7 +101,7 @@ function splitUnit(text: string): { number: string; unit: string } {
     {/each}
   </h1>
 
-  <!-- Subtitulo condensado: placa · ano · odometro -->
+  <!-- Subtitulo condensado: patente/placa · ano · odometro -->
   <p class="subline">
     {[vehicle.plate, vehicle.year, odometerText].filter(Boolean).join(' · ')}
   </p>

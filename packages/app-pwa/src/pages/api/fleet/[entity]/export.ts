@@ -10,13 +10,14 @@ import { validateEntity, resolveInstanceId, bad } from '../../../../lib/fleetApi
 import { can } from '../../../../lib/rbac';
 import { getAuthUser, unauthorized, forbidden } from '../../fleetApi/auth';
 import { toCSV, type CSVColumn } from '../../../../lib/csvExport';
+import { MARKET, volumeLiters } from '../../../../lib/market';
 
 export const prerender = false;
 
 const ENTITY_COLUMNS: Record<string, CSVColumn<any>[]> = {
   vehicle: [
     { key: 'id', label: 'ID' },
-    { key: 'plate', label: 'Placa' },
+    { key: 'plate', label: MARKET.vehicleIdLabel },
     { key: 'make', label: 'Marca' },
     { key: 'model', label: 'Modelo' },
     { key: 'year', label: 'Año' },
@@ -28,7 +29,7 @@ const ENTITY_COLUMNS: Record<string, CSVColumn<any>[]> = {
   driver: [
     { key: 'id', label: 'ID' },
     { key: 'name', label: 'Nombre' },
-    { key: 'cedula', label: 'Cédula' },
+    { key: 'cedula', label: MARKET.driverIdLabel },
     { key: 'licenseCategory', label: 'Categoría Licencia' },
     { key: 'licenseExpiry', label: 'Vencimiento Licencia' },
     { key: 'phone', label: 'Teléfono' },
@@ -49,10 +50,11 @@ const ENTITY_COLUMNS: Record<string, CSVColumn<any>[]> = {
     { key: 'vehicleId', label: 'ID Vehículo' },
     { key: 'driverId', label: 'ID Conductor' },
     { key: 'date', label: 'Fecha' },
-    { key: 'gallons', label: 'Galones' },
+    // El volumen se exporta en la unidad del mercado, venga la fila en `liters` o en `gallons`.
+    { key: 'liters', label: MARKET.volumeUnitName, value: (r: any) => volumeLiters(r) },
     { key: 'cost', label: 'Costo' },
     { key: 'station', label: 'Estación' },
-    { key: 'kmPerGallon', label: 'Km/Galón' },
+    { key: 'kmPerLiter', label: MARKET.efficiencyColumn },
   ],
   alert: [
     { key: 'id', label: 'ID' },

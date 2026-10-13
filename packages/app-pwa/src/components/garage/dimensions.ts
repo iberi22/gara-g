@@ -7,8 +7,8 @@
  *
  * Aqui vive toda la parte pura y testeable de esa capa:
  *   - `formatMm` / `buildDimensionCotas`: el VALOR que se escribe en la cota sale de la ficha
- *     tecnica (`spec.dims`, en mm), nunca de medir la pantalla; el separador de miles es
- *     el colombiano (punto) porque asi se leen las fichas de la app.
+ *     tecnica (`spec.dims`, en mm), nunca de medir la pantalla; el separador de miles sale del
+ *     mercado activo (lib/market.ts).
  *   - `buildBlueprintGeometry`: la silueta de alzado del plano (ruedas, ejes, linea de techo)
  *     derivada de las medidas de la ficha, para que el dibujo de fondo encaje con el 3D.
  *   - `anchorFor` / `fallbackAnchor`: el punto de pantalla de cada cota. Con el motor
@@ -17,6 +17,7 @@
  *     de que el metodo exista todavia.
  */
 import type { DimensionAnchors, ScreenPoint, TireSize, VehicleDimensions } from '../../garage/contracts';
+import { formatNumber } from '../../lib/market';
 
 export type DimensionId = 'length' | 'height' | 'wheelbase';
 
@@ -31,13 +32,13 @@ export interface DimensionCota {
 }
 
 /**
- * Formatea una medida en mm con separador de miles colombiano.
+ * Formatea una medida en mm con el separador de miles del mercado.
  * 4620 -> "4.620 mm"; 0/NaN/null -> "—".
  */
 export function formatMm(mm: number | undefined | null, opts: { unit?: boolean } = {}): string {
   if (mm === undefined || mm === null || !Number.isFinite(mm)) return '—';
   const rounded = Math.round(mm);
-  const text = Math.abs(rounded).toLocaleString('es-CO');
+  const text = formatNumber(Math.abs(rounded));
   const sign = rounded < 0 ? '−' : '';
   return `${sign}${text}${opts.unit === false ? '' : ' mm'}`;
 }

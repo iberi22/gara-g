@@ -1,5 +1,5 @@
 /**
- * vehicleCatalog.ts — Catálogo vehicular local para LATAM (Colombia).
+ * vehicleCatalog.ts — Catálogo vehicular local para LATAM.
  *
  * Contiene datos de marcas/modelos/años/fechas técnicas y repuestos comunes.
  * NO usa APIs externas — todo es estático para que funcione offline-first
@@ -14,14 +14,18 @@
  *     commonParts[].lifeKm) van en esa unidad: en una excavadora "lifeKm: 500" son 500 h.
  *     Se mantiene el nombre del campo para que la salud de piezas sea un solo calculo.
  *   - yearsAvailable: años de fabricación comunes
- *   - soatDefault: costo SOAT anual aproximado en COP
- *   - tecnoDefault: costo tecnomecánica anual aproximado en COP
+ *   - soatDefaultCOP / tecnoManualCOP / avgCostCOP: costos anuales aproximados de los
+ *     documentos obligatorios y de cada repuesto. El sufijo `COP` es el NOMBRE del campo
+ *     (renombrarlo rompe el JSON serializado que consume el cliente): el valor se muestra
+ *     con la moneda del mercado activo, ver `formatMoney` de lib/market.ts.
  *   - revisionPeriodKm: cada cuántos km toca revisión
  *   - oilChangeKm: cada cuántos km toca cambio de aceite
  *   - tireRotationKm: cada cuántos km toca rotación de llantas
  *   - commonParts: repuestos comunes con vida útil esperada en km
  *   - fuelType: 'gasoline' | 'diesel' | 'electric' | 'hybrid' | 'gas'
  */
+
+import { MARKET, formatMoney, type MarketConfig } from './market';
 
 export type VehicleType =
   | 'sedan'
@@ -576,7 +580,7 @@ export const VEHICLE_CATALOG: VehicleMake[] = [
   // Los intervalos de la maquinaria (usageUnit 'h') son los tipicos de los manuales de
   // operacion y mantenimiento de cada clase (aceite y filtros de motor cada 500 h, filtro
   // hidraulico cada 1 000 h, aceite hidraulico cada 3 000 h...). Cada equipo debe
-  // ajustarse a SU manual; los costos son promedios aproximados en COP (repuesto + mano
+  // ajustarse a SU manual; los costos son promedios aproximados (repuesto + mano
   // de obra), como en el resto del catalogo.
   // ---------------------------------------------------------------------------
   {
@@ -857,6 +861,10 @@ export function calculateNextService(
   };
 }
 
-export function formatCOP(value: number): string {
-  return '$' + value.toLocaleString('es-CO');
+/**
+ * Monto del catálogo en la moneda del mercado activo (CLP en Chile, sin decimales).
+ * @deprecated el nombre dice COP porque nació en Colombia; usa `formatMoney` de lib/market.ts.
+ */
+export function formatCOP(value: number, market: MarketConfig = MARKET): string {
+  return formatMoney(value, market);
 }

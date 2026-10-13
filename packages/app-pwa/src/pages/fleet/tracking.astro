@@ -7,6 +7,7 @@ import { ensureSeedData, DEMO_INSTANCE_ID } from '../../lib/fleetSeed.js';
 import { listEntities } from '../../lib/domain.js';
 import { instanceIdFor } from '../../garage/domain/tenant.js';
 import { getLatestTelemetryByVin, type RawTelemetry, type RawVehicle } from '../../lib/livePoll.js';
+import { MARKET } from '../../lib/market.js';
 
 // Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
 // La semilla solo se escribe para el tenant demo.
@@ -19,7 +20,7 @@ const filterVin = Astro.url.searchParams.get('vin') || '';
 const initialRows = getLatestTelemetryByVin(telemetry, vehicles, filterVin);
 
 const columns = [
-  { key: 'plate', label: 'Placa', width: '8rem' },
+  { key: 'plate', label: MARKET.vehicleIdLabel, width: '8rem' },
   { key: 'formattedSpeed', label: 'Velocidad', width: '7rem' },
   { key: 'formattedRpm', label: 'RPM', width: '7rem' },
   { key: 'formattedTemp', label: 'Temp', width: '6rem' },
@@ -30,7 +31,7 @@ const liveRows = initialRows;
 ---
 
 <FleetLayout title="Tracking en Vivo" section="tracking">
-  <section data-testid="tracking-page">
+  <section data-testid="tracking-page" data-market-locale={MARKET.locale}>
     <PageHeader title="Tracking" subtitle="Telemetría en vivo de la flota" icon="tracking" />
     <LiveMap client:only="svelte" initialRows={initialRows} filterVin={filterVin}>
       <div slot="fallback" style="min-height: 480px" aria-hidden="true"></div>
@@ -82,6 +83,11 @@ const liveRows = initialRows;
   import { ELM327Adapter, OBD2Simulator, isBluetoothSupported } from '../../lib/obd2.js';
 
   // SPA-safe (ViewTransitions): init por panel (guard: el adapter vive por página).
+  // Locale del mercado activo: se publica en el DOM (data-market-locale) porque el script
+  // va empaquetado (tiene imports) y no admite define:vars.
+  const marketLocale =
+    document.querySelector('[data-testid="tracking-page"]')?.getAttribute('data-market-locale') ?? 'es-CL';
+
   function initObd2Panel() {
     const panel = document.querySelector('.obd2-control-panel');
     if (!panel || panel.hasAttribute('data-bound')) return;
@@ -160,7 +166,7 @@ const liveRows = initialRows;
           const rowHtml = `
             <td class="p-3">SIM-8888</td>
             <td class="p-3">${record.speed} km/h</td>
-            <td class="p-3">${record.rpm.toLocaleString('es-CO')}</td>
+            <td class="p-3">${record.rpm.toLocaleString(marketLocale)}</td>
             <td class="p-3">${record.coolantTemp}°C</td>
             <td class="p-3">${record.fuelLevel}%</td>
             <td class="p-3">${record.latitude.toFixed(4)}</td>

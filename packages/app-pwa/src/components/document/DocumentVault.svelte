@@ -5,7 +5,7 @@
     instanceId?: string;
     r2Binding?: unknown;
     initialDocuments?: DocumentRecord[];
-    /** Vehiculos del tenant de la sesion (id + placa) para elegir en vez de pegar el id. */
+    /** Vehiculos del tenant de la sesion (id + patente/placa) para elegir en vez de pegar el id. */
     vehicles?: { id: string; label: string }[];
   }
 

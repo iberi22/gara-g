@@ -5,6 +5,7 @@ import PageHeader from '../../../../components/PageHeader.astro';
 import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../../lib/fleetSeed.js';
 import { getEntity, listEntities } from '../../../../lib/domain.js';
 import { instanceIdFor } from '../../../../garage/domain/tenant.js';
+import { MARKET } from '../../../../lib/market.js';
 
 // Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
 // La semilla solo se escribe para el tenant demo.
@@ -16,7 +17,7 @@ const id = url.pathname.split('/').pop()!;
 
 const vehicles = await listEntities('vehicle', instanceId).catch(() => []);
 const vehicleOptions = vehicles.map((v: any) => ({
-  value: v.id, label: `${v.plate || v.name || v.vin || "Sin placa"} — ${v.make} ${v.model}`,
+  value: v.id, label: `${v.plate || v.name || v.vin || `Sin ${MARKET.vehicleIdLabel.toLowerCase()}`} — ${v.make} ${v.model}`,
 }));
 
 let record: any = null;
@@ -61,7 +62,7 @@ if (!record) return Astro.redirect('/fleet/maintenance?error=not_found');
       { name: 'date', label: 'Fecha', type: 'date', required: true },
       { name: 'km', label: 'Kilometraje (km)', type: 'number', step: '1' },
       { name: 'hours', label: 'Horómetro (horas, maquinaria)', type: 'number', step: '1' },
-      { name: 'cost', label: 'Costo (COP)', type: 'number', step: '1000' },
+      { name: 'cost', label: `Costo (${MARKET.currency})`, type: 'number', step: '1000' },
       { name: 'workshop', label: 'Taller', type: 'text' },
       { name: 'description', label: 'Descripción', type: 'textarea' },
       { name: 'status', label: 'Estado', type: 'select', required: true,

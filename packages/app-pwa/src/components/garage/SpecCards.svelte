@@ -9,12 +9,13 @@
  */
 import type { GarageVehicle, MonitoringState } from '../../garage/contracts';
 import { formatLinkFact } from './statusRow';
+import { formatMoney } from '../../lib/market';
 import type { ActivePanel } from './BottomDock.svelte';
 
 interface Props {
   vehicle: GarageVehicle;
   monitoring: MonitoringState | null;
-  /** Ultimo gasto del mes (COP), si el dominio lo tiene. */
+  /** Ultimo gasto del mes, en la moneda del mercado, si el dominio lo tiene. */
   monthlyCostCOP?: number | null;
   onopenpanel: (panel: ActivePanel) => void;
 }
@@ -38,7 +39,7 @@ function displayValue(value: string): string {
   return v === '' || v === '—' ? 'SIN DATOS' : v;
 }
 
-/** Consumo: "118 km/gal" o "SIN DATOS". */
+/** Consumo: "6,5 km/L" o "SIN DATOS". */
 const consumption = $derived.by(() => {
   const ind = indicator('eff');
   const shown = displayValue(ind.value);
@@ -55,11 +56,11 @@ function shownOrDefault(hint: string | undefined, fallback: string): string {
   return h === '' || h === '—' ? fallback : h;
 }
 
-/** Gasto del mes, en COP; cae al indicador del dominio si no hay otro dato. */
+/** Gasto del mes, en la moneda del mercado; cae al indicador del dominio si no hay otro. */
 const spend = $derived.by(() => {
   const ind = indicator('cost');
   if (monthlyCostCOP !== null && monthlyCostCOP !== undefined) {
-    return `$${Math.round(monthlyCostCOP).toLocaleString('es-CO')}`;
+    return formatMoney(Math.round(monthlyCostCOP));
   }
   return displayValue(ind.value);
 });

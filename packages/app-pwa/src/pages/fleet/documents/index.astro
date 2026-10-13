@@ -6,6 +6,7 @@ import PageHeader from '../../../components/PageHeader.astro';
 import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../lib/fleetSeed.js';
 import { listEntities } from '../../../lib/domain.js';
 import { instanceIdFor } from '../../../garage/domain/tenant.js';
+import { MARKET, documentKindLabel } from '../../../lib/market.js';
 
 // Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
 // La semilla solo se escribe para el tenant demo.
@@ -14,12 +15,15 @@ if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData().catch(() => {});
 
 const records = await listEntities('document', instanceId);
 const vehicles = await listEntities('vehicle', instanceId);
-const vehicleOptions = vehicles.map((v: any) => ({ value: v.id, label: `${v.plate || v.name || v.vin || 'Sin placa'} — ${v.make ?? ''} ${v.model ?? ''}`.trim() }));
+const vehicleOptions = vehicles.map((v: any) => ({ value: v.id, label: `${v.plate || v.name || v.vin || `Sin ${MARKET.vehicleIdLabel.toLowerCase()}`} — ${v.make ?? ''} ${v.model ?? ''}`.trim() }));
 
-// La tabla muestra la placa y el estado en español; lo guardado (id del vehículo, `valid`...) no cambia.
+// La tabla muestra la patente y el estado en español; lo guardado (id del vehículo, `valid`...) no cambia.
+// El tipo de documento SÍ se traduce: las filas guardadas pueden decir 'SOAT' o 'Tecnomecánica'
+// (vocabulario colombiano) y en Chile se leen SOAP y Revisión Técnica. El dato no se toca.
 const STATUS_LABELS: Record<string, string> = { valid: 'Vigente', active: 'Vigente', expiring: 'Por vencer', expired: 'Vencido' };
 const rows = records.map((r: any) => ({
   ...r,
+  kind: documentKindLabel(r.kind, MARKET),
   vehicleLabel: (vehicles as any[]).find((v) => v.id === r.vehicleId)?.plate ?? r.vehicleId,
   statusLabel: STATUS_LABELS[r.status] ?? r.status,
 }));
@@ -34,7 +38,7 @@ const columns = [
 const documentFields = [
   { name: 'vehicleId', label: 'Vehículo', type: 'select', required: true, options: vehicleOptions },
   { name: 'kind', label: 'Tipo de documento', type: 'text', required: true,
-    placeholder: 'SOAT, Tecno, Póliza, Tarjeta de propiedad…' },
+    placeholder: MARKET.documentTypesHint },
   { name: 'r2Key', label: 'R2 key (archivo)', type: 'text', placeholder: 'documents/GHI-202/archivo.pdf' },
   { name: 'expiry', label: 'Fecha de vencimiento', type: 'date' },
   {
@@ -52,7 +56,7 @@ const documentFields = [
   <section data-testid="documents-page">
     <PageHeader
       title="Documentos"
-      subtitle="SOAT, tecnomecánica, pólizas y más"
+      subtitle={MARKET.documentSubtitle}
       icon="documents"
     />
 

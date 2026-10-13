@@ -1,4 +1,5 @@
 import { type DomainRecord, createEntity, listEntities, updateEntity } from '../../lib/domain';
+import { MARKET, documentKindLabel, formatMoney } from '../../lib/market';
 /**
  * wiki.ts — Wiki por version: secciones de catalogo (solo lectura) + secciones de
  * comunidad (editables, con control de revision optimista).
@@ -229,8 +230,8 @@ function buildCatalogSections(versionKey: string): WikiSection[] {
           `Cambio de aceite: cada ${model.oilChangeKm} km`,
           `Rotacion de llantas: cada ${model.tireRotationKm} km`,
           '',
-          `SOAT anual estimado: $${model.soatDefaultCOP.toLocaleString('es-CO')}`,
-          `Tecnomecanica estimada: $${model.tecnoManualCOP.toLocaleString('es-CO')}`,
+          `${documentKindLabel('SOAT', MARKET)} anual estimado: ${formatMoney(model.soatDefaultCOP, MARKET)}`,
+          `${documentKindLabel('Tecnomecánica', MARKET)} estimada: ${formatMoney(model.tecnoManualCOP, MARKET)}`,
         ].join('\n'),
       ),
     );
@@ -248,7 +249,7 @@ function buildCatalogSections(versionKey: string): WikiSection[] {
   if (model) {
     const lines = model.commonParts.map(
       (p) =>
-        `${p.name} (${p.category}): cada ${p.lifeKm} km — $${p.avgCostCOP.toLocaleString('es-CO')}`,
+        `${p.name} (${p.category}): cada ${p.lifeKm} km — ${formatMoney(p.avgCostCOP, MARKET)}`,
     );
     sections.push(
       catalogSection(

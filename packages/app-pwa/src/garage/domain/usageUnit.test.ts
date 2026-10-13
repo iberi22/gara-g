@@ -107,10 +107,11 @@ describe('maquinaria por horometro', () => {
     const hyd = v.commitments.find((c) => c.slotId === 'hydraulic_oil');
     expect(hyd?.remainingKm).toBe(150);
     expect(hyd?.urgency).toBe('planned');
-    // Consumo en gal/h: (300 + 600) gal / (1250 - 1100) h = 6 gal/h.
+    // Consumo de la maquinaria: (300 + 600) gal / (1250 - 1100) h = 6 gal/h, que en la
+    // unidad del mercado activo (litros) son 6 x 3,785 = 22,7 L/h.
     const eff = v.indicators.right.find((i) => i.id === 'eff');
-    expect(eff?.unit).toBe('gal/h');
-    expect(eff?.value).toBe('6.0');
+    expect(eff?.unit).toBe('L/h');
+    expect(eff?.value).toBe('22.7');
   });
 
   it('un servicio programado sin proximo usa 500 h y no 10 000', () => {

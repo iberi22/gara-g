@@ -22,7 +22,7 @@ async function addVehicle(page: Page, plate: string) {
   const dialog = page.getByRole('dialog');
   await slow(dialog).toBeVisible();
   await dialog.getByLabel('Modelo').selectOption({ label: 'Toyota Hilux' });
-  await dialog.getByLabel('Placa').fill(plate);
+  await dialog.getByLabel('Patente').fill(plate);
   await dialog.getByLabel('Año').fill('2021');
   await dialog.getByLabel(/Kilometraje/).fill('30000');
   await dialog.getByRole('button', { name: 'Agregar al garage' }).click();

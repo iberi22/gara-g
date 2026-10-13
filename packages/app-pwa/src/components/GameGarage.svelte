@@ -1,6 +1,7 @@
 <script lang="ts">
 import { isGameUiEnabled } from '../lib/interfaceManager';
 import { toast } from '../lib/toast';
+import { MARKET } from '../lib/market';
 
 interface Props {
   initialGameEnabled?: boolean;
@@ -32,7 +33,7 @@ interface GameCar {
   hp: number;
   topSpeed: number; // km/h
   accel: number; // 0-100 s
-  efficiency: number; // km/gal
+  efficiency: number; // km por unidad de volumen del mercado
   health: number; // %
   vin: string;
   color: string;
@@ -327,7 +328,7 @@ function returnToAdmin() {
             </div>
             <div class="spec-row">
               <span class="spec-label">EFICIENCIA COMB.:</span>
-              <span class="spec-val">{currentCar.efficiency} km/gal</span>
+              <span class="spec-val">{currentCar.efficiency} {MARKET.efficiencyUnit}</span>
             </div>
           </div>
         </div></div>
