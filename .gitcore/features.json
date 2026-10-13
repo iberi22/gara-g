@@ -31,7 +31,7 @@
       "id": "full_e2e",
       "title": "Full E2E",
       "progress_pct": 36,
-      "status": "delivered",
+      "status": "partial",
       "tests": [
         "packages/app-pwa/tests/e2e/smoke.spec.ts",
         "packages/app-pwa/tests/e2e/responsive.spec.ts",
