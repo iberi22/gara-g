@@ -6,8 +6,8 @@
  *  - `maintenance`: cada registro con su fecha/km/costo. Si su texto corresponde a una pieza
  *    del catalogo, se marca `part_change` (que es lo que el usuario recuerda: "me
  *    cambiaron las pastillas"); si no, se queda `maintenance`.
- *  - `fuelLog`: cada carga con su km, galones y costo.
- *  - `document`: emision/vencimiento de SOAT, tecnomecanica y demas.
+ *  - `fuelLog`: cada carga con su km, volumen y costo (en litros o galones: manda el mercado).
+ *  - `document`: emision/vencimiento de SOAP, revision tecnica y demas.
  *  - `alert`: alertas del vehiculo, con su severidad.
  *  - telemetria: codigos DTC agrupados. Un mismo codigo que aparece en 40 muestras NO es 40
  *    filas: se agrupa por codigo y se cuenta ("P0301 x 43"), con la ultima vez visto. Esa
@@ -15,8 +15,21 @@
  *
  * Orden: por fecha descendente (lo mas nuevo arriba) y, a igualdad de fecha, por titulo
  * para que la lista sea estable entre peticiones.
+ *
+ * Unidades, moneda y nombres de documento salen de lib/market.ts; `buildHistory` acepta el
+ * mercado como parametro para que los tests comprueben los dos.
  */
 import type { HistoryEvent, HistoryKind, PartSlotId, VehicleFamily } from '../contracts';
+import {
+  LITERS_PER_GALLON,
+  MARKET,
+  documentKindLabel,
+  formatDecimal,
+  formatNumber,
+  formatVolume,
+  volumeLiters,
+  type MarketConfig,
+} from '../../lib/market';
 import { slotsForCatalogPart } from '../parts';
 import {
   type AlertRow,
@@ -114,13 +127,22 @@ function maintenanceEvents(input: HistoryInput): HistoryEvent[] {
   return out;
 }
 
-function fuelEvents(input: HistoryInput): HistoryEvent[] {
+function fuelEvents(input: HistoryInput, market: MarketConfig): HistoryEvent[] {
   const out: HistoryEvent[] = [];
   for (const f of input.fuelLogs) {
     const at = isoOf(f.date);
     if (!at) continue;
-    const gallons = num(f.gallons);
-    const kmpg = num(f.kmPerGallon);
+    const liters = volumeLiters(f);
+    // Rendimiento normalizado a km/L; el campo heredado esta en km/gal.
+    const kmPerGallon = num(f.kmPerGallon);
+    const kmPerLiter =
+      num(f.kmPerLiter) ?? (kmPerGallon !== undefined ? kmPerGallon / LITERS_PER_GALLON : undefined);
+    const efficiency =
+      kmPerLiter === undefined
+        ? undefined
+        : market.volumeUnit === 'L'
+          ? kmPerLiter
+          : kmPerLiter * LITERS_PER_GALLON;
     out.push({
       id: `hist-fuel-${str(f.id) ?? at}`,
       vehicleId: input.vehicleId,
@@ -128,8 +150,8 @@ function fuelEvents(input: HistoryInput): HistoryEvent[] {
       kind: 'fuel',
       title: 'Carga de combustible',
       detail: [
-        gallons !== undefined ? `${gallons.toLocaleString('es-CO')} gal` : undefined,
-        kmpg ? `${kmpg.toFixed(1)} km/gal` : undefined,
+        liters !== null ? formatVolume(liters, market) : undefined,
+        efficiency !== undefined ? `${formatDecimal(efficiency, 1, market)} ${market.efficiencyUnit}` : undefined,
         str(f.station) ?? undefined,
       ]
         .filter(Boolean)
@@ -141,7 +163,7 @@ function fuelEvents(input: HistoryInput): HistoryEvent[] {
   return out;
 }
 
-function documentEvents(input: HistoryInput): HistoryEvent[] {
+function documentEvents(input: HistoryInput, market: MarketConfig): HistoryEvent[] {
   const out: HistoryEvent[] = [];
   for (const d of input.documents) {
     const expiry = str(d.expiry);
@@ -155,7 +177,7 @@ function documentEvents(input: HistoryInput): HistoryEvent[] {
       vehicleId: input.vehicleId,
       at,
       kind: 'document',
-      title: `${kind} — vence ${expiry.slice(0, 10)}`,
+      title: `${documentKindLabel(kind, market)} — vence ${expiry.slice(0, 10)}`,
       detail: str(d.status) ? `Estado: ${str(d.status)}` : undefined,
     });
   }
@@ -226,7 +248,7 @@ export function summarizeDtc(telemetry: TelemetryRow[]): DtcSummary[] {
     .sort((a, b) => (a.lastSeen < b.lastSeen ? 1 : -1));
 }
 
-function dtcEvents(input: HistoryInput): HistoryEvent[] {
+function dtcEvents(input: HistoryInput, market: MarketConfig): HistoryEvent[] {
   return summarizeDtc(input.telemetry)
     .filter((d) => d.lastSeen !== '')
     .map((d) => ({
@@ -238,18 +260,18 @@ function dtcEvents(input: HistoryInput): HistoryEvent[] {
       detail:
         d.count === 1
           ? 'Detectado una vez'
-          : `Detectado ${d.count.toLocaleString('es-CO')} veces · primera vez ${d.firstSeen.slice(0, 16).replace('T', ' ')}`,
+          : `Detectado ${formatNumber(d.count, market)} veces · primera vez ${d.firstSeen.slice(0, 16).replace('T', ' ')}`,
     }));
 }
 
 /** Linea de tiempo del vehiculo, mas reciente primero. */
-export function buildHistory(input: HistoryInput): HistoryEvent[] {
+export function buildHistory(input: HistoryInput, market: MarketConfig = MARKET): HistoryEvent[] {
   const events = [
     ...maintenanceEvents(input),
-    ...fuelEvents(input),
-    ...documentEvents(input),
+    ...fuelEvents(input, market),
+    ...documentEvents(input, market),
     ...alertEvents(input),
-    ...dtcEvents(input),
+    ...dtcEvents(input, market),
   ];
   return events.sort((a, b) => {
     if (a.at !== b.at) return a.at < b.at ? 1 : -1;

@@ -6,6 +6,7 @@ import { ensureSeedData, DEMO_INSTANCE_ID } from '../../lib/fleetSeed.js';
 import { listEntities } from '../../lib/domain.js';
 import { fleetFuelEfficiency, formatKmPerLiter } from '../../lib/fuelLog.js';
 import { instanceIdFor } from '../../garage/domain/tenant.js';
+import { MARKET, formatMoney, formatNumber } from '../../lib/market.js';
 import {
   fuelTimeline,
   costPorTipo,
@@ -36,7 +37,8 @@ for (const m of maintenance as any[]) {
   const e = costByVehicle.get(m.vehicleId as string);
   if (e) e.maint += m.cost || 0;
 }
-const cop = (n: number) => '$' + n.toLocaleString('es-CO');
+// El monto se formatea con la moneda del mercado (CLP en Chile: sin decimales).
+const cop = (n: number) => formatMoney(n, MARKET);
 const costRows = Array.from(costByVehicle.values()).map((c) => ({
   ...c,
   total: c.fuel + c.maint,
@@ -49,7 +51,7 @@ const costRows = Array.from(costByVehicle.values()).map((c) => ({
 
 // GenericTable no formatea moneda por si sola: las columnas apuntan a los *Display ya formateados.
 const columns = [
-  { key: 'plate', label: 'Placa' },
+  { key: 'plate', label: MARKET.vehicleIdLabel },
   { key: 'fuelDisplay', label: 'Combustible', align: 'right' as const },
   { key: 'maintDisplay', label: 'Mantenimiento', align: 'right' as const },
   { key: 'totalDisplay', label: 'Total', align: 'right' as const },
@@ -71,19 +73,19 @@ const totalFuel = fuelLogs.reduce((a: number, b: any) => a + (b.cost || 0), 0);
 const totalMaint = maintenance.reduce((a: number, b: any) => a + (b.cost || 0), 0);
 // Eficiencia real (tanque lleno): distancia entre cargas / combustible consumido; "—" sin al menos
 // dos lecturas de odometro por vehiculo. Ver fleetFuelEfficiency en lib/fuelLog.ts.
-const fuelEff = fleetFuelEfficiency(fuelLogs as any[]);
-const avgKmPerLiter = formatKmPerLiter(fuelEff.kmPerGallon);
+const fuelEff = fleetFuelEfficiency(fuelLogs as any[], MARKET);
+const avgKmPerLiter = formatKmPerLiter(fuelEff.kmPerLiter, MARKET);
 
 // Fuel Timeline Chart
 const fuelData = fuelTimeline(fuelLogs as any[]);
 // Sin registros la serie queda vacia y el grafico dice "Sin datos disponibles": nada de cifras de ejemplo.
 const fuelPoints = fuelData.map((d) => ({ label: d.month, value: d.cost }));
 const fuelChartSvg = lineChartSVG(fuelPoints, {
-  title: 'Evolución de Costo de Combustible (COP)',
+  title: `Evolución de Costo de Combustible (${MARKET.currency})`,
   strokeColor: 'var(--swal-accent)',
   fillColor: 'var(--swal-accent-muted)',
   testId: 'fuel-timeline-chart',
-  unit: 'COP',
+  unit: MARKET.currency,
   height: 260,
 });
 
@@ -91,10 +93,10 @@ const fuelChartSvg = lineChartSVG(fuelPoints, {
 const costTypeData = costPorTipo(maintenance as any[]);
 const costTypePoints = costTypeData.map((d) => ({ label: d.type, value: d.cost }));
 const costTypeChartSvg = barChartSVG(costTypePoints, {
-  title: 'Costo por Tipo de Mantenimiento (COP)',
+  title: `Costo por Tipo de Mantenimiento (${MARKET.currency})`,
   color: 'var(--swal-info)',
   testId: 'cost-type-chart',
-  unit: 'COP',
+  unit: MARKET.currency,
   height: 260,
 });
 ---
@@ -108,28 +110,28 @@ const costTypeChartSvg = barChartSVG(costTypePoints, {
         <div class="swal-card-inner">
           <div class="kpi-label swal-kicker">Costo combustible total</div>
           <div class="kpi-value">{`$${(totalFuel / 1_000_000).toFixed(2)}M`}</div>
-          <div class="kpi-sub">COP · {fuelLogs.length} cargas</div>
+          <div class="kpi-sub">{MARKET.currency} · {fuelLogs.length} cargas</div>
         </div>
       </article>
       <article class="kpi swal-card-frame">
         <div class="swal-card-inner">
           <div class="kpi-label swal-kicker">Costo mantenimiento</div>
           <div class="kpi-value">{`$${(totalMaint / 1_000_000).toFixed(2)}M`}</div>
-          <div class="kpi-sub">COP · {maintenance.length} servicios</div>
+          <div class="kpi-sub">{MARKET.currency} · {maintenance.length} servicios</div>
         </div>
       </article>
       <article class="kpi swal-card-frame">
         <div class="swal-card-inner">
           <div class="kpi-label swal-kicker">Costo total operativo</div>
           <div class="kpi-value">{`$${((totalFuel + totalMaint) / 1_000_000).toFixed(2)}M`}</div>
-          <div class="kpi-sub">COP · toda la flota</div>
+          <div class="kpi-sub">{MARKET.currency} · toda la flota</div>
         </div>
       </article>
       <article class="kpi swal-card-frame">
         <div class="swal-card-inner">
           <div class="kpi-label swal-kicker">Eficiencia promedio</div>
-          <div class="kpi-value">{avgKmPerLiter}{avgKmPerLiter === '—' ? '' : ' km/L'}</div>
-          <div class="kpi-sub">{fuelEff.km > 0 ? `Sobre ${fuelEff.km.toLocaleString('es-CO')} km recorridos` : 'Se necesitan 2 cargas por vehículo'}</div>
+          <div class="kpi-value">{avgKmPerLiter}{avgKmPerLiter === '—' ? '' : ` ${MARKET.efficiencyUnit}`}</div>
+          <div class="kpi-sub">{fuelEff.km > 0 ? `Sobre ${formatNumber(fuelEff.km, MARKET)} km recorridos` : 'Se necesitan 2 cargas por vehículo'}</div>
         </div>
       </article>
     </div>

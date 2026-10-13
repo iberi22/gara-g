@@ -12,6 +12,7 @@ import { listEntities } from '../../../lib/domain.js';
 import { unreadOnly, sortNewestFirst, unreadCount } from '../../../lib/notifications.js';
 import { instanceIdFor } from '../../../garage/domain/tenant.js';
 import { notificationTitleLabel, severityLabel } from '../../../lib/alertLabels';
+import { formatDateTime } from '../../../lib/market.js';
 
 // Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
 // La semilla solo se escribe para el tenant demo.
@@ -65,7 +66,7 @@ const unread = unreadCount(all);
             <div class="g-notif-body">
               <strong>{notificationTitleLabel(n.title)}</strong>
               <p>{n.body}</p>
-              <small>{n.createdAt ? new Date(n.createdAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : ''}{n.severity ? ` · ${severityLabel(n.severity)}` : ''}</small>
+              <small>{n.createdAt ? formatDateTime(n.createdAt) : ''}{n.severity ? ` · ${severityLabel(n.severity)}` : ''}</small>
             </div>
             {!n.readAt && (
               <button

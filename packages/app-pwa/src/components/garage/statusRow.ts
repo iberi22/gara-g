@@ -8,6 +8,7 @@
  */
 import type { Commitment, GarageVehicle, MonitoringState, ViewMode } from '../../garage/contracts';
 import { formatTimeAgo } from './formatters';
+import { formatNumber } from '../../lib/market';
 
 /** Un hecho de la fila: etiqueta corta (ya en mayusculas) y valor. */
 export interface StatusFact {
@@ -52,7 +53,7 @@ export function buildStatusFacts(
     facts.push({ id: `overdue-${c.id}`, label: shortLabel(c.title), value: 'VENCIDO', urgent: true });
   }
 
-  // 2. Documento o compromiso mas proximo (SOAT,Revision, etc.).
+  // 2. Documento o compromiso mas proximo (SOAP/Revisión Técnica, etc.).
   const next = (vehicle.commitments ?? [])
     .filter((c) => c.status !== 'done' && c.urgency !== 'overdue')
     .sort((a, b) => (a.remainingDays ?? 999) - (b.remainingDays ?? 999))[0];
@@ -85,7 +86,7 @@ export function buildStatusFacts(
 
   // 4. Odometro.
   if (vehicle.odometerKm !== undefined && vehicle.odometerKm !== null) {
-    facts.push({ id: 'odo', label: vehicle.usageUnit === 'h' ? 'HORAS' : 'KM', value: Math.round(vehicle.odometerKm).toLocaleString('es-CO') });
+    facts.push({ id: 'odo', label: vehicle.usageUnit === 'h' ? 'HORAS' : 'KM', value: formatNumber(Math.round(vehicle.odometerKm)) });
   }
 
   // 5. Alertas activas.
@@ -133,7 +134,7 @@ const ACTION_STOPWORDS = new Set([
 
 /**
  * Recorta un titulo de compromiso a una etiqueta corta de una palabra en mayusculas y
- * sin tildes: "Renovar SOAT" -> "SOAT", "Cambio de aceite 10W-40" -> "ACEITE",
+ * sin tildes: "Renovar SOAP" -> "SOAP", "Cambio de aceite 10W-40" -> "ACEITE",
  * "Revisión técnica" -> "REVISION".
  */
 export function shortLabel(title: string): string {

@@ -13,6 +13,20 @@
 
 import { domainConfig } from './domain.config.js';
 import { createEntity, listEntities } from './domain.js';
+import { MARKET, LITERS_PER_GALLON } from './market.js';
+import { formatRutBody } from './rut.js';
+
+/**
+ * La demo del tenant `demo-flota` (desarrollo y e2e) usa las ciudades, las estaciones, los
+ * telefonos y los documentos del mercado activo: antes eran de Colombia y la app de una
+ * flota chilena mostraba "Bogotá Norte" y "SOAT". Las PATENTES y los VIN de este seed se
+ * dejan como estan a proposito (ver PR): son filas de un tenant de desarrollo que el cliente
+ * no ve, y los specs de telemetria de e2e (tests/e2e/helpers/telemetry.ts) los usan como
+ * identificadores estables.
+ */
+const DEMO = MARKET.demoFleets;
+/** RUT ficticios de la demo (rango 30.000.000+, por encima de los RUN emitidos). */
+const DEMO_IDS = [30_500_101, 30_500_102, 30_500_103, 30_500_104, 30_500_105].map((n) => formatRutBody(n));
 
 /**
  * Tenant de los DATOS DEMO. No es el tenant de la app: es donde vive el seed
@@ -53,9 +67,9 @@ export async function ensureSeedData(instanceId: string = DEMO_INSTANCE_ID): Pro
   const fleet1 = await createEntity(
     'fleet',
     rec({
-      name: 'Bogotá Norte',
+      name: DEMO[0].name,
       organizationId: 'org-demo',
-      region: 'Bogotá D.C.',
+      region: DEMO[0].region,
       tags: ['urbano', 'livianos'],
       managerId: 'mgr-1',
     }) as any,
@@ -65,9 +79,9 @@ export async function ensureSeedData(instanceId: string = DEMO_INSTANCE_ID): Pro
   const fleet2 = await createEntity(
     'fleet',
     rec({
-      name: 'Medellín Sur',
+      name: DEMO[1].name,
       organizationId: 'org-demo',
-      region: 'Antioquia',
+      region: DEMO[1].region,
       tags: ['mixto', 'reparto'],
       managerId: 'mgr-2',
     }) as any,
@@ -77,9 +91,9 @@ export async function ensureSeedData(instanceId: string = DEMO_INSTANCE_ID): Pro
   const fleet3 = await createEntity(
     'fleet',
     rec({
-      name: 'Cali Logística',
+      name: DEMO[2].name,
       organizationId: 'org-demo',
-      region: 'Valle del Cauca',
+      region: DEMO[2].region,
       tags: ['pesados', 'larga-distancia'],
       managerId: 'mgr-3',
     }) as any,
@@ -229,50 +243,50 @@ export async function ensureSeedData(instanceId: string = DEMO_INSTANCE_ID): Pro
   const driversSpec = [
     {
       name: 'Carlos Méndez',
-      cedula: '79.456.123',
-      licenseCategory: 'C1',
+      cedula: DEMO_IDS[0],
+      licenseCategory: MARKET.truckLicenseClass,
       licenseExpiry: '2027-08-15',
-      phone: '+57 310 4567890',
+      phone: `${MARKET.phonePrefix} 0000 0101`,
       status: 'active',
       fleetId: fleet1.id,
       vehicleId: vehicles[0].id,
     },
     {
       name: 'Lucía Ramírez',
-      cedula: '52.847.612',
-      licenseCategory: 'B1',
+      cedula: DEMO_IDS[1],
+      licenseCategory: MARKET.licenseClasses[0].value,
       licenseExpiry: '2026-12-01',
-      phone: '+57 311 2345678',
+      phone: `${MARKET.phonePrefix} 0000 0102`,
       status: 'active',
       fleetId: fleet1.id,
       vehicleId: vehicles[2].id,
     },
     {
       name: 'Andrés Quintero',
-      cedula: '71.245.891',
-      licenseCategory: 'C2',
+      cedula: DEMO_IDS[2],
+      licenseCategory: MARKET.truckLicenseClass,
       licenseExpiry: '2025-11-20',
-      phone: '+57 312 8765432',
+      phone: `${MARKET.phonePrefix} 0000 0103`,
       status: 'suspended',
       fleetId: fleet2.id,
       vehicleId: vehicles[3].id,
     },
     {
       name: 'María López',
-      cedula: '43.621.547',
-      licenseCategory: 'C1',
+      cedula: DEMO_IDS[3],
+      licenseCategory: MARKET.truckLicenseClass,
       licenseExpiry: '2027-02-28',
-      phone: '+57 313 1122334',
+      phone: `${MARKET.phonePrefix} 0000 0104`,
       status: 'active',
       fleetId: fleet2.id,
       vehicleId: vehicles[5].id,
     },
     {
       name: 'Pedro Salazar',
-      cedula: '16.789.234',
-      licenseCategory: 'C3',
+      cedula: DEMO_IDS[4],
+      licenseCategory: MARKET.truckLicenseClass,
       licenseExpiry: '2028-05-10',
-      phone: '+57 314 9988776',
+      phone: `${MARKET.phonePrefix} 0000 0105`,
       status: 'active',
       fleetId: fleet3.id,
       vehicleId: vehicles[6].id,
@@ -311,7 +325,7 @@ export async function ensureSeedData(instanceId: string = DEMO_INSTANCE_ID): Pro
   // === FUEL LOGS (30) ===
   for (let i = 0; i < 30; i++) {
     const veh = vehicles[i % vehicles.length];
-    const gallons = 10 + Math.floor(Math.random() * 30);
+    const liters = 120 + Math.floor(Math.random() * 160);
     const km = veh.mileage ? Math.floor(veh.mileage * 0.6) + i * 100 : i * 100;
     await createEntity(
       'fuelLog',
@@ -320,17 +334,20 @@ export async function ensureSeedData(instanceId: string = DEMO_INSTANCE_ID): Pro
         driverId: driversSpec[i % driversSpec.length].cedula,
         date: new Date(Date.now() - i * 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         km,
-        gallons,
-        cost: gallons * 14500,
-        station: ['Terpel', 'Primax', 'Mobil'][i % 3],
-        kmPerGallon: 25 + Math.random() * 30,
+        // Se guardan las dos unidades: `liters` (unidad del mercado) y `gallons` (campo heredado).
+        liters,
+        gallons: Math.round((liters / LITERS_PER_GALLON) * 10) / 10,
+        cost: Math.round(liters * 1050),
+        station: MARKET.demoFuelStations[i % MARKET.demoFuelStations.length],
+        kmPerLiter: Math.round((2.2 + Math.random() * 1.4) * 10) / 10,
+        kmPerGallon: Math.round((2.2 + Math.random() * 1.4) * LITERS_PER_GALLON * 10) / 10,
       }) as any,
       DEMO_INSTANCE_ID,
     );
   }
 
   // === DOCUMENTOS (8) ===
-  const docKinds = ['SOAT', 'Tecnomecánica', 'Tarjeta de propiedad', 'Póliza todo riesgo'];
+  const docKinds = [...MARKET.documentKinds];
   for (let i = 0; i < 8; i++) {
     const veh = vehicles[i % vehicles.length];
     await createEntity(
@@ -350,40 +367,10 @@ export async function ensureSeedData(instanceId: string = DEMO_INSTANCE_ID): Pro
   }
 
   // === GEOCERCAS (4) ===
-  const geofenceSpec = [
-    {
-      name: 'Centro de Distribución Bogotá',
-      fleetId: fleet1.id,
-      polygon: '4.7110,-74.0721 4.6510,-74.0721 4.6510,-74.1421 4.7110,-74.1421',
-      type: 'depot',
-      alertOnEnter: false,
-      alertOnExit: true,
-    },
-    {
-      name: 'Cliente Norte - Centro Comercial',
-      fleetId: fleet1.id,
-      polygon: '4.7350,-74.0500 4.7250,-74.0500 4.7250,-74.0400 4.7350,-74.0400',
-      type: 'client',
-      alertOnEnter: true,
-      alertOnExit: false,
-    },
-    {
-      name: 'Taller Autorizado Medellín',
-      fleetId: fleet2.id,
-      polygon: '6.2476,-75.5658 6.2376,-75.5658 6.2376,-75.5758 6.2476,-75.5758',
-      type: 'service',
-      alertOnEnter: true,
-      alertOnExit: false,
-    },
-    {
-      name: 'Puerto de Buenaventura',
-      fleetId: fleet3.id,
-      polygon: '3.8801,-77.0311 3.8601,-77.0311 3.8601,-77.0511 3.8801,-77.0511',
-      type: 'port',
-      alertOnEnter: true,
-      alertOnExit: true,
-    },
-  ];
+  // Nombre y poligono salen del mercado, para que la geocerca no diga una ciudad que no es
+  // la de sus coordenadas.
+  const fleetOfGeofence = [fleet1.id, fleet1.id, fleet2.id, fleet3.id];
+  const geofenceSpec = MARKET.demoGeofences.map((g, i) => ({ ...g, fleetId: fleetOfGeofence[i] }));
   for (const g of geofenceSpec) {
     await createEntity('geofence', rec(g) as any, DEMO_INSTANCE_ID);
   }
@@ -394,17 +381,17 @@ export async function ensureSeedData(instanceId: string = DEMO_INSTANCE_ID): Pro
     {
       kind: 'geofence',
       severity: 'medium',
-      message: 'Salida no autorizada de geocerca Centro de Distribución',
+      message: `Salida no autorizada de geocerca ${MARKET.demoGeofences[0].name}`,
     },
     { kind: 'maintenance', severity: 'low', message: 'Mantenimiento programado vence en 5 días' },
-    { kind: 'document', severity: 'high', message: 'SOAT próximo a vencer - ABC-001' },
+    { kind: 'document', severity: 'high', message: `${MARKET.documentKinds[0]} próximo a vencer - ABC-001` },
     { kind: 'fuel', severity: 'low', message: 'Nivel de combustible bajo (15%)' },
     { kind: 'engine', severity: 'critical', message: 'Código DTC P0420 - Catalizador ineficiente' },
     { kind: 'driver', severity: 'medium', message: 'Conductor sin licencia vigente detectado' },
     { kind: 'speed', severity: 'medium', message: 'Velocidad sostenida sobre límite por 5 min' },
     { kind: 'geofence', severity: 'low', message: 'Entrada a zona restringida fuera de horario' },
     { kind: 'maintenance', severity: 'medium', message: 'Frenos - Pastillas desgastadas (>80%)' },
-    { kind: 'document', severity: 'low', message: 'Tecnomecánica vence en 30 días - DEF-102' },
+    { kind: 'document', severity: 'low', message: `${MARKET.documentKinds[1]} vence en 30 días - DEF-102` },
     { kind: 'engine', severity: 'high', message: 'Temperatura refrigerante elevada (105°C)' },
   ];
   for (let i = 0; i < 12; i++) {

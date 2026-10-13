@@ -2,8 +2,8 @@
  * indicators.ts — Las ocho pastillas del HUD (cuatro a cada lado del 3D). Los ids son los
  * mismos que usa `mock.ts`, porque la UI y sus tests los reconocen.
  *
- *   left:  health (salud general) · odo (odometro) · next (proximo cambio) · docs (SOAT)
- *   right: eff (consumo km/gal) · cost (gasto del mes) · alerts (alertas sin reconocer)
+ *   left:  health (salud general) · odo (odometro) · next (proximo cambio) · docs (SOAP)
+ *   right: eff (consumo km/L) · cost (gasto del mes) · alerts (alertas sin reconocer)
  *          link (APK/OBD: en linea o ultima señal)
  *
  * Reglas de tono, iguales a los umbrales de `statusForHealth` para que la pastilla y el
@@ -12,11 +12,24 @@
  * documento); los numeros sin escala no lo llevan.
  *
  * El gasto del mes usa el mes natural en curso respecto a `now`; el consumo se calcula con
- * el promedio de `kmPerGallon` de las cargas (el campo que ya calcula `computeKmPerGallon`
- * de lib/fuelLog.ts). Sin datos, el valor es "—" y el tono `neutral`: es preferible a un 0
+ * el promedio del rendimiento de las cargas (el campo que ya calcula `computeKmPerLiter` de
+ * lib/fuelLog.ts). Sin datos, el valor es "—" y el tono `neutral`: es preferible a un 0
  * que sugiere "consume cero".
+ *
+ * Las unidades, la moneda y el nombre del documento obligatorio salen de lib/market.ts: en
+ * Chile el HUD dice SOAP y km/L; en Colombia, SOAT y km/gal. `buildIndicators` acepta el
+ * mercado como parametro para que los tests comprueben los dos sin tocar el entorno.
  */
 import type { Commitment, Indicator, PartState, Tone, UsageUnit } from '../contracts';
+import {
+  LITERS_PER_GALLON,
+  MARKET,
+  documentKindLabel,
+  formatMoney,
+  formatNumber,
+  volumeLiters,
+  type MarketConfig,
+} from '../../lib/market';
 import { SOON_DAYS } from './commitments';
 import {
   type AlertRow,
@@ -71,8 +84,11 @@ export function toneForDays(days: number | undefined): Tone {
   return 'ok';
 }
 
-const km = (n: number) => n.toLocaleString('es-CO');
-const cop = (n: number) => `$${Math.round(n).toLocaleString('es-CO')}`;
+const km = (n: number, market: MarketConfig) => formatNumber(n, market);
+const cop = (n: number, market: MarketConfig) => formatMoney(Math.round(n), market);
+/** Consumo del vehiculo en la unidad del mercado a partir de km/L. */
+const eff = (kmPerLiter: number, market: MarketConfig): number =>
+  market.volumeUnit === 'L' ? kmPerLiter : kmPerLiter * LITERS_PER_GALLON;
 
 /** "hace 20 s" / "hace 3 días": el texto que el usuario lee en la pastilla. */
 export function sinceLabel(ms: number | undefined, now: Date): string | undefined {
@@ -87,7 +103,7 @@ export function sinceLabel(ms: number | undefined, now: Date): string | undefine
   return `Última señal hace ${d} ${d === 1 ? 'día' : 'días'}`;
 }
 
-/** SOAT del vehiculo (o el documento mas proximo que se parezca a un SOAT). */
+/** SOAP/SOAT del vehiculo (o el documento mas proximo que se parezca). */
 function soatDays(
   vehicle: VehicleRow,
   documents: { kind?: string; expiry?: string }[],
@@ -96,11 +112,15 @@ function soatDays(
   const own = str(vehicle.soatExpiry);
   const fromVehicle = own ? daysUntil(own, now) : undefined;
   if (fromVehicle !== undefined) return fromVehicle;
-  const doc = documents.find((d) => normalizeText(d.kind ?? '').includes('soat'));
+  // El tipo guardado puede venir en cualquiera de los dos vocabularios ('SOAT' o 'SOAP').
+  const doc = documents.find((d) => {
+    const k = normalizeText(d.kind ?? '');
+    return k.includes('soat') || k.includes('soap');
+  });
   return doc ? daysUntil(str(doc.expiry), now) : undefined;
 }
 
-function leftIndicators(input: IndicatorsInput): Indicator[] {
+function leftIndicators(input: IndicatorsInput, market: MarketConfig): Indicator[] {
   const health = input.overallHealthPct;
   const out: Indicator[] = [];
 
@@ -119,7 +139,7 @@ function leftIndicators(input: IndicatorsInput): Indicator[] {
   out.push({
     id: 'odo',
     label: hours ? 'Horómetro' : 'Odómetro',
-    value: input.odometerKm === undefined ? '—' : km(input.odometerKm),
+    value: input.odometerKm === undefined ? '—' : km(input.odometerKm, market),
     unit: input.odometerKm === undefined ? undefined : usage,
     tone: 'neutral',
   });
@@ -134,7 +154,7 @@ function leftIndicators(input: IndicatorsInput): Indicator[] {
     out.push({
       id: 'next',
       label: 'Próximo cambio',
-      value: over === undefined ? '—' : `${over < 0 ? '−' : ''}${km(Math.abs(over))}`,
+      value: over === undefined ? '—' : `${over < 0 ? '−' : ''}${km(Math.abs(over), market)}`,
       unit: over === undefined ? undefined : next.remainingKm !== undefined ? usage : 'días',
       tone: next.urgency === 'overdue' ? 'critical' : next.urgency === 'soon' ? 'warn' : 'ok',
       hint: next.title,
@@ -144,69 +164,85 @@ function leftIndicators(input: IndicatorsInput): Indicator[] {
   const docDays = soatDays(input.vehicle, input.documents ?? [], input.now);
   out.push({
     id: 'docs',
-    label: 'SOAT',
+    label: documentKindLabel('SOAT', market),
     value: docDays === undefined ? '—' : String(Math.abs(docDays)),
     unit: docDays === undefined ? undefined : 'días',
     tone: toneForDays(docDays),
     progress: docDays === undefined ? undefined : Math.max(0, Math.min(1, docDays / 365)),
-    hint: docDays === undefined ? 'Sin SOAT registrado' : docDays < 0 ? 'Vencido' : undefined,
+    hint:
+      docDays === undefined
+        ? `Sin ${documentKindLabel('SOAT', market)} registrado`
+        : docDays < 0
+          ? 'Vencido'
+          : undefined,
   });
 
   return out;
 }
 
 /**
- * Consumo de maquinaria en gal/h: galones cargados entre la primera y la ultima carga
- * dividido por las horas de motor entre ellas (la primera carga no cuenta: llena lo que
- * se gasto ANTES del periodo). Sin dos cargas con horometro no hay dato.
+ * Consumo de maquinaria en volumen por hora: volumen cargado entre la primera y la ultima
+ * carga dividido por las horas de motor entre ellas (la primera carga no cuenta: llena lo
+ * que se gasto ANTES del periodo). Sin dos cargas con horometro no hay dato.
+ * El volumen se lee en litros (volumeLiters) y se devuelve en la unidad del mercado.
  */
-function gallonsPerHour(fuelLogs: FuelLogRow[]): { value: number; n: number } | undefined {
+function volumePerHour(
+  fuelLogs: FuelLogRow[],
+  market: MarketConfig,
+): { value: number; n: number } | undefined {
   const logs = fuelLogs
-    .map((f) => ({ h: num(f.km), gal: num(f.gallons) }))
-    .filter((f): f is { h: number; gal: number } => f.h !== undefined && f.gal !== undefined && f.gal > 0)
+    .map((f) => ({ h: num(f.km), liters: volumeLiters(f) }))
+    .filter((f): f is { h: number; liters: number } => f.h !== undefined && f.liters !== null && f.liters > 0)
     .sort((a, b) => a.h - b.h);
   if (logs.length < 2) return undefined;
   const span = logs[logs.length - 1].h - logs[0].h;
   if (span <= 0) return undefined;
-  const gal = logs.slice(1).reduce((a, f) => a + f.gal, 0);
-  return { value: gal / span, n: logs.length };
+  const liters = logs.slice(1).reduce((a, f) => a + f.liters, 0);
+  const perHour = liters / span;
+  return { value: market.volumeUnit === 'L' ? perHour : perHour / LITERS_PER_GALLON, n: logs.length };
 }
 
-function rightIndicators(input: IndicatorsInput): Indicator[] {
+function rightIndicators(input: IndicatorsInput, market: MarketConfig): Indicator[] {
   const out: Indicator[] = [];
 
   if (input.unit === 'h') {
-    const gph = gallonsPerHour(input.fuelLogs);
+    const vph = volumePerHour(input.fuelLogs, market);
     out.push({
       id: 'eff',
       label: 'Consumo',
-      value: gph === undefined ? '—' : gph.value.toFixed(1),
-      unit: gph === undefined ? undefined : 'gal/h',
+      value: vph === undefined ? '—' : vph.value.toFixed(1),
+      unit: vph === undefined ? undefined : `${market.volumeUnit}/h`,
       tone: 'neutral',
-      hint: gph ? `${gph.n} cargas` : 'Registra dos cargas con horómetro',
+      hint: vph ? `${vph.n} cargas` : 'Registra dos cargas con horómetro',
     });
-    return out.concat(restIndicators(input));
+    return out.concat(restIndicators(input, market));
   }
 
-  // Consumo: promedio de los km/gal que ya trae cada carga.
+  // Consumo: promedio del rendimiento de las cargas, normalizado a km/L.
   const effs = input.fuelLogs
-    .map((f) => num(f.kmPerGallon))
+    .map((f) => {
+      const perLiter = num(f.kmPerLiter);
+      if (perLiter !== undefined && perLiter > 0) return perLiter;
+      const perGallon = num(f.kmPerGallon);
+      return perGallon !== undefined && perGallon > 0 ? perGallon / LITERS_PER_GALLON : undefined;
+    })
     .filter((v): v is number => v !== undefined && v > 0);
-  const eff = effs.length ? effs.reduce((a, b) => a + b, 0) / effs.length : undefined;
+  const avgKmPerLiter = effs.length ? effs.reduce((a, b) => a + b, 0) / effs.length : undefined;
   out.push({
     id: 'eff',
     label: 'Consumo',
-    value: eff === undefined ? '—' : eff.toFixed(0),
-    unit: eff === undefined ? undefined : 'km/gal',
-    tone: eff === undefined ? 'neutral' : eff < 15 ? 'warn' : 'ok',
+    value: avgKmPerLiter === undefined ? '—' : eff(avgKmPerLiter, market).toFixed(0),
+    unit: avgKmPerLiter === undefined ? undefined : market.efficiencyUnit,
+    // 4 km/L es el equivalente de 15 km/gal, el corte historico de la pastilla.
+    tone: avgKmPerLiter === undefined ? 'neutral' : avgKmPerLiter < 4 ? 'warn' : 'ok',
     hint: effs.length ? `${effs.length} cargas` : 'Sin cargas registradas',
   });
 
-  return out.concat(restIndicators(input));
+  return out.concat(restIndicators(input, market));
 }
 
 /** Lo que no depende de la unidad: gasto del mes, alertas, senal. */
-function restIndicators(input: IndicatorsInput): Indicator[] {
+function restIndicators(input: IndicatorsInput, market: MarketConfig): Indicator[] {
   const out: Indicator[] = [];
   // Gasto del mes natural en curso.
   const monthStart = Date.parse(`${input.now.toISOString().slice(0, 7)}-01T00:00:00Z`);
@@ -219,7 +255,7 @@ function restIndicators(input: IndicatorsInput): Indicator[] {
   out.push({
     id: 'cost',
     label: 'Gasto del mes',
-    value: cost === 0 ? '—' : cop(cost),
+    value: cost === 0 ? '—' : cop(cost, market),
     tone: 'neutral',
   });
 
@@ -260,8 +296,11 @@ function restIndicators(input: IndicatorsInput): Indicator[] {
 }
 
 /** Las ocho pastillas del HUD. */
-export function buildIndicators(input: IndicatorsInput): { left: Indicator[]; right: Indicator[] } {
-  return { left: leftIndicators(input), right: rightIndicators(input) };
+export function buildIndicators(
+  input: IndicatorsInput,
+  market: MarketConfig = MARKET,
+): { left: Indicator[]; right: Indicator[] } {
+  return { left: leftIndicators(input, market), right: rightIndicators(input, market) };
 }
 
 /**

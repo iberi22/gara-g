@@ -5,6 +5,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { CHILE_DEMO_INSTANCE_ID, buildChileDemo, countByEntity, rutDv } from '../src/lib/demoChile';
+import { isValidVin } from '../src/garage/telemetry/ingest';
 import { PRODUCTION_D1_ID, applySeed, buildE2EUserRow, buildSeedSql, countRows } from '../scripts/seed-demo-chile.mjs';
 import { verifyPassword } from '../src/lib/password';
 
@@ -56,6 +57,17 @@ describe('seed-demo-chile', () => {
     const vehicles = rows.filter((r) => r.entity === 'vehicle').map((r) => r.data);
     for (const v of vehicles) expect(v.plate).toMatch(/^ZZ[A-Z]{2}-\d{2}$/);
     expect(new Set(vehicles.map((v) => v.plate)).size).toBe(10);
+
+    // VIN: 17 caracteres ISO 3779 (sin I, O ni Q) y con digito verificador correcto. Es la
+    // regresion del 400 de la API de telemetria: los VIN escritos a mano traian I y O.
+    for (const v of vehicles) {
+      const vin = String(v.vin);
+      expect(vin, vin).toMatch(/^[A-HJ-NPR-Z0-9]{17}$/);
+      expect(vinCheckDigitIndependent(vin), vin).toBe(vin[8]);
+      // El validador REAL de la ruta de telemetria tiene que aceptarlos.
+      expect(isValidVin(vin), vin).toBe(true);
+    }
+    expect(new Set(vehicles.map((v) => v.vin)).size).toBe(10);
 
     const drivers = rows.filter((r) => r.entity === 'driver').map((r) => r.data);
     for (const d of drivers) {
@@ -120,3 +132,26 @@ describe('seed-demo-chile', () => {
     expect(rutDv(10_000_013)).toBe('K');
   });
 });
+
+/**
+ * Verificacion INDEPENDIENTE del digito verificador del VIN (49 CFR 565 / ISO 3779).
+ * Escrita aparte a proposito: si se usara `vinCheckDigit` de demoChile.ts, el test daria por
+ * bueno cualquier error de esa funcion.
+ */
+function vinCheckDigitIndependent(vin: string): string {
+  const translit: Record<string, number> = {
+    A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, G: 7, H: 8,
+    J: 1, K: 2, L: 3, M: 4, N: 5, P: 7, R: 9,
+    S: 2, T: 3, U: 4, V: 5, W: 6, X: 7, Y: 8, Z: 9,
+  };
+  const weights = [8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2];
+  let sum = 0;
+  for (let i = 0; i < 17; i++) {
+    const ch = vin[i];
+    const value = /[0-9]/.test(ch) ? Number(ch) : translit[ch];
+    if (value === undefined) return '?';
+    sum += value * weights[i];
+  }
+  const r = sum % 11;
+  return r === 10 ? 'X' : String(r);
+}

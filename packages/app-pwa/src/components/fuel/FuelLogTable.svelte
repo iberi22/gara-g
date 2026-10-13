@@ -2,7 +2,8 @@
   import { DEFAULT_INSTANCE_ID } from '../../lib/domain.config';
   import { onMount } from 'svelte';
   import { listEntities, createEntity, deleteEntity } from '../../lib/domain';
-  import { computeKmPerGallon, type FuelLogData, type FuelLogRecord } from '../../lib/fuelLog';
+  import { computeKmPerLiter, type FuelLogData, type FuelLogRecord } from '../../lib/fuelLog';
+  import { MARKET, LITERS_PER_GALLON, formatDecimal, formatMoney, formatVolume, volumeLiters } from '../../lib/market';
   import { toast } from '../../lib/toast';
 
   interface Props {
@@ -24,7 +25,8 @@
   let driverId: string = $state('');
   let date: string = $state(new Date().toISOString().slice(0, 10));
   let km: number | '' = $state('');
-  let gallons: number | '' = $state('');
+  // El volumen se captura en la unidad del mercado (litros en Chile).
+  let volume: number | '' = $state('');
   let cost: number | '' = $state('');
   let station: string = $state('');
   let formError: string = $state('');
@@ -34,7 +36,7 @@
     loadError = '';
     try {
       const raw = await listEntities<FuelLogData>('fuelLog', instanceId);
-      logs = computeKmPerGallon(raw);
+      logs = computeKmPerLiter(raw, MARKET);
     } catch (err) {
       loadError = err instanceof Error && err.message ? err.message : 'error desconocido';
     } finally {
@@ -51,13 +53,17 @@
     if (saving) return;
     formError = '';
 
-    if (!vehicleId || !driverId || !date || km === '' || gallons === '' || cost === '') {
+    if (!vehicleId || !driverId || !date || km === '' || volume === '' || cost === '') {
       formError = 'Por favor completa todos los campos requeridos.';
       return;
     }
 
     saving = true;
     try {
+      // Se guarda el volumen en la unidad del mercado y ADEMAS su equivalente en galones:
+      // asi las filas nuevas las lee tanto la interfaz (volumeLiters) como cualquier
+      // consumidor heredado que aun mire `gallons`.
+      const liters = MARKET.volumeUnit === 'L' ? Number(volume) : Number(volume) * LITERS_PER_GALLON;
       await createEntity(
         'fuelLog',
         {
@@ -65,9 +71,11 @@
           driverId,
           date,
           km: Number(km),
-          gallons: Number(gallons),
+          liters: Math.round(liters * 100) / 100,
+          gallons: Math.round((liters / LITERS_PER_GALLON) * 100) / 100,
           cost: Number(cost),
           station: station || 'Estación General',
+          kmPerLiter: 0,
           kmPerGallon: 0,
         },
         instanceId
@@ -78,7 +86,7 @@
       driverId = '';
       date = new Date().toISOString().slice(0, 10);
       km = '';
-      gallons = '';
+      volume = '';
       cost = '';
       station = '';
 
@@ -115,7 +123,7 @@
   <div class="header flex justify-between items-center">
     <div>
       <h2 class="text-2xl font-bold text-[var(--swal-text)]">Bitácora de Combustible</h2>
-      <p class="text-sm text-[var(--swal-text-muted)]">Control de consumos y rendimiento km/galón</p>
+      <p class="text-sm text-[var(--swal-text-muted)]">Control de consumos y {MARKET.efficiencyHelp}</p>
     </div>
   </div>
 
@@ -176,20 +184,20 @@
         />
       </div>
       <div>
-        <label for="gallons" class="block text-xs font-medium text-[var(--swal-text-muted)] mb-1">Galones *</label>
+        <label for="liters" class="block text-xs font-medium text-[var(--swal-text-muted)] mb-1">{MARKET.volumeUnitName} ({MARKET.volumeUnit}) *</label>
         <input
-          id="gallons"
+          id="liters"
           type="number"
           step="0.01"
-          data-testid="input-gallons"
-          bind:value={gallons}
+          data-testid="input-liters"
+          bind:value={volume}
           placeholder="12.5"
           class="w-full bg-[var(--swal-bg)] border border-[var(--swal-border)] rounded px-2.5 py-1.5 text-sm text-[var(--swal-text)]"
           required
         />
       </div>
       <div>
-        <label for="cost" class="block text-xs font-medium text-[var(--swal-text-muted)] mb-1">Costo Total ($) *</label>
+        <label for="cost" class="block text-xs font-medium text-[var(--swal-text-muted)] mb-1">Costo Total ({MARKET.currency}) *</label>
         <input
           id="cost"
           type="number"
@@ -207,7 +215,7 @@
           type="text"
           data-testid="input-station"
           bind:value={station}
-          placeholder="Terpel Av. El Dorado"
+          placeholder={MARKET.fuelStationPlaceholder}
           class="w-full bg-[var(--swal-bg)] border border-[var(--swal-border)] rounded px-2.5 py-1.5 text-sm text-[var(--swal-text)]"
         />
       </div>
@@ -254,10 +262,10 @@
             <th scope="col" class="p-3">Conductor ID</th>
             <th scope="col" class="p-3">Fecha</th>
             <th scope="col" class="p-3 text-right">Km</th>
-            <th scope="col" class="p-3 text-right">Galones</th>
+            <th scope="col" class="p-3 text-right">{MARKET.volumeUnitName}</th>
             <th scope="col" class="p-3 text-right">Costo</th>
             <th scope="col" class="p-3">Estación</th>
-            <th scope="col" class="p-3 text-right text-[var(--swal-accent-text)] font-bold">Km/Galón</th>
+            <th scope="col" class="p-3 text-right text-[var(--swal-accent-text)] font-bold">{MARKET.efficiencyColumn}</th>
             <th scope="col" class="p-3 text-right">Acciones</th>
           </tr>
         </thead>
@@ -291,11 +299,11 @@
                 <td class="p-3 font-mono text-[var(--swal-text-muted)]">{log.driverId}</td>
                 <td class="p-3 text-[var(--swal-text)]" data-testid="col-date">{log.date}</td>
                 <td class="p-3 text-right font-mono">{log.km?.toLocaleString()} km</td>
-                <td class="p-3 text-right font-mono">{log.gallons} gal</td>
-                <td class="p-3 text-right font-mono">${log.cost?.toLocaleString()}</td>
+                <td class="p-3 text-right font-mono">{formatVolume(volumeLiters(log), MARKET)}</td>
+                <td class="p-3 text-right font-mono">{formatMoney(log.cost, MARKET)}</td>
                 <td class="p-3 text-[var(--swal-text-muted)]">{log.station || '—'}</td>
-                <td class="p-3 text-right font-mono text-[var(--swal-accent-text)] font-bold" data-testid="col-kmPerGallon">
-                  {log.kmPerGallon > 0 ? log.kmPerGallon.toFixed(2) : '—'}
+                <td class="p-3 text-right font-mono text-[var(--swal-accent-text)] font-bold" data-testid="col-kmPerLiter">
+                  {(log.kmPerLiter ?? 0) > 0 ? formatDecimal(log.kmPerLiter ?? 0, 2, MARKET) : '—'}
                 </td>
                 <td class="p-3 text-right">
                   <button

@@ -6,6 +6,7 @@ import PageHeader from '../../../../components/PageHeader.astro';
 import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../../lib/fleetSeed.js';
 import { getEntity, listEntities } from '../../../../lib/domain.js';
 import { instanceIdFor } from '../../../../garage/domain/tenant.js';
+import { MARKET } from '../../../../lib/market.js';
 
 // Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
 // La semilla solo se escribe para el tenant demo.
@@ -72,19 +73,9 @@ try {
     initialData={driver}
     fields={[
       { name: 'name', label: 'Nombre completo', type: 'text', required: true },
-      { name: 'cedula', label: 'Cédula', type: 'text', required: true },
+      { name: 'cedula', label: MARKET.driverIdLabel, type: 'text', required: true, placeholder: MARKET.driverIdPlaceholder, help: MARKET.driverIdHelp },
       { name: 'licenseCategory', label: 'Categoría licencia', type: 'select', required: true,
-        options: [
-          { value: 'A1', label: 'A1 — Motos' },
-          { value: 'B1', label: 'B1 — Carros' },
-          { value: 'B2', label: 'B2 — Camionetas' },
-          { value: 'C1', label: 'C1 — Camiones livianos' },
-          { value: 'C2', label: 'C2 — Camiones pesados' },
-          { value: 'C3', label: 'C3 — Tractocamiones' },
-          { value: 'E1', label: 'E1 — Remolques' },
-          { value: 'E2', label: 'E2 — Semirremolques' },
-          { value: 'E3', label: 'E3 —full' },
-        ]
+        options: MARKET.licenseClasses.map((c) => ({ value: c.value, label: c.label }))
       },
       { name: 'licenseExpiry', label: 'Vencimiento licencia', type: 'date', required: true },
       { name: 'phone', label: 'Teléfono', type: 'tel' },

@@ -1,4 +1,5 @@
 import { computeNextService } from '../../lib/maintenance';
+import { MARKET, documentKindLabel, type MarketConfig } from '../../lib/market';
 /**
  * commitments.ts — Lo que el vehiculo DEBE: cambios de pieza proximos, mantenimientos
  * programados y documentos por vencer. Es la lista que la UI ordena por urgencia.
@@ -154,8 +155,12 @@ function maintenanceCommitments(input: CommitmentInput): Commitment[] {
   return out;
 }
 
-/** SOAT y tecnomecanica del propio vehiculo: `document` con `expiry`. */
-function documentCommitments(input: CommitmentInput): Commitment[] {
+/**
+ * Documentos del vehiculo (SOAP/Revisión Técnica en Chile) con su `expiry`.
+ * El tipo guardado puede venir en el vocabulario del otro mercado; `documentKindLabel` lo
+ * traduce para el titulo visible sin tocar el dato.
+ */
+function documentCommitments(input: CommitmentInput, market: MarketConfig): Commitment[] {
   const vehicleId = vehicleIdOf(input.vehicle);
   const out: Commitment[] = [];
   for (const d of input.documents) {
@@ -168,7 +173,7 @@ function documentCommitments(input: CommitmentInput): Commitment[] {
       id: `${vehicleId}-doc-${str(d.id) ?? normalizeText(kind).replace(/ +/g, '-')}`,
       vehicleId,
       kind: 'document',
-      title: `Renovar ${kind}`,
+      title: `Renovar ${documentKindLabel(kind, market)}`,
       dueDate: expiry.slice(0, 10),
       remainingDays,
       urgency: urgencyOf(undefined, remainingDays),
@@ -282,11 +287,14 @@ export function sortCommitments(items: Commitment[], perDay = DUE_SCALE_KM_PER_D
 }
 
 /** Lista de compromisos del vehiculo, ordenada y sin duplicados. */
-export function buildCommitments(input: CommitmentInput): Commitment[] {
+export function buildCommitments(
+  input: CommitmentInput,
+  market: MarketConfig = MARKET,
+): Commitment[] {
   const all = [
     ...partCommitments(input),
     ...maintenanceCommitments(input),
-    ...documentCommitments(input),
+    ...documentCommitments(input, market),
   ];
   return sortCommitments(dedupe(all), input.unit === 'h' ? DUE_SCALE_H_PER_DAY : DUE_SCALE_KM_PER_DAY);
 }
@@ -297,11 +305,14 @@ export function buildCommitments(input: CommitmentInput): Commitment[] {
  * `documents` y se deduplican por texto: el mismo documento no aparece dos veces aunque
  * este en los dos sitios.
  */
-export function vehicleDocumentExpiries(vehicle: VehicleRow): { kind: string; expiry: string }[] {
+export function vehicleDocumentExpiries(
+  vehicle: VehicleRow,
+  market: MarketConfig = MARKET,
+): { kind: string; expiry: string }[] {
   const out: { kind: string; expiry: string }[] = [];
   const soat = str(vehicle.soatExpiry);
-  if (soat) out.push({ kind: 'SOAT', expiry: soat.slice(0, 10) });
+  if (soat) out.push({ kind: documentKindLabel('SOAT', market), expiry: soat.slice(0, 10) });
   const tecno = str(vehicle.tecnoExpiry);
-  if (tecno) out.push({ kind: 'Tecnomecánica', expiry: tecno.slice(0, 10) });
+  if (tecno) out.push({ kind: documentKindLabel('Tecnomecánica', market), expiry: tecno.slice(0, 10) });
   return out;
 }

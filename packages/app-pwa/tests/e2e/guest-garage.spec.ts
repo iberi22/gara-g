@@ -64,7 +64,8 @@ test.describe('garage en modo invitado', () => {
     const dialog = page.getByRole('dialog');
     await slow(dialog).toBeVisible();
     await dialog.getByLabel('Modelo').selectOption({ label: 'Toyota Hilux' });
-    await dialog.getByLabel('Placa').fill('abc123');
+    // En Chile el campo se llama "Patente" (mercado activo): la copia visible cambio.
+    await dialog.getByLabel('Patente').fill('abc123');
     await dialog.getByLabel('Año').fill('2020');
     await dialog.getByLabel(/Kilometraje/).fill('45000');
     await dialog.getByRole('button', { name: 'Agregar al garage' }).click();
@@ -128,7 +129,7 @@ test.describe('garage en modo invitado', () => {
     await page.getByTestId('guest-maintenance').click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('Qué se hizo').fill('Cambio de aceite y filtro');
-    await dialog.getByLabel('Costo (COP)').fill('180000');
+    await dialog.getByLabel('Costo (CLP)').fill('180000');
     await dialog.getByRole('button', { name: 'Registrar' }).click();
     await slow(dialog).toBeHidden();
     await page.getByRole('button', { name: /historial/i }).first().click();
@@ -190,7 +191,7 @@ test.describe('garage en modo invitado', () => {
     await slow(page.getByText('52.000').first()).toBeVisible();
 
     await page.getByTestId('guest-edit').click();
-    await page.getByRole('dialog').getByLabel('Placa').fill('xyz789');
+    await page.getByRole('dialog').getByLabel('Patente').fill('xyz789');
     await page.getByRole('dialog').getByRole('button', { name: 'Guardar cambios' }).click();
     await slow(page.getByText('XYZ789').first()).toBeVisible();
 

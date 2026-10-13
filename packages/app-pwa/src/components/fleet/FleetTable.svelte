@@ -2,6 +2,7 @@
   import { DEFAULT_INSTANCE_ID } from '../../lib/domain.config';
   import { onMount, tick } from 'svelte';
   import { YjsFleetManager, type Fleet, type Vehicle } from '../../lib/yjsFleet.js';
+  import { MARKET } from '../../lib/market';
 
   let { instanceId = DEFAULT_INSTANCE_ID }: { instanceId?: string } = $props();
 
@@ -235,7 +236,7 @@
               name="region"
               type="text"
               class="form-input"
-              placeholder="p. ej. Bogotá"
+              placeholder={MARKET.cityPlaceholder}
               bind:value={formRegion}
               required
             />

@@ -28,6 +28,7 @@ import {
   type Errors,
 } from './guestGarage';
 import { usageUnitOfType } from '../../lib/vehicleCatalog';
+import { MARKET } from '../../lib/market';
 
 export type GuestDialogKind = 'add' | 'usage' | 'maintenance' | 'edit' | 'delete';
 
@@ -222,7 +223,7 @@ function submitDelete(event: SubmitEvent) {
 
       <div class="gf-row">
         <div class="gf-field">
-          <label for="gd-plate">Placa{addUnit === 'h' ? ' (opcional)' : ''}</label>
+          <label for="gd-plate">{MARKET.vehicleIdLabel}{addUnit === 'h' ? ' (opcional)' : ''}</label>
           <input id="gd-plate" bind:value={plate} autocomplete="off" autocapitalize="characters" placeholder="ABC123" aria-invalid={errors.plate ? 'true' : undefined} aria-describedby={errors.plate ? 'gd-plate-err' : undefined} />
           {#if errors.plate}<p id="gd-plate-err" class="gf-err" role="alert">{errors.plate}</p>{/if}
         </div>
@@ -288,7 +289,7 @@ function submitDelete(event: SubmitEvent) {
       <p id="gd-mreading-help" class="gf-help">Si lo dejas vacío usamos la lectura actual. Si es mayor, también la adelanta.</p>
       <div class="gf-row">
         <div class="gf-field">
-          <label for="gd-mcost">Costo (COP)</label>
+          <label for="gd-mcost">Costo ({MARKET.currency})</label>
           <input id="gd-mcost" bind:value={mCost} inputmode="numeric" placeholder="0" aria-invalid={errors.cost ? 'true' : undefined} aria-describedby={errors.cost ? 'gd-mcost-err' : undefined} />
           {#if errors.cost}<p id="gd-mcost-err" class="gf-err" role="alert">{errors.cost}</p>{/if}
         </div>
@@ -323,7 +324,7 @@ function submitDelete(event: SubmitEvent) {
       </div>
       <div class="gf-row">
         <div class="gf-field">
-          <label for="gd-eplate">Placa{unitOfVehicle === 'h' ? ' (opcional)' : ''}</label>
+          <label for="gd-eplate">{MARKET.vehicleIdLabel}{unitOfVehicle === 'h' ? ' (opcional)' : ''}</label>
           <input id="gd-eplate" bind:value={ePlate} autocomplete="off" autocapitalize="characters" aria-invalid={errors.plate ? 'true' : undefined} aria-describedby={errors.plate ? 'gd-eplate-err' : undefined} />
           {#if errors.plate}<p id="gd-eplate-err" class="gf-err" role="alert">{errors.plate}</p>{/if}
         </div>

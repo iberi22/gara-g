@@ -38,7 +38,7 @@ function fillForm() {
   set('vehicleId', 'V-1');
   set('driverId', 'D-1');
   set('km', '1000');
-  set('gallons', '10');
+  set('liters', '10');
   set('cost', '50000');
 }
 
@@ -90,6 +90,14 @@ describe('FuelLogTable', () => {
     release();
     await settle();
     expect(q<HTMLButtonElement>('[data-testid="btn-submit-fuel"]')!.disabled).toBe(false);
+  });
+
+  it('el volumen se captura en litros (unidad de Chile) y la cabecera lo dice', async () => {
+    await setup();
+    const ths = [...document.querySelectorAll('th')].map((th) => th.textContent?.trim());
+    expect(ths).toContain('Litros');
+    expect(ths).not.toContain('Galones');
+    expect(document.querySelector('[data-testid="input-liters"]')).not.toBeNull();
   });
 
   it('las cabeceras llevan scope="col", hay caption y un solo nivel de titulo propio (sin h1)', async () => {

@@ -26,6 +26,7 @@ import type {
   ViewMode,
 } from '../../garage/contracts';
 import { installGarageBridge, postToNative } from '../../garage/telemetry/bridge';
+import { formatNumber } from '../../lib/market';
 import BlueprintBackdrop from './BlueprintBackdrop.svelte';
 import BottomDock, { type ActivePanel } from './BottomDock.svelte';
 import Canvas3D from './Canvas3D.svelte';
@@ -124,7 +125,7 @@ const healthText = $derived.by(() => {
 const odometerText = $derived.by(() => {
   const km = currentVehicle?.odometerKm;
   if (km === null || km === undefined) return '—';
-  return `${Math.round(km).toLocaleString('es-CO')} ${currentVehicle?.usageUnit ?? 'km'}`;
+  return `${formatNumber(Math.round(km))} ${currentVehicle?.usageUnit ?? 'km'}`;
 });
 
 /** Proximo cambio: el compromiso pendiente mas cercano en km (o dias si no hay km). */

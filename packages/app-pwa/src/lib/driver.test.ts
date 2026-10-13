@@ -8,7 +8,8 @@ import {
   getMemoryAdapter,
   setStorageAdapter,
 } from './domain.js';
-import { computeDriverStatus } from './driver.js';
+import { computeDriverStatus, formatDriverId, isValidDriverId } from './driver.js';
+import { MARKETS } from './market.js';
 
 describe('driver domain and CRUD', () => {
   beforeEach(() => {
@@ -97,6 +98,20 @@ describe('driver domain and CRUD', () => {
     // Verify cross-instance access returns null
     const crossAccess = await getEntity('driver', driverInst1.id, 'inst2');
     expect(crossAccess).toBeNull();
+  });
+
+  it('la identificacion del conductor se lee y se valida segun el mercado', () => {
+    // Chile (mercado activo): RUT con digito verificador.
+    expect(formatDriverId('123456785', MARKETS.CL)).toBe('12.345.678-5');
+    expect(isValidDriverId('123456785', MARKETS.CL)).toBe(true);
+    expect(isValidDriverId('123456784', MARKETS.CL)).toBe(false);
+    // Un valor que no se puede leer se muestra tal cual: no se reescribe ni se descarta.
+    expect(formatDriverId('80123456', MARKETS.CL)).toBe('80123456');
+    expect(formatDriverId('', MARKETS.CL)).toBe('—');
+    // Colombia: la cedula no trae digito verificador, asi que solo se exige que no este vacia.
+    expect(formatDriverId('79.456.123', MARKETS.CO)).toBe('79.456.123');
+    expect(isValidDriverId('79.456.123', MARKETS.CO)).toBe(true);
+    expect(isValidDriverId('', MARKETS.CO)).toBe(false);
   });
 
   it('License expiry validation: driver with licenseExpiry in the past is marked as expired in computed status', () => {

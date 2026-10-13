@@ -5,12 +5,13 @@ import ThemeBootstrap from '../../components/theme/ThemeBootstrap.astro';
 import '../../styles/gara-theme.css';
 import { instanceIdFor } from '../../garage/domain/tenant.js';
 import { isFleetOnly } from '../../lib/features';
+import { MARKET } from '../../lib/market.js';
 
 // Tenant de la sesion validada (fuera de produccion tambien admite ?instanceId=): nunca uno fijo.
 const instanceId = instanceIdFor(Astro.request, Astro.locals);
 const vehicles = (await listEntities('vehicle', instanceId).catch(() => [] as any[])).map((v: any) => ({
   id: v.id as string,
-  label: `${v.plate || v.name || v.vin || 'Sin placa'}`,
+  label: `${v.plate || v.name || v.vin || `Sin ${MARKET.vehicleIdLabel.toLowerCase()}`}`,
 }));
 // Columns displayed by DocumentVault: vehicleId, driverId, kind, fileHash, r2Key, expiry, status
 ---

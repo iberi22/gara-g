@@ -8,7 +8,8 @@
     deleteEntity,
     type DomainRecord,
   } from '../../lib/domain.js';
-  import { computeDriverStatus, type DriverData } from '../../lib/driver.js';
+  import { computeDriverStatus, formatDriverId, type DriverData } from '../../lib/driver.js';
+  import { MARKET } from '../../lib/market.js';
 
   export let instanceId: string = DEFAULT_INSTANCE_ID;
 
@@ -90,7 +91,7 @@
   async function handleSubmit() {
     if (saving) return;
     if (!formData.name?.trim() || !formData.cedula?.trim()) {
-      formError = 'Completa el nombre y la cédula del conductor.';
+      formError = `Completa el nombre y ${MARKET.driverIdLabel === 'RUT' ? 'el RUT' : 'la cédula'} del conductor.`;
       return;
     }
     formError = '';
@@ -213,16 +214,17 @@
         </div>
 
         <div>
-          <label class="g-label" for="driver-input-cedula">Cédula / Documento *</label>
+          <label class="g-label" for="driver-input-cedula">{MARKET.driverIdLabel} / Documento *</label>
           <input
             id="driver-input-cedula"
             type="text"
             data-testid="input-cedula"
             required
             bind:value={formData.cedula}
-            placeholder="Ej: 1098765432"
+            placeholder={MARKET.driverIdPlaceholder}
             class="g-input mt-1"
           />
+          <p class="text-xs text-[var(--g-text-muted)] mt-1">{MARKET.driverIdHelp}</p>
         </div>
 
         <div>
@@ -233,13 +235,9 @@
             bind:value={formData.licenseCategory}
             class="g-select mt-1"
           >
-            <option value="A1">A1 (Motocicletas &lt; 125cc)</option>
-            <option value="A2">A2 (Motocicletas &gt; 125cc)</option>
-            <option value="B1">B1 (Automóviles particulares)</option>
-            <option value="B2">B2 (Camiones particulares)</option>
-            <option value="C1">C1 (Automóviles públicos)</option>
-            <option value="C2">C2 (Camiones públicos)</option>
-            <option value="C3">C3 (Vehículos articulados)</option>
+            {#each MARKET.licenseClasses as cls (cls.value)}
+              <option value={cls.value}>{cls.label}</option>
+            {/each}
           </select>
         </div>
 
@@ -261,7 +259,7 @@
             type="text"
             data-testid="input-phone"
             bind:value={formData.phone}
-            placeholder="+57 300 123 4567"
+            placeholder="+56 9 0000 0000"
             class="g-input mt-1"
           />
         </div>
@@ -333,7 +331,7 @@
         <thead>
           <tr>
             <th scope="col">Nombre</th>
-            <th scope="col">Cédula</th>
+            <th scope="col">{MARKET.driverIdLabel}</th>
             <th scope="col">Licencia</th>
             <th scope="col">Vencimiento</th>
             <th scope="col">Teléfono</th>
@@ -348,7 +346,7 @@
             {@const computedStatus = computeDriverStatus(driver)}
             <tr data-testid="driver-row" class="hover:bg-[var(--g-bg-surface)]">
               <td class="font-semibold" data-testid="driver-name">{driver.name}</td>
-              <td class="g-mono text-xs">{driver.cedula}</td>
+              <td class="g-mono text-xs">{formatDriverId(driver.cedula, MARKET)}</td>
               <td>
                 <span class="g-pill g-pill-muted">{driver.licenseCategory || 'N/A'}</span>
               </td>

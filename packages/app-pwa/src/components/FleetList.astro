@@ -5,6 +5,7 @@
  * Falls back to seed data if API unavailable (e.g., build-time pre-render).
  */
 import { ensureSeedData, DEMO_INSTANCE_ID, getFleetStats } from '../lib/fleetSeed.js';
+import { MARKET, formatNumber } from '../lib/market.js';
 
 interface Props {
   /** Tenant del panel. Lo resuelve la pagina (/fleet) desde la sesion. */
@@ -104,20 +105,20 @@ try {
   <div class="g-grid g-grid-3" data-testid="stats-secondary">
     <div class="swal-card-frame">
       <article class="swal-card-inner stat-mini" data-testid="mini-mileage">
-        <div class="mini-value"><span id="mini-mileage">{serverStats.totalMileage.toLocaleString('es-CO')}</span><span class="mini-unit">km</span></div>
+        <div class="mini-value"><span id="mini-mileage">{formatNumber(serverStats.totalMileage, MARKET)}</span><span class="mini-unit">km</span></div>
         <div class="mini-label swal-kicker">Kilometraje total</div>
       </article>
     </div>
     <div class="swal-card-frame">
       <article class="swal-card-inner stat-mini" data-testid="mini-fuel-cost">
         <div class="mini-value"><span id="mini-fuel-cost">${(serverStats.totalFuelCost / 1_000_000).toFixed(2)}</span><span class="mini-unit">M</span></div>
-        <div class="mini-label swal-kicker">Costo combustible COP</div>
+        <div class="mini-label swal-kicker">Costo combustible {MARKET.currency}</div>
       </article>
     </div>
     <div class="swal-card-frame">
       <article class="swal-card-inner stat-mini" data-testid="mini-maint-cost">
         <div class="mini-value"><span id="mini-maint-cost">${(serverStats.totalMaintCost / 1_000_000).toFixed(2)}</span><span class="mini-unit">M</span></div>
-        <div class="mini-label swal-kicker">Costo mantenimiento COP</div>
+        <div class="mini-label swal-kicker">Costo mantenimiento {MARKET.currency}</div>
       </article>
     </div>
     <div class="swal-card-frame">
@@ -145,7 +146,7 @@ try {
   </div>
 </section>
 
-<script is:inline>
+<script is:inline define:vars={{ marketLocale: MARKET.locale }}>
   // Client-side: fetch live stats from API and update DOM
   async function refreshStats() {
     try {
@@ -167,7 +168,7 @@ try {
       set('stat-critical', s.criticalAlerts);
       set('stat-active', s.activeVehicles);
       set('stat-maint', s.maintenanceVehicles);
-      set('mini-mileage', Number(s.totalMileage).toLocaleString('es-CO'));
+      set('mini-mileage', Number(s.totalMileage).toLocaleString(marketLocale));
       set('mini-fuel-cost', '$' + (s.totalFuelCost / 1_000_000).toFixed(2));
       set('mini-maint-cost', '$' + (s.totalMaintCost / 1_000_000).toFixed(2));
       set('mini-geofences', s.geofences);

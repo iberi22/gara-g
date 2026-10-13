@@ -8,6 +8,7 @@ import PageHeader from '../../../../components/PageHeader.astro';
 import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../../lib/fleetSeed.js';
 import { getEntity, listEntities } from '../../../../lib/domain.js';
 import { instanceIdFor } from '../../../../garage/domain/tenant.js';
+import { MARKET, documentKindLabel } from '../../../../lib/market.js';
 
 // Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
 // La semilla solo se escribe para el tenant demo.
@@ -15,7 +16,7 @@ const instanceId = instanceIdFor(Astro.request, Astro.locals);
 if (instanceId === DEMO_INSTANCE_ID) await ensureSeedData().catch(() => {});
 
 const vehicles = await listEntities('vehicle', instanceId).catch(() => [] as any[]);
-const vehicleOptions = vehicles.map((v: any) => ({ value: v.id, label: `${v.plate || v.name || v.vin || 'Sin placa'} — ${v.make ?? ''} ${v.model ?? ''}`.trim() }));
+const vehicleOptions = vehicles.map((v: any) => ({ value: v.id, label: `${v.plate || v.name || v.vin || `Sin ${MARKET.vehicleIdLabel.toLowerCase()}`} — ${v.make ?? ''} ${v.model ?? ''}`.trim() }));
 
 const url = Astro.url;
 const id = url.pathname.split('/').pop()!;
@@ -55,8 +56,8 @@ const documentFields = [
 <FleetLayout title={`Editar documento`} section="documents">
   <section data-testid="document-edit-page">
     <PageHeader
-      title={`Editar documento: ${doc.kind}`}
-      subtitle={`Vehículo ${(vehicles as any[]).find((v) => v.id === doc.vehicleId)?.plate ?? 'sin placa'}`}
+      title={`Editar documento: ${documentKindLabel(doc.kind, MARKET)}`}
+      subtitle={`Vehículo ${(vehicles as any[]).find((v) => v.id === doc.vehicleId)?.plate ?? `sin ${MARKET.vehicleIdLabel.toLowerCase()}`}`}
       icon="documents"
     />
 

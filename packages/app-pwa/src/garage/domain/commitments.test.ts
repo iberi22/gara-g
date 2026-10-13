@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { buildCommitments, sortCommitments, urgencyOf } from './commitments';
+import { MARKETS } from '../../lib/market';
 import type { MaintenanceRow, VehicleRow } from './records';
 
 const NOW = new Date('2026-06-15T12:00:00.000Z');
@@ -197,7 +198,22 @@ describe('buildCommitments', () => {
     const soat = list.find((c) => c.source === 'document');
     expect(soat?.urgency).toBe('overdue');
     expect(soat?.remainingDays).toBeLessThan(0);
-    expect(soat?.title).toBe('Renovar SOAT');
+    // El tipo guardado es el colombiano; el titulo visible depende del mercado.
+    expect(soat?.title).toBe('Renovar SOAP');
+    expect(
+      buildCommitments(
+        {
+          vehicle: vehicle(),
+          family: 'moto',
+          odometerKm: 1000,
+          parts: [],
+          maintenance: [],
+          documents: [{ id: 'd1', kind: 'SOAT', expiry: '2026-05-01' }],
+          now: NOW,
+        },
+        MARKETS.CO,
+      ).find((c) => c.source === 'document')?.title,
+    ).toBe('Renovar SOAT');
   });
 
   it('un documento pronto de vencer sale como soon (corte de 30 dias)', () => {

@@ -5,10 +5,15 @@
 export interface CSVColumn<T = Record<string, unknown>> {
   key: keyof T | string;
   label: string;
+  /**
+   * Valor a exportar cuando no es el campo tal cual (p. ej. el volumen en la unidad del
+   * mercado, que puede vivir en `liters` o en `gallons`). Sin esto se usa `row[key]`.
+   */
+  value?: (row: T) => unknown;
 }
 
 export interface CSVOptions {
-  /** Delimitador de columnas (';' por defecto para compatibilidad Excel en es-CO / Latinoamérica, or ',') */
+  /** Delimitador de columnas (';' por defecto para compatibilidad con el Excel en español, or ',') */
   delimiter?: ',' | ';';
   /** Incluir UTF-8 BOM (\uFEFF) para visualización de tildes y caracteres especiales en Excel */
   includeBOM?: boolean;
@@ -67,7 +72,7 @@ export function toCSV<T extends Record<string, unknown> = Record<string, unknown
   const dataRows = rows.map((row) =>
     columns
       .map((col) => {
-        const val = (row as Record<string, unknown>)[col.key as string];
+        const val = col.value ? col.value(row) : (row as Record<string, unknown>)[col.key as string];
         return escapeCSVCell(val, delimiter);
       })
       .join(delimiter)

@@ -3,6 +3,7 @@ import { untrack } from 'svelte';
 import { isSocioUser, setDemoSocioStatus } from '../lib/interfaceManager';
 import { toast } from '../lib/toast';
 import type { AuiSpec } from '../lib/aui';
+import { MARKET } from '../lib/market';
 import AuiRenderer from './AuiRenderer.svelte';
 
 interface Props {
@@ -75,7 +76,7 @@ function loadDefaultSpec() {
         type: 'Card',
         props: {
           title: 'Eficiencia Global de Flota',
-          content: '94.2% de unidades operativas en ruta con consumo promedio de 28.4 km/galón.',
+          content: `94.2% de unidades operativas en ruta con consumo promedio de 2.8 ${MARKET.efficiencyUnit}.`,
         },
       },
       {
@@ -92,9 +93,9 @@ function loadDefaultSpec() {
         props: {
           headers: ['Vehículo', 'Conductor', 'Estado', 'Último Checkpoint'],
           rows: [
-            ['FL-01 (Toyota Hilux)', 'Carlos Méndez', 'En Ruta', 'Km 45 Vía al Mar'],
-            ['FL-02 (Chevrolet NPR)', 'Andrés Silva', 'En Ruta', 'Base Logística Norte'],
-            ['FL-03 (Kenworth T800)', 'Jorge Ramírez', 'Taller Programado', 'Taller Central'],
+            ['FL-01 (Toyota Hilux)', 'Rodrigo Ejemplo Muñoz', 'En Ruta', MARKET.demoCheckpoints[0]],
+            ['FL-02 (Chevrolet NPR)', 'Patricio Ejemplo Rojas', 'En Ruta', MARKET.demoCheckpoints[1]],
+            ['FL-03 (Kenworth T800)', 'Jorge Ramírez', 'Taller Programado', MARKET.demoCheckpoints[2]],
           ],
         },
       },

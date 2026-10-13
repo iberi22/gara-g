@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Commitment, PartState } from '../contracts';
 import { buildIndicators, sinceLabel, toneForDays, toneForHealth } from './indicators';
+import { LITERS_PER_GALLON, MARKETS } from '../../lib/market';
 import type { AlertRow, FuelLogRow, VehicleRow } from './records';
 
 const NOW = new Date('2026-06-15T12:00:00.000Z');
@@ -122,6 +123,12 @@ describe('buildIndicators: los ocho ids del mock', () => {
     expect(ind.left[0]?.tone).toBe('neutral');
   });
 
+  it('el documento obligatorio se llama como en el mercado (SOAP en Chile, SOAT en Colombia)', () => {
+    const docs = input({ vehicle: vehicle({ soatExpiry: '2026-06-27' }) });
+    expect(buildIndicators(docs, MARKETS.CL).left[3]?.label).toBe('SOAP');
+    expect(buildIndicators(docs, MARKETS.CO).left[3]?.label).toBe('SOAT');
+  });
+
   it('SOAT: dias que faltan, con anillo sobre 365 dias', () => {
     const ind = buildIndicators(input({ vehicle: vehicle({ soatExpiry: '2026-06-27' }) }));
     expect(ind.left[3]?.value).toBe('12');
@@ -136,12 +143,26 @@ describe('buildIndicators: los ocho ids del mock', () => {
     expect(ind.left[3]?.hint).toBe('Vencido');
   });
 
-  it('consumo: promedio de los km/gal de las cargas', () => {
-    const ind = buildIndicators(
+  it('consumo: promedio del rendimiento de las cargas, en la unidad del mercado', () => {
+    // Mercado colombiano: se lee en km/gal, como antes.
+    const co = buildIndicators(
       input({ fuelLogs: [fuel({ id: 'a', kmPerGallon: 30 }), fuel({ id: 'b', kmPerGallon: 20 })] }),
+      MARKETS.CO,
     );
-    expect(ind.right[0]?.value).toBe('25');
-    expect(ind.right[0]?.unit).toBe('km/gal');
+    expect(co.right[0]?.value).toBe('25');
+    expect(co.right[0]?.unit).toBe('km/gal');
+
+    // Mercado chileno (el activo): el mismo dato se lee en km/L.
+    const cl = buildIndicators(
+      input({ fuelLogs: [fuel({ id: 'a', kmPerGallon: 30 }), fuel({ id: 'b', kmPerGallon: 20 })] }),
+      MARKETS.CL,
+    );
+    expect(cl.right[0]?.unit).toBe('km/L');
+    expect(cl.right[0]?.value).toBe(String(Math.round(25 / LITERS_PER_GALLON)));
+
+    // Una fila que ya trae km/L manda sobre el campo heredado.
+    const fromLiters = buildIndicators(input({ fuelLogs: [fuel({ id: 'a', kmPerLiter: 8 })] }), MARKETS.CL);
+    expect(fromLiters.right[0]?.value).toBe('8');
   });
 
   it('gasto del mes: solo cuenta lo del mes en curso', () => {

@@ -13,6 +13,7 @@ import PageHeader from '../../../components/PageHeader.astro';
 import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../lib/fleetSeed.js';
 import { listEntities } from '../../../lib/domain.js';
 import { instanceIdFor } from '../../../garage/domain/tenant.js';
+import { MARKET } from '../../../lib/market.js';
 
 // Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
 // La semilla solo se escribe para el tenant demo.
@@ -29,7 +30,7 @@ const fleetOptions = (fleets as any[]).map((f: any) => ({
 }));
 
 const columns = [
-  { key: 'plate', label: 'Placa', width: '7rem' },
+  { key: 'plate', label: MARKET.vehicleIdLabel, width: '7rem' },
   { key: 'make', label: 'Marca' },
   { key: 'model', label: 'Modelo' },
   { key: 'year', label: 'Año', width: '5rem', align: 'center' as const },

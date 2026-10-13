@@ -4,6 +4,21 @@
  * coherentes entre si (salud ↔ km desde el ultimo cambio ↔ compromisos).
  */
 import type { Commitment, GarageSnapshot, GarageVehicle, Indicator, PartState } from './contracts';
+import { LITERS_PER_GALLON, MARKET, documentKindLabel, formatMoney } from '../lib/market';
+
+/**
+ * Consumo del mock en la unidad del mercado. El valor se escribe en km/L (unidad de Chile)
+ * y se convierte si el mercado activo mide en galones.
+ */
+const eff = (kmPerLiter: number): string =>
+  MARKET.volumeUnit === 'L'
+    ? String(Math.round(kmPerLiter))
+    : String(Math.round(kmPerLiter * LITERS_PER_GALLON));
+/** Etiqueta del documento obligatorio en el vocabulario del mercado (SOAP / Revisión Técnica). */
+const docLabel = (kind: string) => documentKindLabel(kind, MARKET);
+/** Documentos de la demo del HUD, con su nombre chileno. */
+const SOAP = docLabel('SOAT');
+const RT = docLabel('Tecnomecánica');
 
 const ind = (id: string, label: string, value: string, tone: Indicator['tone'], extra: Partial<Indicator> = {}): Indicator => ({
   id,
@@ -36,7 +51,7 @@ const commit = (vehicleId: string, n: number, title: string, urgency: Commitment
 const moto1: GarageVehicle = {
   id: 'mock-moto-1',
   plate: 'ABC12F',
-  vin: 'MOCKVIN0MOTO00001',
+  vin: 'ZZZMOCK0MOT000001',
   name: 'Yamaha FZ16',
   make: 'Yamaha',
   model: 'FZ16',
@@ -59,11 +74,11 @@ const moto1: GarageVehicle = {
       ind('health', 'Salud general', '71', 'ok', { unit: '%', progress: 0.71 }),
       ind('odo', 'Odómetro', '28.450', 'neutral', { unit: 'km' }),
       ind('next', 'Próximo cambio', '−350', 'critical', { unit: 'km', hint: 'Aceite vencido' }),
-      ind('docs', 'SOAT', '12', 'warn', { unit: 'días', progress: 12 / 365 }),
+      ind('docs', SOAP, '12', 'warn', { unit: 'días', progress: 12 / 365 }),
     ],
     right: [
-      ind('eff', 'Consumo', '118', 'ok', { unit: 'km/gal' }),
-      ind('cost', 'Gasto del mes', '$186.000', 'neutral'),
+      ind('eff', 'Consumo', eff(31), 'ok', { unit: MARKET.efficiencyUnit }),
+      ind('cost', 'Gasto del mes', formatMoney(186000, MARKET), 'neutral'),
       ind('alerts', 'Alertas', '1', 'warn'),
       ind('link', 'APK', 'En línea', 'ok', { hint: 'Última señal hace 20 s' }),
     ],
@@ -83,7 +98,7 @@ const moto1: GarageVehicle = {
   ],
   commitments: [
     commit('mock-moto-1', 1, 'Cambio de aceite 10W-40', 'overdue', { slotId: 'engine_oil', remainingKm: -350, dueKm: 28100, estCostCOP: 45000 }),
-    commit('mock-moto-1', 2, 'Renovar SOAT', 'soon', { kind: 'document', source: 'document', remainingDays: 12 }),
+    commit('mock-moto-1', 2, `Renovar ${SOAP}`, 'soon', { kind: 'document', source: 'document', remainingDays: 12 }),
     commit('mock-moto-1', 3, 'Kit de arrastre', 'planned', { slotId: 'drive', remainingKm: 4400, dueKm: 32850, estCostCOP: 180000 }),
   ],
 };
@@ -92,7 +107,7 @@ const moto2: GarageVehicle = {
   ...moto1,
   id: 'mock-moto-2',
   plate: 'XYZ34G',
-  vin: 'MOCKVIN0MOTO00002',
+  vin: 'ZZZMOCK0MOT000002',
   name: 'Yamaha NMAX 155',
   model: 'NMAX',
   year: 2023,
@@ -112,11 +127,11 @@ const moto2: GarageVehicle = {
       ind('health', 'Salud general', '92', 'ok', { unit: '%', progress: 0.92 }),
       ind('odo', 'Odómetro', '9.100', 'neutral', { unit: 'km' }),
       ind('next', 'Próximo cambio', '900', 'ok', { unit: 'km' }),
-      ind('docs', 'SOAT', '210', 'ok', { unit: 'días', progress: 210 / 365 }),
+      ind('docs', SOAP, '210', 'ok', { unit: 'días', progress: 210 / 365 }),
     ],
     right: [
-      ind('eff', 'Consumo', '126', 'ok', { unit: 'km/gal' }),
-      ind('cost', 'Gasto del mes', '$62.000', 'neutral'),
+      ind('eff', 'Consumo', eff(33), 'ok', { unit: MARKET.efficiencyUnit }),
+      ind('cost', 'Gasto del mes', formatMoney(62000, MARKET), 'neutral'),
       ind('alerts', 'Alertas', '0', 'ok'),
       ind('link', 'APK', 'Sin señal', 'neutral', { hint: 'Última señal hace 3 días' }),
     ],
@@ -128,7 +143,7 @@ const moto2: GarageVehicle = {
 const car1: GarageVehicle = {
   id: 'mock-car-1',
   plate: 'GHK123',
-  vin: 'MOCKVIN00CAR00001',
+  vin: 'ZZZMOCK0CAR000001',
   name: 'Toyota Corolla',
   make: 'Toyota',
   model: 'Corolla',
@@ -151,11 +166,11 @@ const car1: GarageVehicle = {
       ind('health', 'Salud general', '63', 'warn', { unit: '%', progress: 0.63 }),
       ind('odo', 'Odómetro', '64.210', 'neutral', { unit: 'km' }),
       ind('next', 'Próximo cambio', '1.200', 'warn', { unit: 'km', hint: 'Pastillas delanteras' }),
-      ind('docs', 'Tecnomecánica', '45', 'ok', { unit: 'días', progress: 45 / 365 }),
+      ind('docs', RT, '45', 'ok', { unit: 'días', progress: 45 / 365 }),
     ],
     right: [
-      ind('eff', 'Consumo', '42', 'ok', { unit: 'km/gal' }),
-      ind('cost', 'Gasto del mes', '$540.000', 'neutral'),
+      ind('eff', 'Consumo', eff(11), 'ok', { unit: MARKET.efficiencyUnit }),
+      ind('cost', 'Gasto del mes', formatMoney(540000, MARKET), 'neutral'),
       ind('alerts', 'Alertas', '2', 'warn'),
       ind('link', 'OBD2', 'En línea', 'ok'),
     ],
@@ -177,7 +192,7 @@ const car1: GarageVehicle = {
   commitments: [
     commit('mock-car-1', 1, 'Pastillas freno delantero', 'soon', { slotId: 'brake_fl', remainingKm: 1200, estCostCOP: 320000 }),
     commit('mock-car-1', 2, 'Filtro de aire', 'soon', { slotId: 'air_filter', remainingKm: 3100 }),
-    commit('mock-car-1', 3, 'Tecnomecánica', 'planned', { kind: 'inspection', source: 'document', remainingDays: 45 }),
+    commit('mock-car-1', 3, RT, 'planned', { kind: 'inspection', source: 'document', remainingDays: 45 }),
   ],
 };
 
@@ -185,7 +200,7 @@ const car2: GarageVehicle = {
   ...car1,
   id: 'mock-car-2',
   plate: 'JKL987',
-  vin: 'MOCKVIN00CAR00002',
+  vin: 'ZZZMOCK0CAR000002',
   name: 'Toyota Hilux',
   model: 'Hilux',
   year: 2022,
