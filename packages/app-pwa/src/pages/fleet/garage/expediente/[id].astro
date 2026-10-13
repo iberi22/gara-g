@@ -19,6 +19,7 @@ import { getEntity } from '../../../../lib/domain';
 import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../../lib/fleetSeed.js';
 import { can } from '../../../../lib/rbac';
 import { findModel, normalizeVehicleType, VEHICLE_TYPE_LABELS } from '../../../../lib/vehicleCatalog';
+import { MARKET, localizeText } from '../../../../lib/market.js';
 import { getAuthUser } from '../../../api/fleetApi/auth';
 import '../../../../styles/gara-theme.css';
 
@@ -45,7 +46,9 @@ const typeLabel = VEHICLE_TYPE_LABELS.find((t) => t.value === typeKey)?.label ??
 const catalog = model
   ? {
       make: model.make,
-      model: model.model,
+      // El nombre de modelo del fabricante se guarda tal cual ("T800 Volqueta") y se muestra en
+      // el vocabulario del mercado ("T800 Tolva" en Chile), igual que los repuestos comunes.
+      model: localizeText(model.model, MARKET),
       typeLabel,
       engineCC: model.engineCC,
       powerHP: model.powerHP,
@@ -53,7 +56,7 @@ const catalog = model
       payloadKg: model.payloadKg,
       revisionPeriodKm: model.revisionPeriodKm,
       oilChangeKm: model.oilChangeKm,
-      commonParts: model.commonParts,
+      commonParts: model.commonParts.map((part) => ({ ...part, name: localizeText(part.name, MARKET) })),
     }
   : null;
 

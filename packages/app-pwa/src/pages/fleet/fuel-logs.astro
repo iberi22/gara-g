@@ -7,6 +7,7 @@ import { ensureSeedData, DEMO_INSTANCE_ID } from '../../lib/fleetSeed.js';
 import { listEntities } from '../../lib/domain.js';
 import { instanceIdFor } from '../../garage/domain/tenant.js';
 import { MARKET, formatDecimal, formatMoney, formatVolume, volumeLiters } from '../../lib/market.js';
+import { vehicleDisplayName } from '../../lib/vehicleCatalog.js';
 import { EFFICIENCY_COLUMN, computeKmPerLiter } from '../../lib/fuelLog.js';
 
 // Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
@@ -17,7 +18,7 @@ const records = await listEntities('fuelLog', instanceId);
 const vehicles = await listEntities('vehicle', instanceId);
 const drivers = await listEntities('driver', instanceId);
 
-const vehicleOptions = vehicles.map((v: any) => ({ value: v.id, label: `${v.plate || v.name || v.vin || `Sin ${MARKET.vehicleIdLabel.toLowerCase()}`} — ${v.make} ${v.model}` }));
+const vehicleOptions = vehicles.map((v: any) => ({ value: v.id, label: `${v.plate || v.name || v.vin || `Sin ${MARKET.vehicleIdLabel.toLowerCase()}`} — ${vehicleDisplayName(v, MARKET)}` }));
 const driverOptions = drivers.map((d: any) => ({ value: d.id, label: d.name }));
 
 // Rendimiento por carga (km / unidad de volumen del mercado). Acepta filas guardadas en

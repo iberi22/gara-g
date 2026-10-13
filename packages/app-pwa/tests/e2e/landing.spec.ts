@@ -52,13 +52,17 @@ test.describe('Portada pública GARA-G', () => {
     expect(text).not.toMatch(/Socio|PAYG|P2P|Yjs|Crear cuenta/);
   });
 
-  test('el FAQ se abre y no promete uso sin internet', async ({ page }) => {
+  test('el FAQ se abre y dice la verdad sobre el modo sin conexión', async ({ page }) => {
     await page.goto('/?inicio=1');
     const offline = page.locator('details', { hasText: '¿Funciona sin internet?' });
     await expect(offline.locator('p')).toBeHidden();
     await offline.locator('summary').click();
     await expect(offline.locator('p')).toBeVisible();
-    await expect(offline.locator('p')).toContainText('Todavía no');
+    // #10 entrego la app shell: el HTML y los datos locales ya se sirven sin red, asi que la
+    // FAQ ya no puede decir "Todavia no" (era lo que afirmaba y lo desmentia la propia app).
+    await expect(offline.locator('p')).not.toContainText('Todavía no');
+    await expect(offline.locator('p')).toContainText('sin conexión');
+    await expect(offline.locator('p')).toContainText('sincroniza');
   });
 
   test('el CTA principal lleva a la bienvenida', async ({ page, context }) => {

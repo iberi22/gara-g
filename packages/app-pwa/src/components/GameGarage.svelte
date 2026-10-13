@@ -2,6 +2,7 @@
 import { isGameUiEnabled } from '../lib/interfaceManager';
 import { toast } from '../lib/toast';
 import { MARKET } from '../lib/market';
+import { vehicleDisplayName } from '../lib/vehicleCatalog';
 
 interface Props {
   initialGameEnabled?: boolean;
@@ -117,7 +118,7 @@ $effect(() => {
         if (data && Array.isArray(data) && data.length > 0) {
           const mapped: GameCar[] = data.map((v: any, idx: number) => ({
             id: v.id ?? `v-${idx}`,
-            name: `${v.make ?? 'Vehículo'} ${v.model ?? ''}`.trim() || 'Unidad de Flota',
+            name: vehicleDisplayName(v, MARKET) || 'Unidad de Flota',
             plate: v.plate ?? `GARA-${idx + 10}`,
             type: v.type ?? 'Flota',
             year: Number(v.year) || 2023,

@@ -12,7 +12,7 @@
  * version anterior se re-resuelven y el usuario vuelve a ver el onboarding.
  */
 import type { PrefsSchema } from './swal-prefs';
-import { MARKET } from './market';
+import { MARKET, localizeText } from './market';
 
 export const GARA_PREFS_SCHEMA: PrefsSchema = {
   version: 1,
@@ -98,7 +98,7 @@ export const GARA_PREFS_SCHEMA: PrefsSchema = {
     },
     {
       id: 'maquinaria',
-      label: 'Maquinaria amarilla y volquetas',
+      label: localizeText('Maquinaria amarilla y volquetas', MARKET),
       description: 'Mantenimiento por horas de motor, documentos y alertas. Sin geocercas.',
       modules: { fleets: true, drivers: true, fuel: true, tracking: false, geofences: false, documents: true, alerts: true },
     },

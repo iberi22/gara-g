@@ -10,7 +10,7 @@
   import OnboardingWizard from '../../lib/swal-prefs/OnboardingWizard.svelte';
   import type { FinishChoice, WizardFeature } from '../../lib/swal-prefs/OnboardingWizard.svelte';
   import { GARA_PREFS_SCHEMA, ONBOARDING_PATH } from '../../lib/prefs.config';
-  import { MARKET } from '../../lib/market';
+  import { MARKET, localizeText } from '../../lib/market';
   import { localPrefsStore, prefsStore } from '../../lib/prefs.client';
   import { enterGuestMode } from '../../lib/prefs.guest';
   import { APP_HOME, BACKUP_PATH, getClientMode, isGuestAllowedPath } from '../../lib/appMode';
@@ -33,7 +33,7 @@
     { id: 'garage', title: 'Garage 3D', desc: 'Tu vehículo en 3D con su estado, su plano y su historial.' },
     { id: 'maintenance', title: 'Mantenimiento por km u horas', desc: 'Compromisos por kilometraje, horas de motor o fecha, con aviso al acercarse.' },
     { id: 'documents', title: 'Documentos y vencimientos', desc: `${MARKET.documentKinds[0]}, ${MARKET.documentKinds[1]} y licencias con su fecha de vencimiento.`, badge: 'Con cuenta' },
-    { id: 'fleets', title: 'Flotas y maquinaria', desc: 'Camiones, volquetas y maquinaria amarilla, con conductores y combustible.', badge: 'Con cuenta' },
+    { id: 'fleets', title: 'Flotas y maquinaria', desc: localizeText('Camiones, volquetas y maquinaria amarilla, con conductores y combustible.', MARKET), badge: 'Con cuenta' },
     { id: 'ai', title: 'Expediente con IA', desc: 'Un asistente que responde sobre tu parque y tus manuales. Tiene un cupo diario.', badge: 'Con cuenta' },
     { id: 'theme', title: 'Tema claro u oscuro', desc: 'Cambia cuando quieras, o sigue el de tu sistema.' },
   ];

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { POST, OPTIONS } from '../../src/pages/api/ai/infer.js';
+import { TIER_LABEL } from '../../src/lib/domain.config.js';
 
 describe('/api/ai/infer Endpoint Unit Tests', () => {
   it('handles OPTIONS preflight with 204 status', async () => {
@@ -28,7 +29,9 @@ describe('/api/ai/infer Endpoint Unit Tests', () => {
     const resFree = await (POST as any)({ request: reqFree });
     expect(resFree.status).toBe(402);
     const dataFree = await resFree.json();
-    expect(dataFree.error).toContain('Socio');
+    // El nombre del tier sale de domain.config.ts: no queda el tier heredado "Socio".
+    expect(dataFree.error).toContain(TIER_LABEL);
+    expect(dataFree.error).not.toContain('Socio');
 
     const reqMesh = new Request('http://localhost/api/ai/infer', {
       method: 'POST',

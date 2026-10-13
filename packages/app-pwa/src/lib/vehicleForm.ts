@@ -14,7 +14,7 @@
  * "Patente" y el ejemplo es ABCD-12; en Colombia, "Placa" y ABC123. El NOMBRE del campo
  * (`plate`) no cambia: renombrarlo rompe las filas ya guardadas y la API.
  */
-import { MARKET } from './market';
+import { MARKET, localizeText } from './market';
 import { VEHICLE_TYPE_LABELS } from './vehicleCatalog';
 
 export interface SelectOption {
@@ -57,7 +57,7 @@ export function vehicleFormFields(fleetOptions: SelectOption[]): FormField[] {
     },
     { name: 'vin', label: 'VIN (17) o serie de la máquina', type: 'text', placeholder: '1HGCM82633A004352 o CAT0320GKZ1234' },
     { name: 'make', label: 'Marca', type: 'text', required: true, placeholder: 'Toyota, Kenworth, Caterpillar' },
-    { name: 'model', label: 'Modelo', type: 'text', required: true, placeholder: 'Hilux, T800 Volqueta, 320' },
+    { name: 'model', label: 'Modelo', type: 'text', required: true, placeholder: localizeText('Hilux, T800 Volqueta, 320', MARKET) },
     { name: 'year', label: 'Año', type: 'number', required: true, step: '1' },
     { name: 'status', label: 'Estado', type: 'select', required: true, options: STATUS_LABELS },
     { name: 'capacity', label: 'Capacidad', type: 'text', placeholder: '5 Pax / 18 Ton / 1,2 m³' },

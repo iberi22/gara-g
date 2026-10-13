@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import AuiInterface from '../src/components/AuiInterface.svelte';
+import { TIER_LABEL } from '../src/lib/domain.config';
 
 let app: ReturnType<typeof mount> | undefined;
 
@@ -69,7 +70,9 @@ describe('AuiInterface: fallos de inferencia', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 402 })));
     const ui = await montar();
     await ui.enviar('flota en taller');
-    expect(ui.alert()?.textContent).toContain('Socio o PAYG');
+    // El nombre del tier sale de domain.config.ts: ya no se nombra el tier heredado "Socio".
+    expect(ui.alert()?.textContent).toContain(TIER_LABEL);
+    expect(ui.alert()?.textContent).not.toContain('Socio');
     expect(document.body.textContent).not.toContain('FL-01');
   });
 

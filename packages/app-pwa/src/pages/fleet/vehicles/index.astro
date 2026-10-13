@@ -13,7 +13,8 @@ import PageHeader from '../../../components/PageHeader.astro';
 import { ensureSeedData, DEMO_INSTANCE_ID } from '../../../lib/fleetSeed.js';
 import { listEntities } from '../../../lib/domain.js';
 import { instanceIdFor } from '../../../garage/domain/tenant.js';
-import { MARKET } from '../../../lib/market.js';
+import { MARKET, localizeText } from '../../../lib/market.js';
+import { vehicleTypeLabel } from '../../../lib/vehicleCatalog.js';
 
 // Tenant de la sesion (fuera de produccion tambien admite ?instanceId=).
 // La semilla solo se escribe para el tenant demo.
@@ -32,11 +33,20 @@ const fleetOptions = (fleets as any[]).map((f: any) => ({
 const columns = [
   { key: 'plate', label: MARKET.vehicleIdLabel, width: '7rem' },
   { key: 'make', label: 'Marca' },
-  { key: 'model', label: 'Modelo' },
+  { key: 'modelLabel', label: 'Modelo' },
   { key: 'year', label: 'Año', width: '5rem', align: 'center' as const },
-  { key: 'type', label: 'Tipo' },
+  { key: 'typeLabel', label: 'Tipo' },
   { key: 'capacity', label: 'Capacidad', width: '7rem' },
 ];
+
+// El `type` guardado ('volqueta') y el nombre de modelo del fabricante ('T800 Volqueta') se
+// muestran en el vocabulario del mercado: la tabla era otra de las pantallas con "volqueta"
+// en un entregable chileno. Las claves crudas no se tocan (el formulario y la API las usan).
+const rows = (vehicles as any[]).map((v) => ({
+  ...v,
+  modelLabel: localizeText(String(v.model ?? ''), MARKET),
+  typeLabel: vehicleTypeLabel(v.type, MARKET),
+}));
 
 const vehicleFields = vehicleFormFields(fleetOptions);
 ---
@@ -70,7 +80,7 @@ const vehicleFields = vehicleFormFields(fleetOptions);
     <!-- Tabla con acciones -->
     <GenericTable
       columns={columns}
-      rows={vehicles}
+      rows={rows}
       testId="vehicles-table"
       showActions={true}
       editBase={`/fleet/vehicles/edit`}

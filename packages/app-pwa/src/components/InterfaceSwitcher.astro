@@ -12,6 +12,9 @@ import {
   getStoredInterface,
   type InterfaceMode,
 } from '../lib/interfaceManager.js';
+// El nombre visible del tier sale de domain.config.ts ("PAYG", legacy "socio"); el script
+// inline lo lee del atributo data-tier-label para no volver a escribirlo a mano.
+import { TIER_LABEL } from '../lib/domain.config.js';
 
 interface Props {
   currentMode?: InterfaceMode;
@@ -85,11 +88,11 @@ const gameAllowed =
     data-pref-module="aui"
     aria-label="AUI Copilot Inteligente"
     aria-pressed={String(activeMode === 'aui')}
-    title="AUI Copilot Inteligente (Gated para cuenta Socio)"
+    title={`AUI Copilot Inteligente (Gated para cuenta ${TIER_LABEL})`}
   >
     <span class="mode-icon" aria-hidden="true">🤖</span>
     <span class="mode-label">AUI</span>
-    <span class="badge-mini swal-kicker" data-testid="socio-badge" aria-hidden="true">AI</span>
+    <span class="badge-mini swal-kicker" data-testid="socio-badge" data-tier-label={TIER_LABEL} aria-hidden="true">AI</span>
   </button>
 
   <button
@@ -159,10 +162,10 @@ const gameAllowed =
         var gameAllowed =
           attrAllowed !== null ? attrAllowed === 'true' : queryAllowed !== null ? queryAllowed : true;
 
-        // Sync badge socio (solo cliente)
+        // Sync badge del tier (solo cliente): el nombre sale del atributo, no de un literal.
         var badge = root.querySelector('[data-testid="socio-badge"]');
         if (badge && isSocioInline()) {
-          badge.textContent = 'SOCIO';
+          badge.textContent = badge.getAttribute('data-tier-label') || 'PAYG';
           badge.classList.add('socio');
         }
 

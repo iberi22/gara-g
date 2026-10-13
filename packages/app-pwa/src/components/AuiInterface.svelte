@@ -1,6 +1,9 @@
 <script lang="ts">
 import { untrack } from 'svelte';
 import { isSocioUser, setDemoSocioStatus } from '../lib/interfaceManager';
+// El nombre visible del tier de facturacion sale de domain.config.ts ("PAYG", legacy "socio"):
+// la interfaz ya no nombra un tier "Socio" que no existe.
+import { TIER_LABEL } from '../lib/domain.config';
 import { toast } from '../lib/toast';
 import type { AuiSpec } from '../lib/aui';
 import { MARKET } from '../lib/market';
@@ -51,8 +54,8 @@ function toggleDemoSocio() {
   isSocio = next;
   toast.show(
     next
-      ? 'Modo Socio (Demo) ACTIVADO: Acceso total al motor de inferencia AUI.'
-      : 'Modo Socio (Demo) DESACTIVADO: Mostrando vista de planes y upsell.',
+      ? `Modo ${TIER_LABEL} (Demo) ACTIVADO: Acceso total al motor de inferencia AUI.`
+      : `Modo ${TIER_LABEL} (Demo) DESACTIVADO: Mostrando vista de planes y upsell.`,
     {
       type: next ? 'success' : 'info',
       title: 'Estado de Cuenta',
@@ -140,7 +143,7 @@ async function handleGenerate(customPrompt?: string) {
     });
 
     if (res.status === 402) {
-      toast.show('Inferencia AI requiere cuenta tipo Socio o PAYG.', {
+      toast.show(`Inferencia AI requiere una cuenta ${TIER_LABEL}.`, {
         type: 'warning',
         title: 'Tier no autorizado',
       });
@@ -148,7 +151,7 @@ async function handleGenerate(customPrompt?: string) {
       currentSpec = null;
       modelMeta = null;
       isSample = false;
-      errorMsg = 'Inferencia AI requiere cuenta tipo Socio o PAYG.';
+      errorMsg = `Inferencia AI requiere una cuenta ${TIER_LABEL}.`;
       return;
     }
 
@@ -220,10 +223,10 @@ async function handleGenerate(customPrompt?: string) {
         class:is-active={isSocio}
         onclick={toggleDemoSocio}
         aria-pressed={isSocio}
-        title="Alternar simulación de cuenta Socio para pruebas"
+        title={`Alternar simulación de cuenta ${TIER_LABEL} para pruebas`}
       >
         <span class="dot-indicator" class:dot-on={isSocio}></span>
-        <span>{isSocio ? 'Cuenta Socio: ACTIVA' : 'Cuenta Socio: DEMO OFF'}</span>
+        <span>{isSocio ? `Cuenta ${TIER_LABEL}: ACTIVA` : `Cuenta ${TIER_LABEL}: DEMO OFF`}</span>
       </button>
     </div>
   </header>
@@ -235,16 +238,16 @@ async function handleGenerate(customPrompt?: string) {
   {#if !isSocio}
     <!-- Gated Upsell View for Non-Socio Users -->
     <div class="aui-upsell g-card" data-testid="aui-upsell-card">
-      <div class="upsell-badge">ACCESO EXCLUSIVO TIER SOCIO</div>
+      <div class="upsell-badge">ACCESO EXCLUSIVO TIER {TIER_LABEL}</div>
       <h3 class="upsell-title">Potencia tu Flota con la Inteligencia Generativa AUI</h3>
       <p class="upsell-desc">
-        La generación declarativa de interfaces y análisis predictivo mediante modelos de lenguaje (LLM) está reservada para cuentas tipo <strong>Socio / PAYG</strong>.
+        La generación declarativa de interfaces y análisis predictivo mediante modelos de lenguaje (LLM) está reservada para cuentas tipo <strong>{TIER_LABEL}</strong>.
       </p>
 
       <div class="upsell-guarantee">
         <span class="shield-icon">🛡️</span>
         <span>
-          <strong>CRUD Básico 100% Libre:</strong> La gestión de tus vehículos, conductores, combustible, geocercas y mantenimientos funciona siempre sin restricciones en la Consola Administrativa. El tier Socio <em>solo</em> gatea la inferencia AI en la nube.
+          <strong>CRUD Básico 100% Libre:</strong> La gestión de tus vehículos, conductores, combustible, geocercas y mantenimientos funciona siempre sin restricciones en la Consola Administrativa. El tier {TIER_LABEL} <em>solo</em> gatea la inferencia AI en la nube.
         </span>
       </div>
 
@@ -262,7 +265,7 @@ async function handleGenerate(customPrompt?: string) {
 
         <div class="plan-card featured">
           <div class="plan-pill">Recomendado</div>
-          <div class="plan-tier">Socio PAYG</div>
+          <div class="plan-tier">{TIER_LABEL}</div>
           <div class="plan-price">5% <span class="period">pay-per-use</span></div>
           <p class="plan-summary">Infraestructura Cloudflare D1/R2 a costo real + 10% AI. 1 o 100 camiones mismo precio.</p>
           <ul class="plan-features">
@@ -277,7 +280,7 @@ async function handleGenerate(customPrompt?: string) {
             data-testid="cta-upgrade-socio"
             onclick={toggleDemoSocio}
           >
-            Activar Tier Socio (Demo)
+            Activar Tier {TIER_LABEL} (Demo)
           </button>
         </div>
       </div>

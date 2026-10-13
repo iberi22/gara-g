@@ -3,6 +3,9 @@
   import type { SocioBillingInfo } from '../lib/socioGate';
   import { isProEnabled } from '../lib/nodeGate';
   import { isSocioActivo } from '../lib/socioGate';
+  // Nombre visible del tier de facturacion: domain.config.ts. "socio" es solo el nombre interno
+  // del gate (socioGate.ts); la insignia ya no lo muestra.
+  import { TIER_LABEL } from '../lib/domain.config';
 
   export let node: SwalNodeStatus | null = null;
   export let socioBilling: SocioBillingInfo | null = null;
@@ -27,12 +30,12 @@
   {#if socioActive}
     <span class="badge badge-socio" title="Active Stripe infrastructure subscription (R2 Quota)">
       <span class="dot socio"></span>
-      SOCIO CLOUD
+      {TIER_LABEL} CLOUD
     </span>
   {:else}
     <span class="badge badge-nosocio" title="No active Stripe socio subscription">
       <span class="dot inactive"></span>
-      SOCIO INACTIVO
+      {TIER_LABEL} INACTIVO
     </span>
   {/if}
 </div>

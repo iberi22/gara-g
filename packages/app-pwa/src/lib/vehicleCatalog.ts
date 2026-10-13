@@ -25,7 +25,7 @@
  *   - fuelType: 'gasoline' | 'diesel' | 'electric' | 'hybrid' | 'gas'
  */
 
-import { MARKET, formatMoney, type MarketConfig } from './market';
+import { MARKET, formatMoney, localizeText, normalizeKindKey, type MarketConfig } from './market';
 
 export type VehicleType =
   | 'sedan'
@@ -57,8 +57,13 @@ export const MACHINERY_TYPES: readonly VehicleType[] = [
   'vibrocompactador',
 ];
 
-/** Etiquetas para selects y tablas, en el orden en que se ofrecen. */
-export const VEHICLE_TYPE_LABELS: ReadonlyArray<{ value: VehicleType; label: string; group: string }> = [
+/**
+ * Etiquetas del catalogo, tal como estan escritas en el mercado de origen (Colombia).
+ * Lo que se MUESTRA sale de `VEHICLE_TYPE_LABELS` / `vehicleTypeLabel`, que las traducen al
+ * vocabulario del mercado activo (Chile: "Tolva", no "Volqueta"). El `value` NO cambia:
+ * es el valor guardado en las filas y el que valida la API.
+ */
+const TYPE_LABELS_BASE: ReadonlyArray<{ value: VehicleType; label: string; group: string }> = [
   { value: 'moto', label: 'Moto', group: 'Livianos' },
   { value: 'sedan', label: 'Automovil / sedan', group: 'Livianos' },
   { value: 'suv', label: 'Campero / SUV', group: 'Livianos' },
@@ -75,6 +80,32 @@ export const VEHICLE_TYPE_LABELS: ReadonlyArray<{ value: VehicleType; label: str
   { value: 'motoniveladora', label: 'Motoniveladora', group: 'Maquinaria amarilla' },
   { value: 'vibrocompactador', label: 'Vibrocompactador', group: 'Maquinaria amarilla' },
 ];
+
+/** Etiquetas para selects y tablas, en el orden en que se ofrecen y en el vocabulario del mercado. */
+export const VEHICLE_TYPE_LABELS: ReadonlyArray<{ value: VehicleType; label: string; group: string }> =
+  TYPE_LABELS_BASE.map((t) => ({ ...t, label: localizeText(t.label, MARKET) }));
+
+/** Etiqueta visible de un tipo guardado, en el vocabulario del mercado. */
+export function vehicleTypeLabel(type: unknown, market: MarketConfig = MARKET): string {
+  const key = normalizeKindKey(String(type ?? ''));
+  const found = TYPE_LABELS_BASE.find((t) => t.value === key);
+  return found ? localizeText(found.label, market) : String(type ?? '');
+}
+
+/**
+ * Nombre visible de un vehiculo: "Kenworth T800 Tolva" en Chile. Los nombres de modelo del
+ * fabricante se guardan tal cual ("T800 Volqueta") y se traducen al mostrarlos; el `name` del
+ * vehiculo, si no hay marca ni modelo, se usa tal cual.
+ */
+export function vehicleDisplayName(
+  vehicle: { make?: unknown; model?: unknown; name?: unknown; plate?: unknown },
+  market: MarketConfig = MARKET,
+): string {
+  const make = String(vehicle.make ?? '').trim();
+  const model = localizeText(String(vehicle.model ?? '').trim(), market);
+  const composed = [make, model].filter(Boolean).join(' ');
+  return composed || String(vehicle.name ?? '').trim() || String(vehicle.plate ?? '').trim();
+}
 
 export function isMachineryType(type: string | undefined): boolean {
   return MACHINERY_TYPES.includes(normalizeVehicleType(type) as VehicleType);

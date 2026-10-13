@@ -6,6 +6,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { CHILE_DEMO_INSTANCE_ID, buildChileDemo, countByEntity, rutDv } from '../src/lib/demoChile';
 import { isValidVin } from '../src/garage/telemetry/ingest';
+import { notificationTitleLabel } from '../src/lib/alertLabels';
+import { alertNotificationTitle, unreadCount } from '../src/lib/notifications';
 import { PRODUCTION_D1_ID, applySeed, buildE2EUserRow, buildSeedSql, countRows } from '../scripts/seed-demo-chile.mjs';
 import { verifyPassword } from '../src/lib/password';
 
@@ -92,6 +94,35 @@ describe('seed-demo-chile', () => {
         expect(lng).toBeGreaterThan(-71);
         expect(lng).toBeLessThan(-68);
       }
+    }
+  });
+
+  it('la demo chilena trae notificaciones que espejan sus alertas (N6)', () => {
+    const rows = buildChileDemo(TODAY);
+    const alerts = rows.filter((r) => r.entity === 'alert');
+    const notifications = rows.filter((r) => r.entity === 'notification');
+
+    // El panel anuncia "6 ALERTAS SIN RECONOCER": el centro de notificaciones no puede estar vacio.
+    expect(alerts.length).toBeGreaterThanOrEqual(3);
+    expect(notifications).toHaveLength(alerts.length);
+    expect(unreadCount(notifications.map((r) => r.data))).toBe(alerts.length);
+
+    for (const [i, alert] of alerts.entries()) {
+      const n = notifications[i].data;
+      // Toda alerta sin reconocer tiene su notificacion no leida, con el mismo mensaje.
+      expect(n.body).toBe(alert.data.message);
+      expect(n.readAt).toBeNull();
+      expect(n.severity).toBe(alert.data.severity);
+      // El titulo guardado usa el formato canonico que la interfaz sabe traducir.
+      expect(n.title).toBe(alertNotificationTitle(String(alert.data.kind), String(alert.data.severity)));
+      expect(notificationTitleLabel(n.title)).toMatch(/^Alerta de .+ — severidad .+$/);
+    }
+
+    // Ids deterministas (volver a sembrar actualiza, no duplica) y fechas ISO.
+    const ids = notifications.map((r) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const n of notifications) {
+      expect(String(n.data.createdAt)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     }
   });
 

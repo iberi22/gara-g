@@ -17,7 +17,8 @@ import type { ManualInfo, VehicleNotes } from '../../garage/assistant/store';
 import type { TechNote } from '../../garage/assistant/prompt';
 import type { GarageVehicle, HistoryEvent, PartState } from '../../garage/contracts';
 import { formatCOP, formatKm } from '../garage/formatters';
-import { MARKET, formatNumber } from '../../lib/market';
+import { MARKET, formatNumber, localizeText } from '../../lib/market';
+import { vehicleDisplayName } from '../../lib/vehicleCatalog';
 import DossierChat from './DossierChat.svelte';
 import DossierManuals from './DossierManuals.svelte';
 
@@ -65,7 +66,9 @@ let notesMsg = $state<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
 const unit = $derived(vehicle.usageUnit);
 const isMachine = $derived(vehicle.spec.family === 'machinery');
-const title = $derived([vehicle.make, vehicle.model].filter(Boolean).join(' ') || vehicle.name);
+// El nombre de modelo del fabricante se muestra en el vocabulario del mercado ("T800 Tolva"
+// en Chile) y el tipo del catalogo tambien.
+const title = $derived(vehicleDisplayName(vehicle, MARKET) || localizeText(vehicle.name ?? '', MARKET));
 
 onMount(() => {
   const fromHash = window.location.hash.slice(1) as Tab;

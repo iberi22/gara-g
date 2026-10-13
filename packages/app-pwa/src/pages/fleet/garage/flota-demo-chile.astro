@@ -10,6 +10,8 @@
  */
 import FleetLayout from '../../../layouts/FleetLayout.astro';
 import { APP_HOME } from '../../../lib/appMode';
+import { MARKET } from '../../../lib/market.js';
+import { vehicleDisplayName } from '../../../lib/vehicleCatalog.js';
 import { loadChileDemo } from '../../../lib/demoChileView';
 
 export const prerender = false;
@@ -65,7 +67,7 @@ const operativos = view.vehicles.filter((v) => v.status === 'active').length;
             {view.vehicles.map((v) => (
               <tr>
                 <th scope="row" class="fd-mono">{String(v.plate ?? '—')}</th>
-                <td>{String(v.make ?? '')} {String(v.model ?? '')}</td>
+                <td>{vehicleDisplayName(v, MARKET)}</td>
                 <td>{String(v.year ?? '—')}</td>
                 <td>{String(v.capacity ?? '—')}</td>
                 <td class="fd-num">{typeof v.mileage === 'number' ? `${num.format(v.mileage)} km` : '—'}</td>
