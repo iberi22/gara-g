@@ -8,6 +8,7 @@ import { listEntities } from '../../../lib/domain.js';
 import { geofenceTypeLabel } from '../../../lib/alertLabels';
 import { escapeHtml } from '../../../lib/html.js';
 import { instanceIdFor } from '../../../garage/domain/tenant.js';
+import { MARKET, demoPolygon } from '../../../lib/market.js';
 import 'leaflet/dist/leaflet.css';
 import '../../../styles/leaflet-taller.css';
 
@@ -37,6 +38,10 @@ const columns = [
   { key: 'alertOnExit', label: 'Alerta salida' },
 ];
 
+// El ejemplo sale del mercado: antes era el poligono "Cliente Norte" de Bogota en un
+// formulario de una flota de Antofagasta.
+const polygonExample = demoPolygon(MARKET);
+
 const geofenceFields = [
   { name: 'name', label: 'Nombre', type: 'text', required: true, placeholder: 'Zona Norte' },
   {
@@ -55,7 +60,7 @@ const geofenceFields = [
     type: 'text',
     required: true,
     placeholder: 'lat,lng lat,lng lat,lng …',
-    help: 'Pares lat,lon separados por espacio. Ej: 4.7350,-74.0500 4.7250,-74.0500 4.7250,-74.0400 4.7350,-74.0400',
+    help: `Pares lat,lon separados por espacio. Ej: ${polygonExample}`,
   },
   { name: 'alertOnEnter', label: 'Alertar al entrar', type: 'checkbox' },
   { name: 'alertOnExit', label: 'Alertar al salir', type: 'checkbox' },
@@ -135,6 +140,9 @@ const geofencesJson = JSON.stringify(
 <!-- Leaflet va empaquetado (CSS en el frontmatter, JS con import() al abrir el mapa): sin CDN,
      asi el mapa funciona sin red en la PWA instalada. Los datos viajan en data-geofences. -->
 <script>
+  // Centro del mapa: importado (no del frontmatter: este script va empaquetado aparte).
+  import { MARKET } from '../../../lib/market.js';
+
   // Parse polygon string "lat,lng lat,lng …" into [[lat,lng], …]
   function parsePolygon(str: unknown): [number, number][] {
     if (!str || typeof str !== 'string') return [];
@@ -176,10 +184,10 @@ const geofencesJson = JSON.stringify(
     if (map) return;
     const geofencesJson = document.getElementById('geofence-map-wrap')?.dataset.geofences;
 
-    // Default view: Colombia (lat=4.57, lng=-74.29), zoom=6
+    // Vista por defecto: centro del mercado (Antofagasta en Chile), zoom de region.
     map = L.map(el, {
-      center: [4.57, -74.29],
-      zoom: 6,
+      center: [MARKET.mapCenter.lat, MARKET.mapCenter.lng],
+      zoom: MARKET.mapCenter.zoom,
       scrollWheelZoom: true,
     });
 

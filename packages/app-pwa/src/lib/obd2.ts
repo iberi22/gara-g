@@ -1,3 +1,4 @@
+import { MARKET } from './market.js';
 import type { TelemetryIngestManager, OBD2TelemetryRecord } from './telemetry.js';
 
 export type OBD2ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'unsupported' | 'error';
@@ -185,8 +186,10 @@ export class ELM327Adapter {
       rpm: parsed.rpm ?? 0,
       coolantTemp: parsed.coolantTemp ?? 90,
       fuelLevel: parsed.fuelLevel ?? 100,
-      latitude: 4.6097,
-      longitude: -74.0817,
+      // Sin GPS real la posicion de referencia es la del mercado (Antofagasta en Chile),
+      // no una constante de Bogota: el simulador pinta en el mapa de la flota.
+      latitude: MARKET.mapCenter.lat,
+      longitude: MARKET.mapCenter.lng,
       troubleCodes: [],
       odometer: 120000,
     };
@@ -246,8 +249,9 @@ export class OBD2Simulator {
       rpm: this.currentRpm,
       coolantTemp: this.currentTemp,
       fuelLevel: this.currentFuel,
-      latitude: 4.6097 + (Math.random() - 0.5) * 0.01,
-      longitude: -74.0817 + (Math.random() - 0.5) * 0.01,
+      // Deriva de +-0,005 grados (~500 m) alrededor del centro del mercado.
+      latitude: MARKET.mapCenter.lat + (Math.random() - 0.5) * 0.01,
+      longitude: MARKET.mapCenter.lng + (Math.random() - 0.5) * 0.01,
       troubleCodes: Math.random() > 0.9 ? ['P0300'] : [],
       odometer: this.odometer,
     };

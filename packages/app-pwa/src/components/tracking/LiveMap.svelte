@@ -62,8 +62,10 @@
 
       if (mapElement && !mapInstance) {
         mapInstance = L.map(mapElement, {
-          center: [4.6097, -74.0817], // Bogota default center
-          zoom: 7,
+          // Centro del mercado (Antofagasta en Chile): la flota chilena todavia no emite
+          // telemetria, asi que `fitBounds` no corre y el mapa se quedaba sobre Bogota.
+          center: [MARKET.mapCenter.lat, MARKET.mapCenter.lng],
+          zoom: MARKET.mapCenter.zoom,
           scrollWheelZoom: true,
         });
 

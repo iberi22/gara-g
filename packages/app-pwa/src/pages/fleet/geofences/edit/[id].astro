@@ -125,6 +125,8 @@ const initialPolygon = typeof geofence.polygon === 'string' ? geofence.polygon :
 <script>
   // @ts-nocheck — JS plano heredado del script inline; Leaflet llega del paquete.
   import L from 'leaflet';
+  // Centro por defecto del mapa de edicion: el del mercado (Antofagasta en Chile).
+  import { MARKET } from '../../../../lib/market.js';
   // === Editor visual de polígono ===
   function parsePolygon(str) {
     if (!str || typeof str !== 'string') return [];
@@ -213,14 +215,14 @@ const initialPolygon = typeof geofence.polygon === 'string' ? geofence.polygon :
 
     vertices = parsePolygon(el.dataset.polygon);
 
-    // Default Colombia si no hay vértices
+    // Default del mercado si no hay vértices (Chile: Antofagasta, no Bogotá).
     const center = vertices.length
       ? vertices.reduce((acc, p) => [acc[0] + p[0] / vertices.length, acc[1] + p[1] / vertices.length], [0, 0])
-      : [4.57, -74.29];
+      : [MARKET.mapCenter.lat, MARKET.mapCenter.lng];
 
     map = L.map(el, {
       center,
-      zoom: vertices.length ? 11 : 6,
+      zoom: vertices.length ? 11 : MARKET.mapCenter.zoom,
       scrollWheelZoom: true,
     });
 
@@ -261,7 +263,7 @@ const initialPolygon = typeof geofence.polygon === 'string' ? geofence.polygon :
         } else if (vertices.length === 1) {
           map.setView(vertices[0], 13);
         } else {
-          map.setView([4.57, -74.29], 6);
+          map.setView([MARKET.mapCenter.lat, MARKET.mapCenter.lng], MARKET.mapCenter.zoom);
         }
       });
     }
