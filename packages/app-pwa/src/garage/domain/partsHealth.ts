@@ -137,8 +137,17 @@ function serviceRank(m: MaintenanceRow): number {
  */
 export function serviceMatches(input: PartHealthInput): Map<PartSlotId, ServiceMatch> {
   const model = input.make && input.model ? findModel(input.make, input.model) : undefined;
-  const parts = model?.commonParts ?? [];
+  let parts = model?.commonParts ?? [];
   const family = input.family;
+
+  if (parts.length === 0 && family === 'moto') {
+    // ESTIMATES: Generic motorcycle intervals
+    parts = [
+      { name: 'Cadena (estimado, ajusta con tu manual)', category: 'transmision', lifeKm: 500, avgCostCOP: 0 },
+      { name: 'Aceite (estimado, ajusta con tu manual)', category: 'liquido', lifeKm: 3000, avgCostCOP: 0 },
+      { name: 'Bujía / Revisión general (estimado, ajusta con tu manual)', category: 'motor', lifeKm: 6000, avgCostCOP: 0 },
+    ];
+  }
   const maintenances = input.maintenance ?? [];
 
   const best = new Map<PartSlotId, ServiceMatch>();
