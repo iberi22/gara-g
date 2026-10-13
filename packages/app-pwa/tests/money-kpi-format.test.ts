@@ -23,6 +23,13 @@ function code(src: string): string {
     .join('\n');
 }
 
+/** El frontmatter de un .astro (lo que se ejecuta en el servidor). */
+function frontmatter(src: string): string {
+  const lines = src.split('\n');
+  const fin = lines.findIndex((l, i) => i > 0 && l.trim() === '---');
+  return lines.slice(1, fin).join('\n');
+}
+
 const FICHEROS = ['components/FleetList.astro', 'pages/fleet/analytics.astro'];
 
 describe('los importes de la interfaz salen de formatMoney', () => {
@@ -38,7 +45,11 @@ describe('los importes de la interfaz salen de formatMoney', () => {
 
   it('el panel usa el formateador del mercado en el SSR y en el sondeo del cliente', () => {
     const s = read('components/FleetList.astro');
-    expect(s).toMatch(/from '\.\.\/lib\/market\.js'/);
+    // OJO: el import del FRONTMATTER es el que ejecuta el servidor. `formatMoney` en la
+    // plantilla sin importarlo alli revienta la pagina en el Worker (ReferenceError) sin que
+    // el build falle: los identificadores sueltos se empaquetan como globales.
+    expect(frontmatter(s)).toMatch(/import \{[^}]*formatMoney[^}]*\} from '\.\.\/lib\/market\.js'/);
+    expect(frontmatter(s)).toMatch(/import \{[^}]*formatNumber[^}]*\}/);
     expect(s).toMatch(/formatMoney\(serverStats\.totalFuelCost,\s*MARKET\)/);
     expect(s).toMatch(/formatMoney\(serverStats\.totalMaintCost,\s*MARKET\)/);
     // El sondeo del cliente usa el mismo formateador, no una copia del formato.
