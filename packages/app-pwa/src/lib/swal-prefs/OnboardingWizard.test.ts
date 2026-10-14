@@ -169,3 +169,23 @@ describe('OnboardingWizard: bienvenida y eleccion de almacenamiento', () => {
     expect((onfinish.mock.calls[0][0] as Preferences).preset).not.toBe('solo');
   });
 });
+
+describe('OnboardingWizard: necesidades', () => {
+  const needs = [
+    { id: 'drv', label: 'Conductores', modules: ['drivers'] },
+    { id: 'fl', label: 'Combustible', modules: ['fuel'] },
+  ];
+  it('elegir una necesidad apaga lo reclamado que no se eligió, mantiene el nº de pasos y explica en Listo', async () => {
+    const { onfinish } = setup({ needs });
+    expect(text()).toContain('Paso 1 / 4');
+    q<HTMLButtonElement>('[data-testid="need-drv"]').click();
+    flushSync();
+    for (let i = 0; i < 3; i++) click('Siguiente');
+    expect(text()).toContain('Paso 4 / 4');
+    expect(q('[data-testid="sum-reasons"]').textContent).toContain('Conductores');
+    click('Entrar');
+    await Promise.resolve();
+    const prefs = onfinish.mock.calls[0][0] as Preferences;
+    expect(prefs.modules).toMatchObject({ drivers: true, fuel: false, home: true });
+  });
+});

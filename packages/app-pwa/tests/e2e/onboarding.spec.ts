@@ -25,7 +25,7 @@ test.describe('Onboarding y ajustes de interfaz', () => {
     await expect(page.getByTestId('feature-garage')).toBeVisible();
     await expect(page.getByTestId('step-storage')).toHaveCount(0);
     await page.getByRole('button', { name: 'Siguiente' }).click();
-    await page.getByRole('button', { name: /Mi vehículo/ }).click();
+    await page.getByRole('button', { name: /^Mi vehículo Una moto/ }).click();
     for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'Siguiente' }).click();
     await expect(page.getByTestId('wizard-step')).toContainText('5 / 5');
     await page.getByRole('button', { name: 'Entrar' }).click();
@@ -33,6 +33,25 @@ test.describe('Onboarding y ajustes de interfaz', () => {
     await page.waitForURL(/\/fleet\/?$/);
     await expect(page.getByTestId('nav-vehicles')).toBeVisible();
     await expect(page.getByTestId('nav-drivers')).toBeHidden();
+  });
+
+  test('necesidades: "Conductores" y "Rastreo en vivo" arman el menú y el resumen lo explica', async ({ page, context }) => {
+    const reset = await context.request.put('/api/prefs', { data: { prefs: {} } });
+    expect(reset.ok()).toBe(true);
+    await page.goto('/fleet/bienvenida');
+    await page.getByRole('button', { name: 'Siguiente' }).click();
+    await page.getByTestId('need-drivers').click();
+    await page.getByTestId('need-live').click();
+    for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'Siguiente' }).click();
+    await expect(page.getByTestId('wizard-step')).toContainText('5 / 5');
+    await expect(page.getByTestId('sum-reasons')).toContainText('Conductores');
+    await page.getByRole('button', { name: 'Entrar' }).click();
+
+    await page.waitForURL(/\/fleet\/?$/);
+    await expect(page.getByTestId('nav-drivers')).toBeVisible();
+    await expect(page.getByTestId('nav-tracking')).toBeVisible();
+    await expect(page.getByTestId('nav-fuel')).toBeHidden();
+    await expect(page.getByTestId('nav-fleets')).toBeHidden();
   });
 
   test('con sesion /fleet/bienvenida no ofrece modo local ni deja cookie de invitado', async ({ page, context }) => {
