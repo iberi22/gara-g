@@ -9,14 +9,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { env } from 'cloudflare:workers';
 import { GET } from '../src/pages/api/mesh/room-key';
 import { DEV_MESH_ROOM_SECRET, EPOCH_MS, INFO_ROOM_ID, INFO_ROOM_KEY, deriveRoomKeys } from '../src/pages/api/mesh/_roomKey';
+import { isRoomOwner } from '../src/pages/api/mesh/_roomOwner';
 
 const envMock = env as unknown as Record<string, unknown>;
 // Fixture de test, no un secreto real: 40 caracteres repetidos para pasar el minimo de 32.
 const FIXTURE_ROOM_SECRET = 'x'.repeat(40);
-const SESSIONS: Record<string, { userId: string; instanceId: string }> = {
-  'tok-a1': { userId: 'usr_a1', instanceId: 'tenant-a' },
-  'tok-a2': { userId: 'usr_a2', instanceId: 'tenant-a' },
-  'tok-b': { userId: 'usr_b', instanceId: 'tenant-b' },
+const SESSIONS: Record<string, { userId: string; instanceId: string; role: string }> = {
+  'tok-a1': { userId: 'usr_a1', instanceId: 'tenant-a', role: 'admin' },
+  'tok-a2': { userId: 'usr_a2', instanceId: 'tenant-a', role: 'operator' },
+  'tok-a3': { userId: 'usr_a3', instanceId: 'tenant-a', role: 'observer' },
+  'tok-a4': { userId: 'usr_a4', instanceId: 'tenant-a', role: 'admin' },
+  'tok-b': { userId: 'usr_b', instanceId: 'tenant-b', role: 'admin' },
 };
 
 function ctx(token: string | null, query = '') {
@@ -38,7 +41,7 @@ beforeEach(() => {
   envMock.SESSION = {
     get: vi.fn(async (key: string) => {
       const s = SESSIONS[key.replace('token:', '')];
-      return s ? JSON.stringify({ ...s, email: 'x@y.z', role: 'observer', exp: Date.now() + 60_000 }) : null;
+      return s ? JSON.stringify({ ...s, email: 'x@y.z', role: s.role, exp: Date.now() + 60_000 }) : null;
     }),
     delete: vi.fn(),
   };
@@ -89,17 +92,107 @@ describe('/api/mesh/room-key', () => {
     expect(viaHeader.roomId).toBe(base.roomId);
   });
 
-  it('tenants distintos -> roomId y claves distintos (actual y previa); mismo tenant -> los mismos', async () => {
+  it('tenants distintos -> roomId y claves distintos (actual y previa); mismo tenant -> los mismos (dos propietarios)', async () => {
     const a1 = (await get('tok-a1')).body;
-    const a2 = (await get('tok-a2')).body; // otro usuario, mismo tenant
+    const a4 = (await get('tok-a4')).body; // otro usuario (propietario), mismo tenant
     const b = (await get('tok-b')).body;
-    expect(a2.roomId).toBe(a1.roomId);
-    expect(a2.key).toBe(a1.key);
-    expect(a2.previous.key).toBe(a1.previous.key);
+    expect(a4.roomId).toBe(a1.roomId);
+    expect(a4.key).toBe(a1.key);
+    expect(a4.previous.key).toBe(a1.previous.key);
     expect(b.roomId).not.toBe(a1.roomId);
     expect(b.key).not.toBe(a1.key);
     expect(b.previous.key).not.toBe(a1.previous.key);
     expect(b.key).not.toBe(a1.previous.key);
+  });
+
+  it('no propietario (operador) del mismo tenant recibe 403 y no obtiene clave ni sala', async () => {
+    const { res, body } = await get('tok-a2');
+    expect(res.status).toBe(403);
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe('Solo el propietario de la sala recibe la clave');
+    expect(body.key).toBeUndefined();
+    expect(body.roomId).toBeUndefined();
+  });
+
+  it('no propietario (observador) del mismo tenant recibe 403 y no obtiene clave ni sala', async () => {
+    const { res, body } = await get('tok-a3');
+    expect(res.status).toBe(403);
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe('Solo el propietario de la sala recibe la clave');
+    expect(body.key).toBeUndefined();
+    expect(body.roomId).toBeUndefined();
+  });
+
+  it('el propietario del tenant recibe 200 y las claves correctas de su sala', async () => {
+    const expected = await deriveRoomKeys(FIXTURE_ROOM_SECRET, 'tenant-a');
+    const { res, body } = await get('tok-a1');
+    expect(res.status).toBe(200);
+    expect(body.roomId).toBe(expected.roomId);
+    expect(body.key).toBe(expected.key);
+  });
+
+  it('un no propietario no puede cambiar de tenant (403 incluso forzando el header)', async () => {
+    // Operador (no propietario) intentando acceder a otro tenant
+    const c = ctx('tok-a2', '?instanceId=tenant-b');
+    c.request = new Request(c.request.url, { headers: { cookie: 'session=tok-a2', 'x-instance-id': 'tenant-b' } });
+    const res = await GET(c);
+    expect(res.status).toBe(403);
+  });
+
+  it('el propietario de un tenant distinto obtiene su propia sala y no la ajena', async () => {
+    const { res, body } = await get('tok-b');
+    expect(res.status).toBe(200);
+    const expected = await deriveRoomKeys(FIXTURE_ROOM_SECRET, 'tenant-b');
+    expect(body.roomId).toBe(expected.roomId);
+    const aExpected = await deriveRoomKeys(FIXTURE_ROOM_SECRET, 'tenant-a');
+    expect(body.roomId).not.toBe(aExpected.roomId);
+  });
+
+  it('el chequeo 403 de no propietario precede al 503 de secreto no configurado', async () => {
+    envMock.MESH_ROOM_SECRET = undefined;
+
+    // Operador obtiene 403 (no 503)
+    const op = await get('tok-a2');
+    expect(op.res.status).toBe(403);
+
+    // Propietario obtiene 503 (no hay secreto)
+    const owner = await get('tok-a1');
+    expect(owner.res.status).toBe(503);
+
+    // Sin sesión obtiene 401
+    const noSession = await get(null);
+    expect(noSession.res.status).toBe(401);
+  });
+
+  it('falla cerrado (403 para no propietario): un rol ausente, vacío, o incorrecto', async () => {
+    // Override SESSIONS return para roles erróneos
+    const testRole = async (roleVal: any) => {
+      envMock.SESSION = {
+        get: vi.fn(async () => JSON.stringify({ userId: 'u', instanceId: 't', email: 'x', role: roleVal, exp: Date.now() + 60_000 })),
+        delete: vi.fn(),
+      };
+      const r = await get('tok-test');
+      expect(r.res.status).toBe(403);
+    };
+
+    await testRole('');
+    await testRole('ADMIN');
+    await testRole(null);
+    await testRole(undefined);
+  });
+
+  it('isRoomOwner determina correctamente si es propietario (unit)', () => {
+    expect(isRoomOwner({ role: 'admin' })).toBe(true);
+
+    expect(isRoomOwner({ role: 'operator' })).toBe(false);
+    expect(isRoomOwner({ role: 'observer' })).toBe(false);
+    expect(isRoomOwner({ role: undefined })).toBe(false);
+    expect(isRoomOwner({ role: null })).toBe(false);
+    expect(isRoomOwner({ role: '' })).toBe(false);
+    expect(isRoomOwner({ role: 'owner' })).toBe(false);
+    expect(isRoomOwner({ role: 'ADMIN' })).toBe(false);
+    expect(isRoomOwner(null)).toBe(false);
+    expect(isRoomOwner(undefined)).toBe(false);
   });
 
   it('es estable dentro de la epoca y rota al cambiar de epoca, con la previa enlazada', async () => {
