@@ -17,7 +17,7 @@
  * Sin clave (endpoint caido, 401, 503) NO se abre ninguna sala: `attachDocToMesh` lanza y la
  * grafica sigue en local; nunca hay un modo sin cifrar.
  * Limites: la metadata de la sala (quien se conecta, tamano y ritmo de los mensajes) es visible
- * para quien conozca el roomId; la clave la tiene todo usuario del tenant; los mensajes cifrados
+ * para quien conozca el roomId; la clave solo la reciben los administradores (propietarios) del tenant; los mensajes cifrados
  * grabados pueden reenviarse (los updates de Yjs son idempotentes, no hay efecto nuevo).
  *
  * Claves y epocas: el servidor rota la clave cada semana y entrega tambien la anterior. Se

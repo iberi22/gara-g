@@ -29,7 +29,7 @@
  *     recargar. El build no puede comprobar secretos; es un paso manual del despliegue.
  *   - Los tipos del binding estan en src/env.d.ts (Cloudflare.Env).
  *
- * Limite conocido: cualquier usuario del tenant (cualquier rol) recibe la clave; quien la tuvo
+ * Limite conocido: solo los administradores (propietarios) del tenant reciben la clave; operadores y observadores obtienen 403; quien la tuvo
  * conserva acceso hasta que pasan dos epocas, y el roomId no rota con la epoca.
  */
 import type { APIRoute } from 'astro';
@@ -37,6 +37,7 @@ import { env } from 'cloudflare:workers';
 import { sessionInstanceId } from '../../../garage/domain/tenant';
 import { getAuthUser } from '../fleetApi/auth';
 import { DEV_MESH_ROOM_SECRET, MIN_SECRET_LENGTH, deriveRoomKeys } from './_roomKey';
+import { isRoomOwner } from './_roomOwner';
 
 export const prerender = false;
 
@@ -73,6 +74,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
   // Solo el tenant de la sesion: sin default silencioso, y la URL no se mira.
   const instanceId = sessionInstanceId(locals) ?? (user.instanceId || undefined);
   if (!instanceId) return reply(401, { ok: false, error: 'Sesion sin tenant' });
+
+  if (!isRoomOwner(user)) return reply(403, { ok: false, error: 'Solo el propietario de la sala recibe la clave' });
 
   const secret = resolveSecret();
   if (!secret) return reply(503, { ok: false, error: 'Malla cifrada no configurada' });
