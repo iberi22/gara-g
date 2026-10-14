@@ -276,16 +276,9 @@ export class CloudflareVaultAdapter implements StorageAdapter {
   }
 
   async update(entity: string, id: string, patch: Record<string, unknown>, instanceId: string): Promise<DomainRecord | null> {
-    const cur = await this.get(entity, id, instanceId);
-    if (!cur) return null;
-    const next = { ...cur, ...patch, updated_at: new Date().toISOString() } as DomainRecord;
-
-    // @swal/vault no exporta función para re-sellar con un DEK existente.
-    // Para no regenerar el recovery share (y evitar corromper los shares locales),
-    // mantenemos el sealed pack existente inalterado en la nube. La actualización real requiere
-    // cambios en la librería vault. Solo actualizamos en memoria para fallback/local.
-    this.memKey(entity).set(id, next);
-    return next;
+    // Updates cannot be persisted durably because @swal/vault cannot re-seal with an existing DEK.
+    // Reject before reading anything, so no cache or memory state is touched on failure.
+    throw new Error('update not supported by the vault adapter until @swal/vault can re-seal with an existing DEK');
   }
 
   async del(entity: string, id: string, instanceId: string): Promise<boolean> {

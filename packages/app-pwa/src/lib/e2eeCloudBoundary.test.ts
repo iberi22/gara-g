@@ -159,24 +159,22 @@ describe('frontera E2EE — la nube no puede descifrar', () => {
     expect(val.data).toBeInstanceOf(ArrayBuffer); // o similar dependiendo de como cifremos
   });
 
-  it('update() mantiene el mismo share de recuperacion original y la recuperacion funciona', async () => {
+  it('update() lanza error explícito sin modificar el registro en memoria ni en la nube', async () => {
     const { env } = fakeCloud();
     const adapter = new CloudflareVaultAdapter(env, 'app-e2ee');
     await adapter.create('item', Object.assign(rec(), { secreto: 'v1' }) as any);
-    const rec1 = await adapter.recoveryShare('r1');
 
-    await adapter.update('item', 'r1', { secreto: 'v2' }, 'inst1');
-    const rec2 = await adapter.recoveryShare('r1');
+    await expect(adapter.update('item', 'r1', { secreto: 'v2' }, 'inst1')).rejects.toThrow(
+      'update not supported by the vault adapter until @swal/vault can re-seal with an existing DEK',
+    );
 
-    expect(rec1?.value).toBeDefined();
-    expect(rec2?.value, 'recovery share value debe mantenerse constante en un update').toBe(rec1?.value);
+    // Tras el fallo, get() en la misma instancia y en otra debe seguir devolviendo el registro original intacto
+    const gotMem = await adapter.get('item', 'r1', 'inst1');
+    expect(gotMem?.secreto).toBe('v1');
 
-    // Para simular lectura desde la nube (operator scenario), usamos otro adapter
     const ajeno = new CloudflareVaultAdapter(env, 'app-e2ee');
-    ajeno.setDeviceShareStore(adapter['deviceStore']); // le pasamos el store para que pueda leer
-    const got = await ajeno.get('item', 'r1', 'inst1');
-    // Como el update fue ignorado en la nube por falta de soporte de re-sellado,
-    // la nube todavía tiene el registro antiguo 'v1'.
-    expect(got?.secreto).toBe('v1');
+    ajeno.setDeviceShareStore(adapter['deviceStore']);
+    const gotCloud = await ajeno.get('item', 'r1', 'inst1');
+    expect(gotCloud?.secreto).toBe('v1');
   });
 });
