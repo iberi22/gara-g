@@ -3,6 +3,7 @@
   import { getClientMode } from '../../lib/appMode';
   import { parseBackupCode } from '../../lib/e2ee/crypto';
   import { createSyncClient, type SyncResult } from '../../lib/e2ee/syncClient';
+  import { downloadMyData } from '../../lib/local/exportMyData';
   import { MARKET } from '../../lib/market';
 
   const sync = createSyncClient();
@@ -252,6 +253,17 @@
       </div>
     </section>
   {/if}
+
+  <section class="blk swal-card-frame">
+    <div class="swal-card-inner inner">
+      <h2 class="swal-kicker"><span class="swal-tick" aria-hidden="true"></span> Exportar mis datos</h2>
+      <p class="hint">Descarga todos los datos generados en este dispositivo sin cifrar (SQL o JSON). No incluye la clave de sincronización.</p>
+      <div class="btns">
+        <button type="button" class="btn" onclick={() => downloadMyData('json')} data-testid="backup-export-json">Descargar JSON</button>
+        <button type="button" class="btn" onclick={() => downloadMyData('sql')} data-testid="backup-export-sql">Descargar SQL</button>
+      </div>
+    </div>
+  </section>
 
   <section class="blk swal-card-frame">
     <div class="swal-card-inner inner">
