@@ -27,7 +27,7 @@ async function addHilux(page: Page) {
   const dialog = page.getByRole('dialog');
   await slow(dialog).toBeVisible();
   await dialog.getByLabel('Modelo').selectOption({ label: 'Toyota Hilux' });
-  await dialog.getByLabel('Placa').fill('abc123');
+  await dialog.getByLabel(/Patente|Placa/).fill('abc123');
   await dialog.getByLabel('Año').fill('2020');
   await dialog.getByLabel(/Kilometraje/).fill('45000');
   await dialog.getByRole('button', { name: 'Agregar al garage' }).click();
@@ -73,8 +73,10 @@ test.describe('mercado sin cuenta', () => {
 
     // Un vehiculo en el garage local (IndexedDB), por la misma pantalla que usa el dueno.
     await page.goto('/fleet/garage?gl=1');
-    await slow(page.getByTestId('guest-add-first')).toBeVisible({ timeout: 60_000 });
-    await page.getByTestId('guest-add-first').click();
+    // Garage vacio: "Agregar mi primer vehiculo". Con el camion de demo del invitado: "+ Vehiculo".
+    const addBtn = page.getByTestId('guest-add-first').or(page.getByTestId('guest-add')).first();
+    await slow(addBtn).toBeVisible({ timeout: 60_000 });
+    await addBtn.click();
     await addHilux(page);
 
     await page.goto('/fleet/mercado');
@@ -84,10 +86,12 @@ test.describe('mercado sin cuenta', () => {
     await expect(page.getByTestId('tab-todo')).toHaveAttribute('aria-selected', 'true');
 
     const section = page.getByTestId('todo-vehiculos');
-    await slow(section.getByTestId('tv-vehicle')).toHaveCount(1);
-    await expect(section.getByRole('heading', { level: 3 }).first()).toContainText('Toyota');
-    await expect(section.getByRole('heading', { name: 'Cambio de aceite' })).toBeVisible();
-    await expect(section.getByRole('heading', { name: 'Kit de carretera' })).toBeVisible();
+    // Con el camion de demo del invitado hay 2 vehiculos: contamos el Toyota que agrego el test.
+    const toyota = section.getByTestId('tv-vehicle').filter({ hasText: 'Toyota' });
+    await slow(toyota).toHaveCount(1);
+    await expect(toyota.getByRole('heading', { level: 3 }).first()).toContainText('Toyota');
+    await expect(section.getByRole('heading', { name: 'Cambio de aceite' }).first()).toBeVisible();
+    await expect(section.getByRole('heading', { name: 'Kit de carretera' }).first()).toBeVisible();
     // sin ofertas de la red, cada rubro lo dice
     await expect(section.getByText('Sin ofertas por ahora').first()).toBeVisible();
     // 360 px sin desborde horizontal
