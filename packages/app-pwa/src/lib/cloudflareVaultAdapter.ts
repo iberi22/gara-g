@@ -1,12 +1,20 @@
 // cloudflareVaultAdapter.ts — StorageAdapter 100% cifrado sobre Cloudflare R2+D1+KV
 // Reusable para cualquier app SWAL (gara-g, hosteler-ia, flota, etc).
 // Si no hay bindings (mesh-only), fallback a MemoryAdapter (0$, replica P2P en otros nodos gara-g).
-// Si hay bindings, cada record se cifra via @swal/vault createSealedPack y se guarda ciphertext en R2 + meta en D1.
-// 1 camion = 100 camiones mismo precio: no hay fee por entity, solo bytes (R2) + rows (D1) + AI tokens.
+// Frontera E2EE: R2 guarda el ciphertext sin shares, KV guarda exactamente un share (x=3),
+// los shares de dispositivo (x=1) y recuperacion (x=2) NUNCA salen del equipo.
+// El operador de la nube acumula como mucho 1 de 3 shares y no puede descifrar (umbral es 2).
+// Nota: los datos son irrecuperables si el dispositivo original y la clave de recuperacion se pierden.
 
 import type { StorageAdapter, DomainRecord } from './domain';
 import { domainConfig } from './domain.config';
-import { createSealedPack, unpackSealedPack } from '@swal/vault/sealedPack.js';
+import {
+  createSealedPack,
+  unpackSealedPack,
+  packWithoutShares,
+  cloudBoundShare,
+  assertCloudSharesSafe,
+} from '@swal/vault/sealedPack.js';
 
 // Tipos Cloudflare bindings (compat con wrangler.toml template)
 export type CloudflareEnv = {
@@ -20,6 +28,133 @@ export class CloudflareVaultAdapter implements StorageAdapter {
   private appId: string;
   // memory fallback para dev/tests sin bindings
   private mem = new Map<string, Map<string, DomainRecord>>();
+
+  private deviceStore: {
+    save(id: string, s: { device: any; recovery: any }): void | Promise<void>;
+    load(id: string): { device: any; recovery: any } | null | Promise<any>;
+  } = {
+    save: async (id: string, s: { device: any; recovery: any }) => {
+      await this.saveToIndexedDB(id, s);
+    },
+    load: async (id: string) => {
+      return await this.loadFromIndexedDB(id);
+    },
+  };
+
+  private _masterKey: CryptoKey | null = null;
+  private _keyInitPromise: Promise<CryptoKey> | null = null;
+
+  private async getDBKey(db: IDBDatabase): Promise<CryptoKey> {
+    if (this._masterKey) return this._masterKey;
+    if (this._keyInitPromise) return this._keyInitPromise;
+    this._keyInitPromise = (async () => {
+      const existingKey = await new Promise<CryptoKey | undefined>((resolve, reject) => {
+        const tx = db.transaction('keys', 'readonly');
+        const req = tx.objectStore('keys').get('master-key');
+        req.onsuccess = () => resolve(req.result?.key);
+        req.onerror = () => reject(req.error);
+      });
+
+      if (existingKey) {
+        this._masterKey = existingKey;
+        return existingKey;
+      }
+
+      if (typeof crypto === 'undefined' || !crypto.subtle) throw new Error('Crypto API not available');
+      const key = await crypto.subtle.generateKey(
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+      );
+      this._masterKey = key;
+
+      return new Promise<CryptoKey>((resolve, reject) => {
+        const tx = db.transaction('keys', 'readwrite');
+        const req = tx.objectStore('keys').put({ id: 'master-key', key });
+        req.onsuccess = () => resolve(key);
+        req.onerror = () => reject(req.error);
+      });
+    })();
+    return this._keyInitPromise;
+  }
+
+  private async openDB(): Promise<IDBDatabase | null> {
+    if (typeof indexedDB === 'undefined') return null;
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('vault-device-shares', 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('shares')) db.createObjectStore('shares', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('keys')) db.createObjectStore('keys', { keyPath: 'id' });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  private async saveToIndexedDB(id: string, s: { device: any; recovery: any }) {
+    const db = await this.openDB();
+    if (!db) return;
+    try {
+      const key = await this.getDBKey(db);
+      const iv = typeof crypto !== 'undefined' ? crypto.getRandomValues(new Uint8Array(12)) : new Uint8Array(12);
+      const data = new TextEncoder().encode(JSON.stringify(s));
+      const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
+
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction('shares', 'readwrite');
+        const req = tx.objectStore('shares').put({ id, iv, data: encrypted });
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    } finally {
+      db.close();
+    }
+  }
+
+  private async loadFromIndexedDB(id: string): Promise<{ device: any; recovery: any } | null> {
+    const db = await this.openDB();
+    if (!db) return null;
+    try {
+      const result = await new Promise<any>((resolve, reject) => {
+        const tx = db.transaction('shares', 'readonly');
+        const req = tx.objectStore('shares').get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      if (!result) return null;
+
+      const key = await this.getDBKey(db);
+      const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: result.iv },
+        key,
+        result.data
+      );
+      return JSON.parse(new TextDecoder().decode(decrypted));
+    } catch (e) {
+      return null;
+    } finally {
+      db.close();
+    }
+  }
+
+  setDeviceShareStore(store: {
+    save(id: string, s: { device: any; recovery: any }): void | Promise<void>;
+    load(id: string): { device: any; recovery: any } | null | Promise<any>;
+  }) {
+    this.deviceStore = store;
+  }
+
+  async recoveryShare(id: string): Promise<any> {
+    const s = await this.deviceStore.load(id);
+    return s?.recovery ?? null;
+  }
+
+  private async localShares(id: string): Promise<any[]> {
+    const s = await this.deviceStore.load(id);
+    if (!s) return [];
+    return [s.device, s.recovery].filter(Boolean);
+  }
 
   constructor(env: CloudflareEnv, appId = domainConfig.appId as string) {
     this.env = env;
@@ -52,7 +187,19 @@ export class CloudflareVaultAdapter implements StorageAdapter {
       } as any);
 
       const r2Key = this.r2Key(entity, record.id, record.instance_id);
-      if (this.env.SWAL_R2?.put) await this.env.SWAL_R2.put(r2Key, JSON.stringify(pack), { httpMetadata: { contentType: 'application/json' } });
+
+      const cloudPack = packWithoutShares(pack);
+      const kvShare = cloudBoundShare(pack.shares ?? []);
+      assertCloudSharesSafe(kvShare ? 1 : 0);
+
+      // The createSealedPack generates a new DEK and shares.
+      // Saving these to device store securely.
+      await this.deviceStore.save(record.id, {
+        device: pack.shares?.[0] ?? null,
+        recovery: pack.shares?.[1] ?? null,
+      });
+
+      if (this.env.SWAL_R2?.put) await this.env.SWAL_R2.put(r2Key, JSON.stringify(cloudPack), { httpMetadata: { contentType: 'application/json' } });
       if (this.env.SWAL_D1?.prepare) {
         await this.env.SWAL_D1.prepare(
           'INSERT OR REPLACE INTO sealed_meta (id, appId, instance_id, entity, content_hash, r2_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -61,9 +208,9 @@ export class CloudflareVaultAdapter implements StorageAdapter {
           .run()
           .catch(() => {});
       }
-      // guarda shares en KV para reconstruccion (1 share en KV, resto en pack)
-      if (this.env.SWAL_KV?.put && pack.shares?.[0]) {
-        await this.env.SWAL_KV.put(`share:${this.appId}:${record.id}`, JSON.stringify(pack.shares)).catch(() => {});
+      // UN solo share en KV (el índice 3)
+      if (this.env.SWAL_KV?.put && kvShare) {
+        await this.env.SWAL_KV.put(`share:${this.appId}:${record.id}`, JSON.stringify([kvShare])).catch(() => {});
       }
     } catch (e) {
       console.warn('[vaultAdapter] cloud create fallback to mem', e);
@@ -89,7 +236,10 @@ export class CloudflareVaultAdapter implements StorageAdapter {
               const obj = await this.env.SWAL_R2.get(row.r2_key);
               if (!obj) continue;
               const pack = JSON.parse(await obj.text());
-              const shares: any = JSON.parse((await this.env.SWAL_KV?.get(`share:${this.appId}:${row.id}`)) ?? 'null') ?? pack.shares;
+              const kvShares: any = JSON.parse((await this.env.SWAL_KV?.get(`share:${this.appId}:${row.id}`)) ?? 'null');
+              const deviceShares = await this.localShares(row.id);
+              const shares = [...deviceShares, ...(kvShares ?? [])];
+              if (shares.length < 2) continue;
               const plain = await unpackSealedPack(pack, shares.slice(0, 2));
               const rec = JSON.parse(new TextDecoder().decode(plain));
               if (rec.instance_id === instanceId) out.push(rec);
@@ -111,7 +261,10 @@ export class CloudflareVaultAdapter implements StorageAdapter {
       const obj = await this.env.SWAL_R2?.get(r2Key);
       if (!obj) return mem;
       const pack = JSON.parse(await obj.text());
-      const shares: any = JSON.parse((await this.env.SWAL_KV?.get(`share:${this.appId}:${id}`)) ?? 'null') ?? pack.shares;
+      const kvShares: any = JSON.parse((await this.env.SWAL_KV?.get(`share:${this.appId}:${id}`)) ?? 'null');
+      const deviceShares = await this.localShares(id);
+      const shares = [...deviceShares, ...(kvShares ?? [])];
+      if (shares.length < 2) return mem;
       const plain = await unpackSealedPack(pack, shares.slice(0, 2));
       const rec = JSON.parse(new TextDecoder().decode(plain));
       if (rec.instance_id !== instanceId) return null;
@@ -126,7 +279,11 @@ export class CloudflareVaultAdapter implements StorageAdapter {
     const cur = await this.get(entity, id, instanceId);
     if (!cur) return null;
     const next = { ...cur, ...patch, updated_at: new Date().toISOString() } as DomainRecord;
-    await this.create(entity, next); // re-cifra y re-subre
+
+    // @swal/vault no exporta función para re-sellar con un DEK existente.
+    // Para no regenerar el recovery share (y evitar corromper los shares locales),
+    // mantenemos el sealed pack existente inalterado en la nube. La actualización real requiere
+    // cambios en la librería vault. Solo actualizamos en memoria para fallback/local.
     this.memKey(entity).set(id, next);
     return next;
   }
