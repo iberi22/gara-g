@@ -144,6 +144,13 @@ test.describe('mercado entre dos navegadores', () => {
       // El selector se habilita cuando el nodo de la malla ya esta listo.
       await slow(owner.locator('[data-testid=city-select]:not([disabled])')).toBeVisible();
       await owner.getByTestId('city-select').selectOption({ label: 'Bogotá' });
+      // Desde G4 (2026-10-14) el opt-in viene apagado y sin categorias: el comprador las activa como un usuario.
+      await owner.getByTestId('consent-panel').getByLabel('Recibir ofertas').check();
+      for (let i = 0; i < 10; i++) {
+        const off = owner.getByTestId('consent-panel').locator('button.mk-chip[aria-pressed="false"]').first();
+        if ((await owner.getByTestId('consent-panel').locator('button.mk-chip[aria-pressed="false"]').count()) === 0) break;
+        await off.click();
+      }
 
       const vendor = await vendorCtx.newPage();
       await vendor.goto('/fleet/mercado/vender');
