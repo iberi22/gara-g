@@ -9,7 +9,7 @@
   import { onMount } from 'svelte';
   import OnboardingWizard from '../../lib/swal-prefs/OnboardingWizard.svelte';
   import type { FinishChoice, WizardFeature } from '../../lib/swal-prefs/OnboardingWizard.svelte';
-  import { GARA_PREFS_SCHEMA, ONBOARDING_PATH } from '../../lib/prefs.config';
+  import { GARA_PREFS_SCHEMA, GARA_NEEDS, GARA_CORE_MODULES, ONBOARDING_PATH } from '../../lib/prefs.config';
   import { MARKET, localizeText } from '../../lib/market';
   import { localPrefsStore, prefsStore } from '../../lib/prefs.client';
   import { enterGuestMode } from '../../lib/prefs.guest';
@@ -70,6 +70,8 @@
     askStorage={!hasSession}
     {initialStorage}
     defaultPreset="personal"
+    needs={GARA_NEEDS}
+    needsCore={GARA_CORE_MODULES}
     cloudHref={`/login?redirect=${encodeURIComponent(ONBOARDING_PATH)}`}
     onfinish={go}
     onskip={() => go({ ...store.get(), onboarded: true }, { backup: false })}

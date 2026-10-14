@@ -12,6 +12,7 @@
  * version anterior se re-resuelven y el usuario vuelve a ver el onboarding.
  */
 import type { PrefsSchema } from './swal-prefs';
+import type { Need } from './swal-prefs/needs';
 import { MARKET, localizeText } from './market';
 
 export const GARA_PREFS_SCHEMA: PrefsSchema = {
@@ -120,6 +121,22 @@ export const GARA_PREFS_SCHEMA: PrefsSchema = {
     },
   ],
 };
+
+/**
+ * Necesidades del onboarding ("que necesitas") → modulos y paneles. Los ids son los de arriba.
+ * Lo que una necesidad reclama y el usuario no elige se apaga; `GARA_CORE_MODULES` nunca se apaga
+ * por esto. Solo se mapea lo que la app ya hace: nada de PIN, boveda familiar, IA local ni inventario.
+ */
+export const GARA_NEEDS: Need[] = [
+  { id: 'own', label: 'Mi vehículo propio', desc: 'Garage, mantenimiento y manuales de una moto o un carro.', modules: ['game', 'maintenance', 'catalog'], panels: ['state', 'history', 'wiki'] },
+  { id: 'fleet', label: 'Una flota', desc: 'Varios vehículos agrupados por región o cliente, con analítica.', modules: ['fleets', 'analytics'], panels: ['dash-fleets', 'dash-km-chart'] },
+  { id: 'drivers', label: 'Conductores', desc: 'Licencias, vencimientos y asignación.', modules: ['drivers'] },
+  { id: 'fuel', label: 'Combustible y mantenimiento', desc: 'Cargas, rendimiento y compromisos por km, horas o fecha.', modules: ['fuel', 'maintenance'], panels: ['upcoming', 'notifier'] },
+  { id: 'docs', label: 'Documentos con vencimiento', desc: 'Seguros, licencias y permisos con aviso antes de vencer.', modules: ['documents', 'alerts'], panels: ['notifier'] },
+  { id: 'live', label: 'Rastreo en vivo', desc: 'Ubicación en el mapa y geocercas.', modules: ['tracking', 'geofences'], panels: ['monitoring'] },
+];
+/** Modulos que las necesidades nunca apagan (el inicio y el garage siempre estan). */
+export const GARA_CORE_MODULES = ['dashboard', 'game', 'aui', 'vehicles', 'maintenance', 'catalog'];
 
 /** Ruta del onboarding y de los ajustes (el middleware y el menu las usan). */
 export const ONBOARDING_PATH = '/fleet/bienvenida';

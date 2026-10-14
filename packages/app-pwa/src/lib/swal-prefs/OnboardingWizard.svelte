@@ -28,6 +28,8 @@ export interface FinishChoice {
    */
   import PrefsEditor from './PrefsEditor.svelte';
   import { applyPreset, defaultPrefs } from './resolve';
+  import { applyNeeds, explainNeeds } from './needs';
+  import type { Need } from './needs';
   import type { Preferences, PrefsSchema } from './schema';
 
   interface Props {
@@ -50,6 +52,10 @@ export interface FinishChoice {
     initialStorage?: StorageChoice;
     /** Perfil que se preselecciona si el usuario aun no tiene uno. */
     defaultPreset?: string;
+    /** Pregunta "que necesitas" dentro del paso de perfil. Sin esto, no se pregunta. */
+    needs?: Need[];
+    /** Modulos que las necesidades nunca apagan. */
+    needsCore?: string[];
   }
 
   let {
@@ -65,6 +71,8 @@ export interface FinishChoice {
     cloudHref = '/login',
     initialStorage,
     defaultPreset,
+    needs = [],
+    needsCore = [],
   }: Props = $props();
 
   type StepId = 'welcome' | 'storage' | 'profile' | 'menu' | 'panels' | 'done';
@@ -93,10 +101,22 @@ export interface FinishChoice {
   const panelsOn = $derived(Object.values(draft.panels).filter((p) => p.enabled).length);
   const panelsTotal = $derived(Object.keys(draft.panels).length);
 
+  // Necesidades elegidas (solo del asistente; no se guardan: lo guardado son los modulos y paneles).
+  let selectedNeeds = $state<string[]>([]);
+  const reasons = $derived(explainNeeds(schema, draft, needs, selectedNeeds));
+
+  function toggleNeed(id: string) {
+    selectedNeeds = selectedNeeds.includes(id) ? selectedNeeds.filter((n) => n !== id) : [...selectedNeeds, id];
+    // Parte de los valores por defecto para que quitar una necesidad devuelva lo que ella habia tocado.
+    const d = defaultPrefs(schema);
+    draft = applyNeeds(schema, { ...d, onboarded: draft.onboarded }, needs, selectedNeeds, needsCore);
+  }
   function choose(id: string) {
+    selectedNeeds = [];
     draft = applyPreset(schema, draft, id);
   }
   function fromScratch() {
+    selectedNeeds = [];
     const d = defaultPrefs(schema);
     draft = { ...d, onboarded: draft.onboarded };
   }
@@ -186,6 +206,21 @@ export interface FinishChoice {
       <section aria-labelledby="wz-h1">
         <h1 id="wz-h1" class="h">{title}</h1>
         <p class="lead">Elige un punto de partida. Podrás ajustar el menú y los paneles en los pasos siguientes y cambiarlo cuando quieras en Ajustes.</p>
+        {#if needs.length}
+          <fieldset class="needs" data-testid="needs">
+            <legend class="name">¿Qué necesitas? <span class="desc">Marca todo lo que aplique; el menú y los paneles se arman con eso.</span></legend>
+            <ul class="presets">
+              {#each needs as n (n.id)}
+                <li class="swal-card-frame" class:is-active={selectedNeeds.includes(n.id)}>
+                  <button type="button" class="swal-card-inner card" aria-pressed={selectedNeeds.includes(n.id)} data-testid={`need-${n.id}`} onclick={() => toggleNeed(n.id)}>
+                    <span class="name">{n.label}</span>
+                    {#if n.desc}<span class="desc">{n.desc}</span>{/if}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </fieldset>
+        {/if}
         <ul class="presets">
           {#each presets as p (p.id)}
             <li class="swal-card-frame" class:is-active={draft.preset === p.id}>
@@ -223,6 +258,14 @@ export interface FinishChoice {
           <li class="swal-card-frame"><div class="swal-card-inner sum"><strong data-testid="sum-modules">{modulesOn}</strong><span>de {modulesTotal} módulos activos</span></div></li>
           <li class="swal-card-frame"><div class="swal-card-inner sum"><strong data-testid="sum-panels">{panelsOn}</strong><span>de {panelsTotal} paneles activos</span></div></li>
         </ul>
+        {#if reasons.length}
+          <h2 class="sub">Por qué se activó</h2>
+          <ul class="why" data-testid="sum-reasons">
+            {#each reasons as r (r.kind + r.id)}
+              <li><strong>{r.label}</strong> <span class="desc">({r.kind === 'module' ? 'módulo' : 'panel'}) por {r.because.join(', ')}</span></li>
+            {/each}
+          </ul>
+        {/if}
       </section>
     {/if}
 
@@ -268,6 +311,10 @@ export interface FinishChoice {
   .btn.link { color: var(--swal-text); }
   .name { font-size: 1rem; font-weight: 700; }
   .desc { font-size: 0.875rem; line-height: 1.4; color: var(--swal-text-muted); }
+  .needs { border: 0; margin: 0 0 1.25rem; padding: 0; }
+  .needs legend { margin-bottom: 0.5rem; padding: 0; }
+  .sub { margin: 1.25rem 0 0.5rem; font-size: 1rem; }
+  .why { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.25rem; }
   .sum { display: flex; align-items: baseline; gap: 0.75rem; padding: 1rem; }
   .sum strong { font-size: 2rem; font-family: var(--swal-font-mono, monospace); color: var(--swal-text); }
   .sum span { color: var(--swal-text-secondary); }
