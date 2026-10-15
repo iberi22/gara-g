@@ -200,3 +200,42 @@ describe('mergeLocalDumps', () => {
     expect(JSON.stringify(a)).toBe(snap);
   });
 });
+
+  it('migrateLocalStoresEncryption aborts entirely if write fails', async () => {
+    // 1. Setup unencrypted data
+    await createEntity('vehicle', { plate: 'PLAIN' }, LOCAL_INSTANCE_ID);
+    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+
+    // 2. Mock a failure during IDB put operation
+    const db = await (await import('./indexedDbAdapter')).openLocalDb();
+
+    // Let's modify the IDBTransaction prototype strictly for this test
+    const txProto = Object.getPrototypeOf(db.transaction('records', 'readwrite'));
+    const originalStore = txProto.objectStore;
+    let puts = 0;
+
+    // Mock the store.put to fail on the first call
+    vi.spyOn(txProto, 'objectStore').mockImplementation(function(this: any, name: string) {
+       const store = originalStore.call(this, name);
+       if (name === 'records') {
+           const origPut = store.put;
+           store.put = function(this: any, ...args: any[]) {
+               puts++;
+               if (puts === 1) throw new Error('Simulated atomic write failure');
+               return origPut.apply(this, args);
+           };
+       }
+       return store;
+    });
+
+    // 3. Attempt migration which should throw
+    await expect((await import('./indexedDbAdapter')).migrateLocalStoresEncryption(key)).rejects.toThrow('Simulated atomic write failure');
+
+    // Restore the prototype
+    vi.restoreAllMocks();
+
+    // 4. Verify no row changed (still readable as plain)
+    const list = await listEntities('vehicle', LOCAL_INSTANCE_ID);
+    expect(list.length).toBe(1);
+    expect(list[0].plate).toBe('PLAIN');
+  });
