@@ -47,6 +47,26 @@ pnpm run e2e:ta:live
 
 ---
 
+## Offline coverage scope (test 5)
+
+Test 5 is an **offline readiness** check, not an offline reproduction: it verifies that the
+service worker controls the page and that the app shell is in the Cache Storage that
+`public/sw.js` uses as last resort (`caches.match('/')`). It cannot cut the network:
+Playwright routes do not see requests handled by the service worker, and `public/sw.js`
+serves navigations network-first, so aborting routes would leave the reload online and the
+test would pass even with a broken offline fallback.
+
+Real offline behaviour — the network actually cut with `context.setOffline(true)` — is
+covered by the Playwright specs:
+
+- `tests/e2e/offline-local-first.spec.ts`
+- `tests/e2e/offline-queue.spec.ts`
+
+(The CI `e2e` job in `.github/workflows/ci.yml` runs `offline-local-first.spec.ts`;
+`offline-queue.spec.ts` is currently left out of that job because it is red locally as well.)
+
+---
+
 ## Sandbox Run Results Summary
 
 Target execution counts measured on `origin/main` at `1cec6de`:
@@ -57,7 +77,7 @@ Target execution counts measured on `origin/main` at `1cec6de`:
 | 2. guest mode opens the fleet area without an account | PASSED | PASSED |
 | 3. onboarding `/fleet/bienvenida` advances through its steps (mutating, `local/`) | PASSED | SKIPPED |
 | 4. a guest can create a vehicle and see it listed (mutating, `local/`) | PASSED | SKIPPED |
-| 5. offline: app shell renders with network blocked | PASSED | PASSED |
+| 5. offline readiness: the service worker controls the page and the shell is cached (readiness only, see scope above) | PASSED | PASSED |
 | 6. PWA manifest and service worker are served | PASSED | PASSED |
 
 **Total**: 6/6 passed (local), 4/4 passed (live). Zero real app bugs found.
