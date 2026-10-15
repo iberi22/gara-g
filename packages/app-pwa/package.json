@@ -21,6 +21,7 @@
     "@astrojs/svelte": "^9.0.1",
     "@fontsource/inter": "5.3.0",
     "@fontsource/jetbrains-mono": "5.3.0",
+    "@mlc-ai/web-llm": "^0.2.86",
     "@swal/edge-mesh": "^0.1.1",
     "@swal/ui": "^0.2.0",
     "@swal/vault": "^0.2.0",

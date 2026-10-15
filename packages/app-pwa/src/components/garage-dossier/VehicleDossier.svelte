@@ -381,7 +381,16 @@ const SUGGESTED_NOTES: Record<string, string[]> = {
       <DossierManuals vehicleId={vehicle.id} manuals={manuals} {canUpload} onchange={(m) => (manuals = m)} />
     {:else if tab === 'asistente'}
       {#key manuals.map((m) => m.textKey).join('|')}
-        <DossierChat vehicleId={vehicle.id} vehicleName={title} family={vehicle.spec.family} manuals={manuals} />
+        <DossierChat
+          vehicleId={vehicle.id}
+          vehicleName={title}
+          family={vehicle.spec.family}
+          manuals={manuals}
+          {vehicle}
+          {history}
+          notes={notes}
+          {notesText}
+        />
       {/key}
     {/if}
   </main>

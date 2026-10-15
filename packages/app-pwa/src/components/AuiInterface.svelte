@@ -1,12 +1,16 @@
 <script lang="ts">
+/**
+ * AuiInterface — AUI local (D-aui): la composición de tableros corre en el navegador.
+ *
+ * Sin cobros ni cuentas: la generación usa la IA local (Chrome Prompt API
+ * o WebGPU) y, si el navegador no la tiene, se muestra un aviso en español explicando qué
+ * hace falta. La spec del modelo se valida siempre en lib/aui.ts (whitelist AuiSpec v1).
+ */
 import { untrack } from 'svelte';
-import { isSocioUser, setDemoSocioStatus } from '../lib/interfaceManager';
-// El nombre visible del tier de facturacion sale de domain.config.ts ("PAYG", legacy "socio"):
-// la interfaz ya no nombra un tier "Socio" que no existe.
-import { TIER_LABEL } from '../lib/domain.config';
 import { toast } from '../lib/toast';
-import type { AuiSpec } from '../lib/aui';
+import { generateAui, type AuiSpec } from '../lib/aui';
 import { MARKET } from '../lib/market';
+import { detectLocalAi, type AiTier } from '../lib/localAi/capabilities';
 import AuiRenderer from './AuiRenderer.svelte';
 
 interface Props {
@@ -15,20 +19,15 @@ interface Props {
 
 const { initialPrompt = '' }: Props = $props();
 
-let isSocio = $state<boolean>(false);
 let promptText = $state<string>(initialPrompt);
 let loading = $state<boolean>(false);
 let currentSpec = $state<AuiSpec | null>(null);
 /** Mensaje de fallo visible (role="alert"): un fallo NUNCA se pinta como si fuera un resultado. */
 let errorMsg = $state<string>('');
-/** El lienzo muestra el ejemplo determinístico local: datos inventados, no reales. */
+/** El lienzo muestra un ejemplo local: datos inventados, no reales. */
 let isSample = $state<boolean>(false);
-let modelMeta = $state<{
-  model: string;
-  tokensUsed: number;
-  cost: number;
-  via: string;
-} | null>(null);
+let tier = $state<AiTier>('rules');
+let modelMeta = $state<{ model: string; via: string } | null>(null);
 
 const PRESET_PROMPTS = [
   'Generar panel de Mantenimiento Preventivo y Alertas de Taller',
@@ -39,39 +38,19 @@ const PRESET_PROMPTS = [
 
 $effect(() => {
   if (typeof window !== 'undefined') {
-    isSocio = isSocioUser();
-    // Ejemplo inicial (marcado como tal en el lienzo). untrack: solo una vez al montar;
-    // si lo leyera como dependencia, vaciar el lienzo tras un fallo lo volveria a rellenar.
     untrack(() => {
-      if (isSocio && !currentSpec && !errorMsg) loadDefaultSpec();
+      detectLocalAi().then((detected) => (tier = detected));
+      if (!currentSpec && !errorMsg) loadDefaultSpec();
     });
   }
 });
-
-function toggleDemoSocio() {
-  const next = !isSocio;
-  setDemoSocioStatus(next);
-  isSocio = next;
-  toast.show(
-    next
-      ? `Modo ${TIER_LABEL} (Demo) ACTIVADO: Acceso total al motor de inferencia AUI.`
-      : `Modo ${TIER_LABEL} (Demo) DESACTIVADO: Mostrando vista de planes y upsell.`,
-    {
-      type: next ? 'success' : 'info',
-      title: 'Estado de Cuenta',
-    }
-  );
-  if (next && !currentSpec && !errorMsg) {
-    loadDefaultSpec();
-  }
-}
 
 function loadDefaultSpec() {
   currentSpec = {
     version: 1,
     copy: {
       title: 'AUI Agentic Workspace · Flota GARA-G',
-      subtitle: 'Componentes generados dinámicamente mediante contrato AuiSpec v1 (Edge + Cloudflare Workers AI)',
+      subtitle: 'Vista de ejemplo de composición dinámica (contrato AuiSpec v1)',
     },
     components: [
       {
@@ -112,19 +91,14 @@ function loadDefaultSpec() {
     ],
   };
   isSample = true;
-  modelMeta = {
-    model: 'deterministic-aui-seed',
-    tokensUsed: 85,
-    cost: 0.00085,
-    via: 'local-seed',
-  };
+  modelMeta = { model: 'ejemplo-local', via: 'local-ejemplo' };
 }
 
 async function handleGenerate(customPrompt?: string) {
   if (loading) return;
   const p = (customPrompt ?? promptText).trim();
   if (!p) {
-    toast.show('Por favor ingresa un prompt para generar la interfaz.', { type: 'warning' });
+    toast.show('Por favor ingresa un pedido para generar la interfaz.', { type: 'warning' });
     return;
   }
 
@@ -133,70 +107,24 @@ async function handleGenerate(customPrompt?: string) {
   errorMsg = '';
 
   try {
-    const res = await fetch('/api/ai/infer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: p,
-        tierId: isSocio ? 'payg' : 'free',
-      }),
-    });
-
-    if (res.status === 402) {
-      toast.show(`Inferencia AI requiere una cuenta ${TIER_LABEL}.`, {
-        type: 'warning',
-        title: 'Tier no autorizado',
-      });
-      isSocio = false;
+    const res = await generateAui(p);
+    if (!res.spec) {
       currentSpec = null;
       modelMeta = null;
       isSample = false;
-      errorMsg = `Inferencia AI requiere una cuenta ${TIER_LABEL}.`;
+      errorMsg = res.error ?? 'No se pudo generar la interfaz con la IA local.';
       return;
     }
-
-    if (!res.ok) {
-      throw new Error(`Error en inferencia HTTP ${res.status}`);
-    }
-
-    const data = await res.json();
-    if (data.spec) {
-      currentSpec = data.spec;
-      isSample = false;
-      modelMeta = {
-        model: data.model ?? 'llama-3.1-70b-instruct',
-        tokensUsed: data.tokensUsed ?? 120,
-        cost: data.cost ?? 0.0012,
-        via: data.via ?? 'cf-workers-ai',
-      };
-      toast.show('Interfaz generada con éxito por el agente AUI.', {
-        type: 'success',
-        title: 'AUI Generada',
-      });
-    } else {
-      throw new Error('La respuesta no incluye una interfaz');
-    }
+    currentSpec = res.spec;
+    isSample = false;
+    modelMeta = { model: res.model ?? 'modelo local', via: res.via };
+    toast.show('Interfaz generada con la IA local.', { type: 'success', title: 'AUI generada' });
   } catch (err) {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      // Sin red (y solo ahi): el motor determinístico offline-first es legitimo, pero el
-      // lienzo lo marca con un aviso visible: son datos de ejemplo, no una respuesta.
-      console.warn('[AuiInterface] Sin conexion, ejemplo determinístico local:', err);
-      loadDefaultSpec();
-      if (currentSpec?.copy) {
-        currentSpec.copy.subtitle = `Modo offline-first · Prompt: "${p}"`;
-      }
-      toast.show('Sin conexión: se muestra un ejemplo local, no datos reales.', {
-        type: 'info',
-        title: 'Sin conexión',
-      });
-    } else {
-      // 5xx, red caida con el navegador "en linea", respuesta rota: es un fallo, no un resultado.
-      console.warn('[AuiInterface] Fallo la inferencia remota:', err);
-      currentSpec = null;
-      modelMeta = null;
-      isSample = false;
-      errorMsg = 'No se pudo generar la interfaz. Inténtalo de nuevo.';
-    }
+    console.warn('[AuiInterface] Fallo la inferencia local:', err);
+    currentSpec = null;
+    modelMeta = null;
+    isSample = false;
+    errorMsg = 'No se pudo generar la interfaz. Inténtalo de nuevo.';
   } finally {
     loading = false;
   }
@@ -204,168 +132,101 @@ async function handleGenerate(customPrompt?: string) {
 </script>
 
 <section class="aui-container" data-testid="aui-interface-view">
-  <!-- Top Bar: Switcher socio demo & header -->
   <header class="aui-header g-card">
     <div class="aui-header-left">
-      <span class="aui-badge-icon">🤖</span>
       <div>
-        <h2 class="aui-heading">AUI Copilot · Agentic User Interface</h2>
+        <h2 class="aui-heading">AUI · Agentic User Interface</h2>
         <p class="aui-subheading">
-          Modelos generativos para composición dinámica de tableros de flota (SWAL/UI + Cloudflare Workers AI)
+          Composición dinámica de tableros con la IA local de tu navegador. No pide cuenta ni
+          conexión, y la app funciona igual sin ella.
         </p>
       </div>
     </div>
-    <div class="aui-header-right">
-      <button
-        type="button"
-        class="g-btn demo-toggle-btn"
-        data-testid="toggle-demo-socio"
-        class:is-active={isSocio}
-        onclick={toggleDemoSocio}
-        aria-pressed={isSocio}
-        title={`Alternar simulación de cuenta ${TIER_LABEL} para pruebas`}
-      >
-        <span class="dot-indicator" class:dot-on={isSocio}></span>
-        <span>{isSocio ? `Cuenta ${TIER_LABEL}: ACTIVA` : `Cuenta ${TIER_LABEL}: DEMO OFF`}</span>
-      </button>
-    </div>
   </header>
+
+  {#if tier === 'rules'}
+    <div class="aui-local-ai" role="status" data-testid="aui-local-ai-note">
+      Este navegador no tiene IA local disponible. La AUI puede componer tableros con Chrome
+      Prompt API (Gemini Nano) o con WebGPU; mientras tanto se muestra un ejemplo local.
+    </div>
+  {/if}
 
   {#if errorMsg}
     <div class="aui-alert" role="alert" data-testid="aui-error">{errorMsg}</div>
   {/if}
 
-  {#if !isSocio}
-    <!-- Gated Upsell View for Non-Socio Users -->
-    <div class="aui-upsell g-card" data-testid="aui-upsell-card">
-      <div class="upsell-badge">ACCESO EXCLUSIVO TIER {TIER_LABEL}</div>
-      <h3 class="upsell-title">Potencia tu Flota con la Inteligencia Generativa AUI</h3>
-      <p class="upsell-desc">
-        La generación declarativa de interfaces y análisis predictivo mediante modelos de lenguaje (LLM) está reservada para cuentas tipo <strong>{TIER_LABEL}</strong>.
-      </p>
-
-      <div class="upsell-guarantee">
-        <span class="shield-icon">🛡️</span>
-        <span>
-          <strong>CRUD Básico 100% Libre:</strong> La gestión de tus vehículos, conductores, combustible, geocercas y mantenimientos funciona siempre sin restricciones en la Consola Administrativa. El tier {TIER_LABEL} <em>solo</em> gatea la inferencia AI en la nube.
-        </span>
+  <div class="aui-workspace" data-testid="aui-workspace">
+    <div class="prompt-bar g-card">
+      <label for="aui-prompt-input" class="prompt-label">
+        ¿Qué interfaz o reporte necesitas que el agente componga para tu flota?
+      </label>
+      <div class="prompt-input-group">
+        <input
+          id="aui-prompt-input"
+          type="text"
+          class="g-input prompt-input"
+          placeholder="Ej: Generar tabla de vehículos en taller con costos estimados..."
+          bind:value={promptText}
+          onkeydown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              if (loading) return;
+              handleGenerate();
+            }
+          }}
+          data-testid="aui-prompt-input"
+        />
+        <button
+          type="button"
+          class="g-btn g-btn-cyan prompt-submit"
+          disabled={loading}
+          onclick={() => handleGenerate()}
+          data-testid="aui-submit-btn"
+        >
+          {#if loading}
+            <span>Generando...</span>
+          {:else}
+            <span>Generar AUI</span>
+          {/if}
+        </button>
       </div>
 
-      <div class="plans-grid">
-        <div class="plan-card">
-          <div class="plan-tier">Mesh-Only</div>
-          <div class="plan-price">0$ <span class="period">/ siempre</span></div>
-          <p class="plan-summary">P2P puro Yjs/IndexedDB sin nube. CRUD completo ilimitado de flota.</p>
-          <ul class="plan-features">
-            <li>✓ 100% Offline-first local</li>
-            <li>✓ Sincronización malla P2P</li>
-            <li>✗ Sin inferencia AI cloud</li>
-          </ul>
-        </div>
-
-        <div class="plan-card featured">
-          <div class="plan-pill">Recomendado</div>
-          <div class="plan-tier">{TIER_LABEL}</div>
-          <div class="plan-price">5% <span class="period">pay-per-use</span></div>
-          <p class="plan-summary">Infraestructura Cloudflare D1/R2 a costo real + 10% AI. 1 o 100 camiones mismo precio.</p>
-          <ul class="plan-features">
-            <li>✓ AUI Copilot completo</li>
-            <li>✓ Cloudflare Workers AI LLaMA 3.1</li>
-            <li>✓ Bóveda R2 cifrada</li>
-            <li>✓ Telemetría OBD2 multisede</li>
-          </ul>
+      <div class="preset-pills">
+        <span class="preset-label">Sugerencias rápidas:</span>
+        {#each PRESET_PROMPTS as preset (preset)}
           <button
             type="button"
-            class="g-btn g-btn-cyan btn-upgrade"
-            data-testid="cta-upgrade-socio"
-            onclick={toggleDemoSocio}
-          >
-            Activar Tier {TIER_LABEL} (Demo)
-          </button>
-        </div>
-      </div>
-    </div>
-  {:else}
-    <!-- Active Socio Workspace -->
-    <div class="aui-workspace" data-testid="aui-workspace">
-      <!-- Prompt Bar -->
-      <div class="prompt-bar g-card">
-        <label for="aui-prompt-input" class="prompt-label">
-          ¿Qué interfaz o reporte necesitas que el agente componga para tu flota?
-        </label>
-        <div class="prompt-input-group">
-          <input
-            id="aui-prompt-input"
-            type="text"
-            class="g-input prompt-input"
-            placeholder="Ej: Generar tabla de vehículos en taller con costos estimados..."
-            bind:value={promptText}
-            onkeydown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                if (loading) return;
-                handleGenerate();
-              }
-            }}
-            data-testid="aui-prompt-input"
-          />
-          <button
-            type="button"
-            class="g-btn g-btn-cyan prompt-submit"
+            class="preset-pill"
+            data-testid="aui-preset-prompt"
             disabled={loading}
-            onclick={() => handleGenerate()}
-            data-testid="aui-submit-btn"
+            onclick={() => handleGenerate(preset)}
           >
-            {#if loading}
-              <span>Generando...</span>
-            {:else}
-              <span>Generar AUI ✦</span>
-            {/if}
+            {preset}
           </button>
-        </div>
-
-        <!-- Presets -->
-        <div class="preset-pills">
-          <span class="preset-label">Sugerencias rápidas:</span>
-          {#each PRESET_PROMPTS as preset}
-            <button
-              type="button"
-              class="preset-pill"
-              data-testid="aui-preset-prompt"
-              disabled={loading}
-              onclick={() => handleGenerate(preset)}
-            >
-              {preset}
-            </button>
-          {/each}
-        </div>
-      </div>
-
-      <!-- Telemetry Info -->
-      {#if modelMeta}
-        <div class="telemetry-bar">
-          <span class="telemetry-chip"><strong>Modelo:</strong> {modelMeta.model}</span>
-          <span class="telemetry-chip"><strong>Vía:</strong> {modelMeta.via}</span>
-          <span class="telemetry-chip"><strong>Tokens:</strong> {modelMeta.tokensUsed}</span>
-          <span class="telemetry-chip"><strong>Costo Est.:</strong> ${modelMeta.cost.toFixed(5)}</span>
-        </div>
-      {/if}
-
-      <!-- Rendered AUI Canvas -->
-      <div class="rendered-canvas g-card" data-testid="aui-rendered-content" aria-busy={loading}>
-        {#if isSample && currentSpec}
-          <p class="aui-sample-note" role="status" data-testid="aui-sample-note">
-            Ejemplo generado sin conexión: datos no reales.
-          </p>
-        {/if}
-        {#if currentSpec}
-          <AuiRenderer spec={currentSpec} />
-        {:else if !errorMsg}
-          <p class="aui-canvas-empty">Escribe un prompt o elige una sugerencia para generar una interfaz.</p>
-        {/if}
+        {/each}
       </div>
     </div>
-  {/if}
+
+    {#if modelMeta}
+      <div class="telemetry-bar">
+        <span class="telemetry-chip"><strong>Modelo:</strong> {modelMeta.model}</span>
+        <span class="telemetry-chip"><strong>Vía:</strong> {modelMeta.via}</span>
+      </div>
+    {/if}
+
+    <div class="rendered-canvas g-card" data-testid="aui-rendered-content" aria-busy={loading}>
+      {#if isSample && currentSpec}
+        <p class="aui-sample-note" role="status" data-testid="aui-sample-note">
+          Ejemplo local: datos no reales.
+        </p>
+      {/if}
+      {#if currentSpec}
+        <AuiRenderer spec={currentSpec} />
+      {:else if !errorMsg}
+        <p class="aui-canvas-empty">Escribe un pedido o elige una sugerencia para generar una interfaz.</p>
+      {/if}
+    </div>
+  </div>
 </section>
 
 <style>
@@ -396,11 +257,6 @@ async function handleGenerate(customPrompt?: string) {
     gap: 1rem;
   }
 
-  .aui-badge-icon {
-    font-size: 2rem;
-    line-height: 1;
-  }
-
   .aui-heading {
     font-size: 1.25rem;
     font-weight: 700;
@@ -414,43 +270,13 @@ async function handleGenerate(customPrompt?: string) {
     margin: 0;
   }
 
-  .demo-toggle-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    background: var(--swal-bg-surface);
-    border: 1px solid var(--swal-border-light);
-    color: var(--swal-text-secondary);
-    font-size: 0.75rem;
-    font-family: var(--swal-font-mono);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    padding: 0.5rem 0.85rem;
+  .aui-local-ai {
+    padding: 0.75rem 1rem;
+    background: var(--swal-warning-muted);
+    border: 1px solid var(--swal-warning);
     border-radius: var(--swal-radius);
-    cursor: pointer;
-    transition: background 150ms ease, border-color 150ms ease;
-  }
-
-  .demo-toggle-btn:hover {
-    background: var(--swal-surface-hover);
-    border-color: var(--swal-border-strong);
-  }
-
-  .demo-toggle-btn.is-active {
-    background: var(--swal-success-muted);
-    border-color: var(--swal-success);
-    color: var(--swal-success);
-  }
-
-  .dot-indicator {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--swal-text-faint);
-  }
-
-  .dot-indicator.dot-on {
-    background: var(--swal-success);
+    color: var(--swal-text);
+    font-size: 0.85rem;
   }
 
   .aui-alert {
@@ -478,156 +304,6 @@ async function handleGenerate(customPrompt?: string) {
     font-size: 0.9rem;
   }
 
-  /* Upsell */
-  .aui-upsell {
-    padding: 2.5rem 2rem;
-    text-align: center;
-    background: var(--swal-surface);
-    border: 1px solid var(--swal-border);
-    border-radius: var(--swal-radius);
-  }
-
-  .upsell-badge {
-    display: inline-block;
-    background: var(--swal-accent-muted);
-    color: var(--swal-accent-text);
-    border: 1px solid var(--swal-accent);
-    padding: 0.25rem 0.75rem;
-    border-radius: var(--swal-radius);
-    font-family: var(--swal-font-mono);
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.14em;
-    margin-bottom: 1rem;
-  }
-
-  .upsell-title {
-    font-size: 1.5rem;
-    font-weight: 800;
-    color: var(--swal-text);
-    margin: 0 0 0.75rem 0;
-  }
-
-  .upsell-desc {
-    max-width: 580px;
-    margin: 0 auto 1.5rem auto;
-    font-size: 0.95rem;
-    color: var(--swal-text-secondary);
-    line-height: 1.5;
-  }
-
-  .upsell-guarantee {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.75rem;
-    background: var(--swal-success-muted);
-    border: 1px solid var(--swal-success);
-    border-radius: var(--swal-radius);
-    padding: 0.75rem 1.25rem;
-    max-width: 640px;
-    font-size: 0.85rem;
-    color: var(--swal-text);
-    text-align: left;
-    margin-bottom: 2.5rem;
-  }
-
-  .plans-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
-    gap: 1.5rem;
-    max-width: 720px;
-    margin: 0 auto;
-    text-align: left;
-  }
-
-  .plan-card {
-    background: var(--swal-bg-surface);
-    border: 1px solid var(--swal-border);
-    border-radius: var(--swal-radius);
-    padding: 1.5rem;
-    position: relative;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .plan-card.featured {
-    border-color: var(--swal-accent);
-    background: var(--swal-surface);
-  }
-
-  .plan-pill {
-    position: absolute;
-    top: -10px;
-    right: 16px;
-    background: var(--swal-accent);
-    color: var(--swal-accent-contrast);
-    font-family: var(--swal-font-mono);
-    font-size: 0.65rem;
-    font-weight: 800;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    padding: 2px 8px;
-    border-radius: var(--swal-radius);
-  }
-
-  .plan-tier {
-    font-family: var(--swal-font-mono);
-    font-size: 0.8rem;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    font-weight: 700;
-    color: var(--swal-text);
-  }
-
-  .plan-price {
-    font-size: 1.75rem;
-    font-weight: 800;
-    color: var(--swal-text);
-    margin: 0.5rem 0;
-  }
-
-  .plan-price .period {
-    font-size: 0.8rem;
-    color: var(--swal-text-muted);
-    font-weight: normal;
-  }
-
-  .plan-summary {
-    font-size: 0.8rem;
-    color: var(--swal-text-muted);
-    line-height: 1.4;
-    margin-bottom: 1rem;
-  }
-
-  .plan-features {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 1.5rem 0;
-    font-size: 0.82rem;
-    color: var(--swal-text-secondary);
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    flex: 1;
-  }
-
-  .btn-upgrade {
-    width: 100%;
-    justify-content: center;
-    padding: 0.6rem 1rem;
-    font-weight: 600;
-    background: var(--swal-accent);
-    border: 1px solid var(--swal-accent);
-    color: var(--swal-accent-contrast);
-    border-radius: var(--swal-radius);
-    cursor: pointer;
-  }
-  .btn-upgrade:hover {
-    background: var(--swal-accent-hover);
-    border-color: var(--swal-accent-hover);
-  }
-
-  /* Workspace */
   .aui-workspace {
     display: flex;
     flex-direction: column;

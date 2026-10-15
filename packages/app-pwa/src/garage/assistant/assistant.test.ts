@@ -1,15 +1,14 @@
 /**
  * assistant.test.ts — Asistente del expediente: manuales, contexto, IA y ruta.
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createEntity } from '../../lib/domain';
 import { MOCK_SNAPSHOT } from '../mock';
-import type { VehicleDetail } from '../contracts';
-import { deltaOf, normalizeAiStream, runAssistant, type AiBinding } from './ai';
-import { handleAssistant, MAX_EXCERPTS, sanitizeExcerpts } from './handler';
+import type { LocalChatMessage, LocalChatOptions, LocalChatResult } from '../../lib/localAi/index';
+import { MAX_EXCERPTS, runLocalAssistant, sanitizeExcerpts, type LocalAssistantContext } from './handler';
 import { chunkManual, foldText, manualTitle, retrieve, tokensOf } from './manualText';
 import { buildSystemPrompt, MAX_MESSAGES, sanitizeMessages } from './prompt';
-import { indexManual, manualsOf, parseNotes, resetAssistantSlots, takeAssistantSlot, ASSISTANT_PER_MINUTE } from './store';
+import { indexManual, manualsOf, parseNotes } from './store';
 
 const MD = `# manual.pdf
 ## Metadata
@@ -102,98 +101,13 @@ describe('prompt', () => {
     expect(text).toContain('no ha cargado manuales');
   });
 });
-
-/** SSE de Workers AI armado a mano, partido en trozos arbitrarios como llega de la red. */
-function fakeAiStream(events: unknown[], cut = 17): ReadableStream<Uint8Array> {
-  const text = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('') + 'data: [DONE]\n\n';
-  const bytes = new TextEncoder().encode(text);
-  let i = 0;
-  return new ReadableStream({
-    pull(c) {
-      if (i >= bytes.length) return c.close();
-      c.enqueue(bytes.slice(i, i + cut));
-      i += cut;
-    },
-  });
-}
-
-async function readSse(stream: ReadableStream<Uint8Array>): Promise<Record<string, unknown>[]> {
-  const text = await new Response(stream).text();
-  return text
-    .split('\n\n')
-    .filter((l) => l.startsWith('data: '))
-    .map((l) => JSON.parse(l.slice(6)));
-}
-
-describe('ai', () => {
-  it('lee texto y razonamiento de los dos formatos', () => {
-    expect(deltaOf({ choices: [{ delta: { content: 'Hola' } }] })).toEqual({ text: 'Hola' });
-    expect(deltaOf({ choices: [{ delta: { reasoning: 'pienso' } }] })).toEqual({ thinking: true });
-    expect(deltaOf({ response: 'viejo' })).toEqual({ text: 'viejo' });
-    expect(deltaOf(null)).toEqual({});
-  });
-
-  it('normaliza el stream: un aviso de razonamiento, el texto y el cierre', async () => {
-    const src = fakeAiStream([
-      { choices: [{ delta: { content: '', role: 'assistant' } }] },
-      { choices: [{ delta: { reasoning: 'a' } }] },
-      { choices: [{ delta: { reasoning: 'b' } }] },
-      { choices: [{ delta: { content: 'Usa 10W-40' } }] },
-      { choices: [{ delta: { content: ' JASO MA2.' } }] },
-    ]);
-    const out = await readSse(normalizeAiStream(src, 'm1'));
-    expect(out).toEqual([{ thinking: true }, { t: 'Usa 10W-40' }, { t: ' JASO MA2.' }, { done: true, model: 'm1' }]);
-  });
-
-  it('pasa al modelo de respaldo si el primero falla', async () => {
-    const calls: string[] = [];
-    const ai: AiBinding = {
-      async run(model) {
-        calls.push(model);
-        if (calls.length === 1) throw new Error('AiError 4006: daily neurons exhausted');
-        return { response: 'respuesta corta' };
-      },
-    };
-    const run = await runAssistant(ai, [{ role: 'user', content: 'hola' }], ['a', 'b']);
-    expect(calls).toEqual(['a', 'b']);
-    expect(run.model).toBe('b');
-    expect(await readSse(run.stream)).toEqual([{ t: 'respuesta corta' }, { done: true, model: 'b' }]);
-  });
-});
-
-describe('POST /api/garage/assistant (handler)', () => {
-  const detail: VehicleDetail = { vehicle: MOCK_SNAPSHOT.vehicles[0], history: [] };
-  const okAi: AiBinding = { run: async () => fakeAiStream([{ choices: [{ delta: { content: 'ok' } }] }]) };
-  const deps = (over: Partial<Parameters<typeof handleAssistant>[1]> = {}) => ({
-    ai: okAi,
-    userId: 'u1',
-    loadVehicle: async (id: string) => (id === 'v1' ? { detail, notes: [], notesText: '', manuals: [] } : null),
-    ...over,
-  });
-  const ask = { vehicleId: 'v1', messages: [{ role: 'user', content: '¿Qué aceite?' }] };
-
-  beforeEach(() => resetAssistantSlots());
-
-  it('responde en streaming', async () => {
-    const res = await handleAssistant(ask, deps());
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toContain('text/event-stream');
-    expect(await readSse(res.body as ReadableStream<Uint8Array>)).toContainEqual({ t: 'ok' });
-  });
-
-  it('400 sin pregunta, 404 de otro tenant, 503 sin binding', async () => {
-    expect((await handleAssistant({ vehicleId: 'v1', messages: [] }, deps())).status).toBe(400);
-    expect((await handleAssistant({ ...ask, vehicleId: 'otro' }, deps())).status).toBe(404);
-    expect((await handleAssistant(ask, deps({ ai: undefined }))).status).toBe(503);
-  });
-
-  it('limita las consultas por minuto', async () => {
-    for (let i = 0; i < ASSISTANT_PER_MINUTE; i++) expect(takeAssistantSlot('u2', 1000 + i).ok).toBe(true);
-    expect(takeAssistantSlot('u2', 2000).ok).toBe(false);
-    for (let i = 0; i < ASSISTANT_PER_MINUTE; i++) await handleAssistant(ask, deps());
-    const res = await handleAssistant(ask, deps());
-    expect(res.status).toBe(429);
-    expect(res.headers.get('Retry-After')).toBeTruthy();
+describe('handler local', () => {
+  const context = (): LocalAssistantContext => ({
+    vehicle: MOCK_SNAPSHOT.vehicles[0],
+    history: [],
+    manuals: ['Manual FZ'],
+    excerpts: [{ manual: 'Manual FZ', page: 42, text: 'tuerca del eje trasero 90 N·m' }],
+    now: new Date('2026-10-02T00:00:00Z'),
   });
 
   it('acota los fragmentos que manda el navegador', () => {
@@ -202,6 +116,36 @@ describe('POST /api/garage/assistant (handler)', () => {
     expect(out.length).toBe(MAX_EXCERPTS);
     expect(out[0].text.length).toBe(1800);
     expect(sanitizeExcerpts([{ manual: '', page: -3, text: 'a' }])[0]).toEqual({ manual: 'Manual', page: 0, text: 'a' });
+  });
+
+  it('arma el prompt en el dispositivo y usa la IA local', async () => {
+    const sent: readonly LocalChatMessage[][] = [];
+    const chat = async (
+      messages: readonly LocalChatMessage[],
+      options?: LocalChatOptions,
+    ): Promise<LocalChatResult> => {
+      (sent as LocalChatMessage[][]).push([...messages]);
+      options?.onToken?.('ok');
+      return { via: 'rules', model: 'reglas-locales', text: 'ok' };
+    };
+    const tokens: string[] = [];
+    const res = await runLocalAssistant([{ role: 'user', content: '¿Qué aceite?' }], context(), {
+      chat,
+      onToken: (t) => tokens.push(t),
+    });
+    expect(res).toMatchObject({ asked: true, via: 'rules', model: 'reglas-locales', text: 'ok' });
+    expect(tokens).toEqual(['ok']);
+    expect(sent[0][0].role).toBe('system');
+    expect(sent[0][0].content).toContain('Odometro actual');
+    expect(sent[0][0].content).toContain('[Manual: Manual FZ, pag. 42]');
+    expect(sent[0][sent[0].length - 1]).toEqual({ role: 'user', content: '¿Qué aceite?' });
+  });
+
+  it('sin pregunta no llama a la IA', async () => {
+    const chat = vi.fn();
+    const res = await runLocalAssistant([{ role: 'assistant', content: 'hola' }], context(), { chat });
+    expect(res.asked).toBe(false);
+    expect(chat).not.toHaveBeenCalled();
   });
 });
 

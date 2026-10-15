@@ -1,6 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { PUBLIC_DEMO } from './helpers/features';
 
+/** Ruta de IA retirada por G3: debe tratarse como cualquier API protegida. */
+const RETIRED_AI_ROUTE = '/api/ai/infer';
+
 /**
  * E2E tests for middleware auth-gate (W13.6 fix-middleware-authgate).
  *
@@ -36,21 +39,19 @@ test.describe('Auth Gate Middleware & PUBLIC_DEMO', () => {
     expect(response.headers()['location'] || '').toContain('/login');
   });
 
-  test('AI tier gate: /api/ai/infer returns 402 for free/unauthenticated requests', async ({ request }) => {
-    const response = await request.post('/api/ai/infer', {
+  test('la ruta de IA retirada responde 401 sin sesion, nunca 402', async ({ request }) => {
+    // G3: la inferencia pasa al navegador y la ruta cloud ya no existe. El guard general
+    // la trata como cualquier API protegida (401), no como un gate de tier (402).
+    const response = await request.post(RETIRED_AI_ROUTE, {
       data: { prompt: 'Test telemetry analysis' },
     });
-    expect(response.status()).toBe(402);
-    const body = await response.json().catch(() => ({}));
-    expect(body.code).toBe(402);
+    expect(response.status()).toBe(401);
   });
 
-  test('AI tier gate: /api/ai/infer returns 402 with ?public_demo=true', async ({ request }) => {
-    const response = await request.post('/api/ai/infer?public_demo=true', {
+  test('la ruta de IA retirada tampoco se abre con ?public_demo=true', async ({ request }) => {
+    const response = await request.post(`${RETIRED_AI_ROUTE}?public_demo=true`, {
       data: { prompt: 'Test telemetry analysis' },
     });
-    expect(response.status()).toBe(402);
-    const body = await response.json().catch(() => ({}));
-    expect(body.code).toBe(402);
+    expect(response.status()).toBe(401);
   });
 });

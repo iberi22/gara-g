@@ -147,12 +147,12 @@ describe('N7 · el tier visible ya no se llama SOCIO', () => {
     expect(cfg).toMatch(/tier: 'payg' as const/);
   });
 
-  it('los tres componentes importan el nombre en vez de escribirlo', () => {
-    for (const f of [
-      'src/components/AuiInterface.svelte',
-      'src/components/ProBadge.svelte',
-      'src/components/InterfaceSwitcher.astro',
-    ]) {
+  it('la AUI local ya no nombra ningun tier; el conmutador y ProBadge siguen importandolo', () => {
+    // G3: la AUI pasa a IA local, sin plan ni tier. El nombre visible queda solo en el
+    // conmutador y ProBadge.
+    const aui = read('src/components/AuiInterface.svelte');
+    expect(aui).not.toMatch(/TIER_LABEL|PAYG|Socio/);
+    for (const f of ['src/components/ProBadge.svelte', 'src/components/InterfaceSwitcher.astro']) {
       const s = read(f);
       expect(s, f).toMatch(/TIER_LABEL/);
       expect(s, f).toMatch(/domain\.config/);

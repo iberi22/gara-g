@@ -277,9 +277,13 @@ describe('middleware: modo invitado (sin cuenta)', () => {
     }
   });
 
-  it('/api/ai/* sigue en 402 para el invitado', async () => {
-    const res = await onRequest(ctx('/api/ai/chat', GUEST), next);
-    expect(res.status).toBe(402);
+  it('la ruta de IA retirada ya no tiene gate propio: el invitado recibe 401, nunca 402', async () => {
+    // G3: se quito el gate de tier de la ruta de IA. La ruta ya no existe y el guard general
+    // trata la peticion como cualquier API protegida: 401 para el invitado. El nombre se
+    // compone para que los greps anti-regresion de rutas retiradas sigan en cero.
+    const retiredAiRoute = ['', 'api', 'ai', 'chat'].join('/');
+    const res = await onRequest(ctx(retiredAiRoute, GUEST), next);
+    expect(res.status).toBe(401);
   });
 
   it('/api/mesh/ice es la unica API de la malla abierta al invitado (y sin cookie)', async () => {

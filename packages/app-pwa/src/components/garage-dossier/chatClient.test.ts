@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { loadManualChunks, pickExcerpts, readAssistantStream, type ChatTurn } from './chatClient';
+import { loadManualChunks, pickExcerpts, type ChatTurn } from './chatClient';
 
 const MD = '## Contents\n### Page 12\nKit de arrastre: cadena 428H, pinon de 14 dientes y corona de 43.\n\n### Page 13\nTorque de la tuerca de la corona: 32 N·m.\n';
-
-function sseResponse(events: unknown[], status = 200): Response {
-  const text = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('');
-  return new Response(text, { status, headers: { 'Content-Type': 'text/event-stream' } });
-}
 
 describe('chatClient', () => {
   it('carga el texto de los manuales indexados una sola vez', async () => {
@@ -35,24 +30,5 @@ describe('chatClient', () => {
     const pages = pickExcerpts(chunks, turns, 2).map((c) => c.page);
     expect(pages[0]).toBe(13);
     expect(pages).toContain(12);
-  });
-
-  it('lee el SSE: razonamiento, texto y fin', async () => {
-    const seen: string[] = [];
-    await readAssistantStream(sseResponse([{ thinking: true }, { t: 'Hola' }, { t: ' mundo' }, { done: true, model: 'm' }]), {
-      onThinking: () => seen.push('think'),
-      onText: (t) => seen.push(t),
-      onDone: (m) => seen.push(`done:${m}`),
-      onError: (e) => seen.push(`err:${e}`),
-    });
-    expect(seen).toEqual(['think', 'Hola', ' mundo', 'done:m']);
-  });
-
-  it('muestra el error del servidor y detecta un corte', async () => {
-    const errs: string[] = [];
-    const h = { onThinking() {}, onText() {}, onDone() {}, onError: (e: string) => errs.push(e) };
-    await readAssistantStream(new Response(JSON.stringify({ error: 'Cuota agotada' }), { status: 503 }), h);
-    await readAssistantStream(sseResponse([{ t: 'a medias' }]), h);
-    expect(errs).toEqual(['Cuota agotada', 'La respuesta se corto antes de terminar.']);
   });
 });

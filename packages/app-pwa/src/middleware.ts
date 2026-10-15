@@ -9,8 +9,6 @@ import type { APIContext, MiddlewareNext } from 'astro';
  * - PUBLIC_DEMO: flag (env, default false). Si es true, /fleet* es de acceso público demo.
  *   Si es false, /fleet* exige sesión con redirect 303 a /login.
  * - RBAC: para /api/fleet/* se valida can(role, entity, action) aquí mismo (defense in depth).
- * - /api/ai/*: NUNCA es público sin gate de tier (mantiene HTTP 402 para free/no autenticado),
- *   independiente del flag PUBLIC_DEMO.
  */
 import { env } from 'cloudflare:workers';
 import type { D1Database, KVNamespace } from '@cloudflare/workers-types';
@@ -225,28 +223,6 @@ async function handleRequest(context: APIContext, next: MiddlewareNext): Promise
       status: 404,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     });
-  }
-
-  // --- AI tier gate for /api/ai/* ---
-  if (pathname.startsWith('/api/ai/')) {
-    const token = context.cookies.get('session')?.value ?? '';
-    const user = token ? await getSessionUser(token) : null;
-    const tierHeader = context.request.headers.get('x-tier-id');
-
-    // Requests with free tier or no session/credits return 402 Payment Required
-    if (!user || user.role === 'free' || tierHeader === 'free') {
-      return new Response(
-        JSON.stringify({
-          ok: false,
-          error: 'Inferencia AI requiere suscripción Pro/PAYG (Free tier agotado o no permitido)',
-          code: 402,
-        }),
-        {
-          status: 402,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
-    }
   }
 
   // --- Auth guard: todo lo que no sea PUBLICO exige sesion ---
