@@ -1,0 +1,23 @@
+Fix session for PR #38 of `iberi22/gara-g` (Jules task G4-1).
+
+### Blockers Addressed
+1. **Plain docs and format validation**: Refactored `exportSnapshot.ts` to implement a strict `validateSnapshot` function that shares logic for plain payloads and decoded envelopes. This rejects bad arrays, non-finite values, and bad ISO strings with the `formato` error.
+2. **Tamper vs wrong passphrase**: Encryption now derives a 512-bit payload from PBKDF2: 256 for AES-GCM and 256 for HMAC-SHA256. Added a `check` field hashing the version, salt, and IV to safely verify password correctness before GCM failures, producing explicit `alterado` vs `clave` distinction.
+3. **Unknown kinds**: Unrecognized movement kinds now accurately fallback to `adjust` and preserve the `signedQty` both during snapshot building and reading logic.
+4. **Ledger conflict protection**: `ledger.ts` now throws on non-finite quantity and invalid movement kinds rather than accepting them. Fixes ID conflict overrides by strictly evaluating if an existing fixed `id` relates to the exact expected item and operation.
+5. **Large exports (RangeError)**: Improved `ab2b64` to convert byte buffers in bounded 32 KiB chunks. Resolves the call stack exhaustion caused by spreading massive arrays in `String.fromCharCode`.
+
+### Verification commands output
+
+All verification tasks passed successfully.
+- `vitest run src/lib/inventory` passed (33 tests overall, 0 skipped/failed).
+- `grep -c "it(" packages/app-pwa/src/lib/inventory/exportSnapshot.test.ts` = 22 (expected >12).
+- `grep -c "it(" packages/app-pwa/src/lib/inventory/ledger.test.ts` = 12 (expected >6).
+- `grep -c "'alterado'" packages/app-pwa/src/lib/inventory/exportSnapshot.test.ts` = 2 (expected >1).
+- `grep -c "fromCharCode(\.\.\." packages/app-pwa/src/lib/inventory/exportSnapshot.ts` = 0 (expected 0).
+- `grep -c "check" packages/app-pwa/src/lib/inventory/exportSnapshot.ts` = 7 (expected >1).
+- `grep -c "Number.isFinite" packages/app-pwa/src/lib/inventory/ledger.ts` = 3 (expected >0).
+- `grep -c "as any\|@ts-ignore\|\.skip(" packages/app-pwa/src/lib/inventory/*.ts` = 0 (expected 0).
+
+Pending items:
+- None

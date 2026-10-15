@@ -30,20 +30,20 @@ describe('Inventory Ledger', () => {
 
   it('appendMovement updates item quantity and logs movement', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', { id: 'item1', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as any);
+    await adapter.create('inventoryItem', { id: 'item1', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as Record<string, unknown>);
 
     await appendMovement(adapter, 'inst1', 'item1', 'purchase', 50);
     expect(await quantityOf(adapter, 'inst1', 'item1')).toBe(50);
 
     const history = await movementHistory(adapter, 'inst1', 'item1');
     expect(history).toHaveLength(1);
-    expect((history[0] as any).kind).toBe('purchase');
-    expect((history[0] as any).qty).toBe(50);
+    expect((history[0] as Record<string, unknown>).kind).toBe('purchase');
+    expect((history[0] as Record<string, unknown>).qty).toBe(50);
   });
 
   it('appendMovement correctly handles multiple movements and signs', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', { id: 'item2', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as any);
+    await adapter.create('inventoryItem', { id: 'item2', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as Record<string, unknown>);
 
     await appendMovement(adapter, 'inst1', 'item2', 'purchase', 100);
     await appendMovement(adapter, 'inst1', 'item2', 'use', 30);
@@ -58,7 +58,7 @@ describe('Inventory Ledger', () => {
 
   it('appendMovement is idempotent when same id is retried', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', { id: 'item3', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as any);
+    await adapter.create('inventoryItem', { id: 'item3', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as Record<string, unknown>);
 
     const tx1 = await appendMovement(adapter, 'inst1', 'item3', 'purchase', 20, undefined, { id: 'tx-fixed-1' });
     expect(await quantityOf(adapter, 'inst1', 'item3')).toBe(20);
@@ -70,32 +70,32 @@ describe('Inventory Ledger', () => {
 
   it('creates opening balance if item has quantity but no movements', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', { id: 'item4', instance_id: 'inst1', quantity: 15, created_at: '', updated_at: '' } as any);
+    await adapter.create('inventoryItem', { id: 'item4', instance_id: 'inst1', quantity: 15, created_at: '', updated_at: '' } as Record<string, unknown>);
 
     await appendMovement(adapter, 'inst1', 'item4', 'purchase', 10);
 
     const history = await movementHistory(adapter, 'inst1', 'item4');
     expect(history).toHaveLength(2); // opening balance + purchase
-    expect((history[0] as any).kind).toBe('adjust');
-    expect((history[0] as any).qty).toBe(15);
+    expect((history[0] as Record<string, unknown>).kind).toBe('adjust');
+    expect((history[0] as Record<string, unknown>).qty).toBe(15);
 
     expect(await quantityOf(adapter, 'inst1', 'item4')).toBe(25); // 15 + 10
   });
 
   it('syncQuantity updates item.quantity from sum of movements', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', { id: 'item5', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as any);
+    await adapter.create('inventoryItem', { id: 'item5', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as Record<string, unknown>);
 
     await appendMovement(adapter, 'inst1', 'item5', 'purchase', 40);
     const item = await adapter.get('inventoryItem', 'item5', 'inst1');
-    expect((item as any).quantity).toBe(40);
+    expect((item as Record<string, unknown>).quantity).toBe(40);
   });
 
   it('instance isolation: movements are scoped to instanceId', async () => {
     const adapter = getMemoryAdapter();
     // different items
-    await adapter.create('inventoryItem', { id: 'itemA', instance_id: 'instA', quantity: 0, created_at: '', updated_at: '' } as any);
-    await adapter.create('inventoryItem', { id: 'itemB', instance_id: 'instB', quantity: 0, created_at: '', updated_at: '' } as any);
+    await adapter.create('inventoryItem', { id: 'itemA', instance_id: 'instA', quantity: 0, created_at: '', updated_at: '' } as Record<string, unknown>);
+    await adapter.create('inventoryItem', { id: 'itemB', instance_id: 'instB', quantity: 0, created_at: '', updated_at: '' } as Record<string, unknown>);
 
     await appendMovement(adapter, 'instA', 'itemA', 'purchase', 100);
     await appendMovement(adapter, 'instB', 'itemB', 'purchase', 50);
@@ -106,12 +106,39 @@ describe('Inventory Ledger', () => {
 
   it('adjust handles positive and negative values correctly', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', { id: 'item7', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as any);
+    await adapter.create('inventoryItem', { id: 'item7', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as Record<string, unknown>);
 
     await appendMovement(adapter, 'inst1', 'item7', 'adjust', 20);
     expect(await quantityOf(adapter, 'inst1', 'item7')).toBe(20);
 
     await appendMovement(adapter, 'inst1', 'item7', 'adjust', -5);
     expect(await quantityOf(adapter, 'inst1', 'item7')).toBe(15);
+  });
+
+  it('appendMovement rejects invalid kinds', async () => {
+    const adapter = getMemoryAdapter();
+    await adapter.create('inventoryItem', { id: 'i1', instance_id: 'inst1', quantity: 0 } as Record<string, unknown>);
+
+    await expect(appendMovement(adapter, 'inst1', 'i1', 'magic' as Record<string, unknown>, 10))
+      .rejects.toThrow(/Tipo de movimiento invalido/);
+  });
+
+  it('appendMovement rejects invalid quantities', async () => {
+    const adapter = getMemoryAdapter();
+    await adapter.create('inventoryItem', { id: 'i1', instance_id: 'inst1', quantity: 0 } as Record<string, unknown>);
+
+    await expect(appendMovement(adapter, 'inst1', 'i1', 'purchase', NaN))
+      .rejects.toThrow(/Cantidad de movimiento invalida/);
+  });
+
+  it('appendMovement rejects fixed id conflicts', async () => {
+    const adapter = getMemoryAdapter();
+    await adapter.create('inventoryItem', { id: 'i1', instance_id: 'inst1', quantity: 0 } as Record<string, unknown>);
+    await adapter.create('inventoryItem', { id: 'i2', instance_id: 'inst1', quantity: 0 } as Record<string, unknown>);
+
+    await appendMovement(adapter, 'inst1', 'i1', 'purchase', 10, undefined, { id: 'conflict-id' });
+
+    await expect(appendMovement(adapter, 'inst1', 'i2', 'purchase', 10, undefined, { id: 'conflict-id' }))
+      .rejects.toThrow(/Conflicto de movimiento/);
   });
 });
