@@ -15,6 +15,12 @@ import {
   cloudBoundShare,
   assertCloudSharesSafe,
 } from '@swal/vault/sealedPack.js';
+import {
+  sealRecoveryKit,
+  openRecoveryKit,
+  type RecoveryKitV1,
+  type RecoveryKitEntry,
+} from './vaultRecoveryKit';
 
 // Tipos Cloudflare bindings (compat con wrangler.toml template)
 export type CloudflareEnv = {
@@ -47,7 +53,12 @@ export class CloudflareVaultAdapter implements StorageAdapter {
   private deviceStore: {
     save(id: string, s: { device: any; recovery: any }): void | Promise<void>;
     load(id: string): { device: any; recovery: any } | null | Promise<any>;
+    // Escritura condicional atomica: decide "no existe" y escribe en la misma transaccion.
+    saveIfAbsent?(id: string, s: { device: any; recovery: any }): Promise<boolean>;
   } = {
+    saveIfAbsent: async (id: string, s: { device: any; recovery: any }) => {
+      return await this.saveIfAbsentToIndexedDB(id, s);
+    },
     save: async (id: string, s: { device: any; recovery: any }) => {
       await this.saveToIndexedDB(id, s);
     },
@@ -154,6 +165,37 @@ export class CloudflareVaultAdapter implements StorageAdapter {
     }
   }
 
+  // Devuelve false si ya existia (no escribe). Cifra fuera de la transaccion; get y put van en la misma.
+  private async saveIfAbsentToIndexedDB(id: string, s: { device: any; recovery: any }): Promise<boolean> {
+    const db = await this.openDB();
+    if (!db) throw new DeviceShareStoreUnavailable('IndexedDB no disponible: el share del dispositivo no puede persistirse');
+    let wrote = false;
+    try {
+      const key = await this.getDBKey(db);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const data = new TextEncoder().encode(JSON.stringify(s));
+      const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
+      const tx = db.transaction('shares', 'readwrite');
+      const store = tx.objectStore('shares');
+      const existing = await new Promise<any>((resolve, reject) => {
+        const req = store.get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      if (!existing) {
+        store.put({ id, iv, data: encrypted });
+        wrote = true;
+      }
+      await txDone(tx);
+    } finally {
+      db.close();
+    }
+    if (!wrote) return false;
+    const back = await this.loadFromIndexedDB(id);
+    if (!back) throw new DeviceShareStoreUnavailable('El share del dispositivo no se pudo releer tras guardarlo');
+    return true;
+  }
+
   private async loadFromIndexedDB(id: string): Promise<{ device: any; recovery: any } | null> {
     const db = await this.openDB();
     if (!db) return null;
@@ -199,6 +241,52 @@ export class CloudflareVaultAdapter implements StorageAdapter {
   async recoveryShare(entity: string, instanceId: string, id: string): Promise<any> {
     const s = await this.deviceStore.load(this.shareKey(entity, instanceId, id));
     return s?.recovery ?? null;
+  }
+
+  // Kit de recuperacion: solo cripto local, sin red ni escrituras en R2/KV/D1.
+  async exportRecoveryKit(
+    instanceId: string,
+    refs: Array<{ entity: string; id: string }>,
+    kitCode: string,
+  ): Promise<{ kit: RecoveryKitV1; missing: Array<{ entity: string; id: string }> }> {
+    const entries: RecoveryKitEntry[] = [];
+    const missing: Array<{ entity: string; id: string }> = [];
+    for (const ref of refs) {
+      const share = await this.recoveryShare(ref.entity, instanceId, ref.id);
+      if (share === null || share === undefined) missing.push(ref);
+      else entries.push({ entity: ref.entity, id: ref.id, share });
+    }
+    const kit = await sealRecoveryKit(this.appId, instanceId, entries, kitCode);
+    return { kit, missing };
+  }
+
+  // Serializa los restores de esta instancia: comprobar y guardar no se pisan entre llamadas concurrentes.
+  // Entre pestañas distintas no hay garantia: documentado como limite.
+  private restoreChain: Promise<unknown> = Promise.resolve();
+
+  restoreRecoveryKit(kit: unknown, kitCode: string, instanceId: string): Promise<{ restored: number; skipped: number }> {
+    const run = this.restoreChain.then(() => this.doRestoreRecoveryKit(kit, kitCode, instanceId));
+    this.restoreChain = run.catch(() => undefined);
+    return run;
+  }
+
+  private async doRestoreRecoveryKit(kit: unknown, kitCode: string, instanceId: string): Promise<{ restored: number; skipped: number }> {
+    // Validar y descifrar ANTES de cualquier escritura.
+    const entries = await openRecoveryKit(kit, kitCode, { appId: this.appId, instanceId });
+    let restored = 0;
+    let skipped = 0;
+    if (!this.deviceStore.saveIfAbsent) {
+      throw new DeviceShareStoreUnavailable('El almacen de shares no ofrece escritura condicional: no se puede restaurar sin riesgo');
+    }
+    for (const { entity, id, share } of entries) {
+      const key = this.shareKey(entity, instanceId, id);
+      const toSave = { device: null, recovery: share };
+      // Decide y escribe en una sola transaccion: nunca sobrescribe un share existente.
+      const wrote = await this.deviceStore.saveIfAbsent(key, toSave);
+      if (wrote) restored++;
+      else skipped++;
+    }
+    return { restored, skipped };
   }
 
   private async localShares(entity: string, instanceId: string, id: string): Promise<any[]> {
