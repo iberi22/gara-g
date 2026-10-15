@@ -137,14 +137,28 @@ describe('SWAL-GARA 03.03 Telemetry Ingest + Sealed Pack R2', () => {
     const metadata = { vehicleId: 'veh-r2', timestamp: Date.now(), recordCount: 1 };
     const pack = await createSealedPack(payload, metadata);
 
-    const r2Client = new R2StorageClient({ bucketName: 'swal-r2-vault' });
+    let putPayload = '';
+    const r2Binding = {
+      put: async (key: string, value: string) => {
+        putPayload = value;
+      },
+    };
+    const r2Client = new R2StorageClient({ bucketName: 'swal-r2-vault', r2Binding });
     const uploadResult = await r2Client.uploadSealedPack(pack);
 
     expect(uploadResult.contentHash).toBe(pack.content_hash);
     expect(uploadResult.url).toContain('swal-r2-vault');
 
+    // Assert that the uploaded JSON payload contains no shares
+    expect(putPayload).toBeTruthy();
+    const uploadedPack = JSON.parse(putPayload);
+    expect(uploadedPack.shares).toEqual([]);
+
     const retrievedPack = await r2Client.getSealedPack(pack.content_hash);
     expect(retrievedPack?.content_hash).toBe(pack.content_hash);
+
+    // Assert that the retrieved pack from memory store also has no shares
+    expect(retrievedPack?.shares).toEqual([]);
 
     const isIntegrityOk = await r2Client.verifyR2PackIntegrity(pack.content_hash);
     expect(isIntegrityOk).toBe(true);

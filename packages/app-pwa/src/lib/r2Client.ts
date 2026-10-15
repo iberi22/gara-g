@@ -44,7 +44,10 @@ export class R2StorageClient {
     }
 
     const key = `packs/${pack.content_hash}.json`;
-    const packJson = JSON.stringify(pack);
+
+    // Strip shares before uploading to R2 to ensure the cloud never holds enough material to decrypt
+    const packWithoutShares = { ...pack, shares: [] };
+    const packJson = JSON.stringify(packWithoutShares);
 
     const binding = this.r2Binding as
       | { put?: (k: string, v: string, opts?: unknown) => Promise<unknown> }
