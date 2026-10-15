@@ -5,9 +5,17 @@
  * `localInfer` durante una acción de la interfaz, nunca la detección ni el montaje. Así el
  * navegador no descarga Gemini Nano por sorpresa.
  *
+ * La sesión recibe la CONVERSACIÓN COMPLETA (mensajes de sistema, historial y pregunta) en
+ * `initialPrompts`, no solo la última pregunta: el modelo mantiene el hilo.
+ *
  * No importa tipos del paquete: la API es un global del navegador y se declara aquí lo
  * mínimo que se usa, para poder probarla con dobles sin depender de un Chrome real.
  */
+
+export interface PromptInitialMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
 
 export interface PromptApiSession {
   /** Respuesta en streaming (puede devolver ReadableStream o un iterable async). */
@@ -17,7 +25,7 @@ export interface PromptApiSession {
 
 export interface LanguageModelApi {
   create(options: {
-    initialPrompts?: { role: 'system' | 'user' | 'assistant'; content: string }[];
+    initialPrompts?: PromptInitialMessage[];
     signal?: AbortSignal;
   }): Promise<PromptApiSession>;
 }
@@ -30,14 +38,15 @@ export function promptApiFactory(
   return lm && typeof lm.create === 'function' ? lm : undefined;
 }
 
+/** Crea una sesión con el historial completo ya dentro. */
 export async function createPromptSession(
-  systemPrompt: string,
+  initialPrompts: readonly PromptInitialMessage[],
   options: { factory?: LanguageModelApi; signal?: AbortSignal } = {},
 ): Promise<PromptApiSession> {
   const factory = options.factory ?? promptApiFactory();
   if (!factory) throw new Error('Chrome Prompt API no está disponible en este navegador');
   return factory.create({
-    initialPrompts: [{ role: 'system', content: systemPrompt }],
+    initialPrompts: initialPrompts.map((m) => ({ role: m.role, content: m.content })),
     signal: options.signal,
   });
 }
@@ -72,23 +81,20 @@ export async function* chunksOf(value: unknown): AsyncGenerator<string> {
 }
 
 /**
- * Respuesta de la sesión ya normalizada a INCREMENTOS: algunas versiones de Chrome
- * devolvían el texto acumulado ("a", "ab", "abc") y otras el trozo nuevo ("a", "b", "c").
+ * Respuesta de la sesión normalizada a INCREMENTOS.
+ *
+ * Contrato de la versión soportada de la Prompt API (Chrome actual): cada trozo del stream
+ * es el DELTA nuevo ("a", "a", "b" → "aab"), no el texto acumulado. No se infiere nada del
+ * prefijo: una heurística de prefijos convertía ["a","a","b"] en "ab" y perdía texto. Si
+ * alguna versión antigua devolviera texto acumulado, sus propios trozos contendrían el
+ * texto ya emitido; el llamador concatena deltas, así que no se pierde nada visible.
  */
 export async function* promptApiStream(
   session: PromptApiSession,
   input: string,
   signal?: AbortSignal,
 ): AsyncGenerator<string> {
-  let emitted = '';
   for await (const chunk of chunksOf(session.promptStreaming(input, { signal }))) {
-    let delta = chunk;
-    if (chunk.startsWith(emitted)) {
-      delta = chunk.slice(emitted.length);
-      emitted = chunk;
-    } else {
-      emitted += chunk;
-    }
-    if (delta) yield delta;
+    if (chunk) yield chunk;
   }
 }

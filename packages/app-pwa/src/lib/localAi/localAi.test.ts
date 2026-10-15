@@ -1,22 +1,28 @@
 // @vitest-environment jsdom
 /**
- * localAi.test.ts — Cadena de respaldo de la IA local y "sin descargas silenciosas".
+ * localAi.test.ts — Cadena de respaldo de la IA local, consentimiento y cancelación.
  *
- * Ninguna de las funciones lanza hacia la interfaz: si un motor falla, responde el nivel
- * de reglas. Y la deteccion / el montaje de la tarjeta de consentimiento NUNCA cargan el
- * motor de WebGPU (eso solo ocurre con el clic del usuario).
+ * Reglas que fija esta suite:
+ *  - Ninguna consulta descarga un modelo: sin motor YA cargado y autorizado, responden las
+ *    reglas (y `@mlc-ai/web-llm` no se toca).
+ *  - Una respuesta VACÍA es un fallo: se sigue con el siguiente motor y se acaba en reglas.
+ *  - El motor cargado se reutiliza solo para el modelo autorizado: nunca se cambia a otro.
+ *  - La Prompt API recibe la conversación completa, no solo la última pregunta.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import LocalAiConsent from '../../components/garage-dossier/LocalAiConsent.svelte';
 import { detectLocalAi } from './capabilities';
+import { DEFAULT_LOCAL_MODEL, LOW_MEMORY_LOCAL_MODEL } from './config';
+import { clearConsent, saveConsent } from './consent';
 import { localChat, localInfer } from './index';
 import { RULES_LABEL, RULES_NEEDS_LOCAL_AI, RULES_NO_MATCH } from './rules';
 import type { PromptApiSession } from './promptApi';
+import { disposeWebllmEngine, loadWebllmEngine, type WebllmChunk, type WebllmEngine } from './webllmEngine';
 import type { ManualChunk } from '../../garage/assistant/manualText';
 
-const mlc = vi.hoisted(() => ({ CreateMLCEngine: vi.fn() }));
-vi.mock('@mlc-ai/web-llm', () => ({ CreateMLCEngine: mlc.CreateMLCEngine }));
+const mlc = vi.hoisted(() => ({ CreateWebWorkerMLCEngine: vi.fn() }));
+vi.mock('@mlc-ai/web-llm', () => ({ CreateWebWorkerMLCEngine: mlc.CreateWebWorkerMLCEngine }));
 
 const excerpts: ManualChunk[] = [
   { manual: 'Manual FZ', page: 42, text: 'Pares de apriete: tuerca del eje trasero 90 N·m.' },
@@ -26,14 +32,41 @@ async function* fromArray(values: string[]): AsyncGenerator<string> {
   for (const v of values) yield v;
 }
 
+interface FakeEngine {
+  engine: WebllmEngine;
+  create: ReturnType<typeof vi.fn>;
+  interruptGenerate: ReturnType<typeof vi.fn>;
+  unload: ReturnType<typeof vi.fn>;
+  dispose: ReturnType<typeof vi.fn>;
+}
+
+function fakeEngine(chunks: WebllmChunk[] = [{ choices: [{ delta: { content: 'respuesta del modelo' } }] }]): FakeEngine {
+  const create = vi.fn(async () =>
+    (async function* () {
+      for (const chunk of chunks) yield chunk;
+    })(),
+  );
+  const interruptGenerate = vi.fn();
+  const unload = vi.fn(async () => {});
+  const dispose = vi.fn();
+  const engine: WebllmEngine = { chat: { completions: { create } }, interruptGenerate, unload, dispose };
+  return { engine, create, interruptGenerate, unload, dispose };
+}
+
 function stubLanguageModel(create: (options: unknown) => Promise<PromptApiSession>): void {
   (globalThis as { LanguageModel?: unknown }).LanguageModel = { availability: async () => 'available', create };
 }
 
-afterEach(() => {
+beforeEach(() => {
+  localStorage.clear();
+});
+
+afterEach(async () => {
+  await disposeWebllmEngine();
   delete (globalThis as { LanguageModel?: unknown }).LanguageModel;
   Reflect.deleteProperty(globalThis.navigator, 'gpu');
-  mlc.CreateMLCEngine.mockReset();
+  mlc.CreateWebWorkerMLCEngine.mockReset();
+  clearConsent();
   document.body.innerHTML = '';
 });
 
@@ -58,16 +91,50 @@ describe('localChat · reglas', () => {
     expect(parts.join('')).toContain(RULES_LABEL);
   });
 
-  it('forzando reglas no toca la Prompt API', async () => {
+  it('forzando reglas no toca ni la Prompt API ni WebLLM', async () => {
     const create = vi.fn(async () => ({ promptStreaming: () => fromArray(['x']) }));
     stubLanguageModel(create);
-    await localChat(ask, { tier: 'rules', excerpts });
+    const { engine } = fakeEngine();
+    await localChat(ask, { tier: 'rules', excerpts, engine, modelId: DEFAULT_LOCAL_MODEL });
     expect(create).not.toHaveBeenCalled();
+    expect(mlc.CreateWebWorkerMLCEngine).not.toHaveBeenCalled();
   });
 });
 
-describe('localChat · motor que falla', () => {
-  it('si la Prompt API lanza, cae a las reglas', async () => {
+describe('localChat · Prompt API', () => {
+  it('envía la conversación completa y pregunta solo el último turno del usuario', async () => {
+    const promptStreaming = vi.fn(() => fromArray(['Usa ', '10W-40']));
+    let received: unknown;
+    stubLanguageModel(async (options) => {
+      received = options;
+      return { promptStreaming };
+    });
+    const parts: string[] = [];
+    const messages = [
+      { role: 'system' as const, content: 'SISTEMA' },
+      { role: 'user' as const, content: '¿Qué aceite?' },
+      { role: 'assistant' as const, content: 'Chequea el manual.' },
+      { role: 'user' as const, content: '¿Y el torque?' },
+    ];
+    const res = await localChat(messages, { tier: 'prompt-api', onToken: (t) => parts.push(t) });
+    expect(res).toMatchObject({ via: 'prompt-api', model: 'gemini-nano' });
+    expect((received as { initialPrompts: unknown }).initialPrompts).toEqual([
+      { role: 'system', content: 'SISTEMA' },
+      { role: 'user', content: '¿Qué aceite?' },
+      { role: 'assistant', content: 'Chequea el manual.' },
+    ]);
+    expect(promptStreaming).toHaveBeenCalledWith('¿Y el torque?', { signal: undefined });
+    expect(parts).toEqual(['Usa ', '10W-40']);
+  });
+
+  it('una respuesta vacía NO es un éxito: cae a las reglas', async () => {
+    stubLanguageModel(async () => ({ promptStreaming: () => fromArray([]) }));
+    const res = await localChat(ask, { tier: 'prompt-api', excerpts });
+    expect(res.via).toBe('rules');
+    expect(res.text).toContain(RULES_LABEL);
+  });
+
+  it('si la Prompt API lanza cae a las reglas', async () => {
     stubLanguageModel(async () => {
       throw new Error('sin permiso');
     });
@@ -76,12 +143,20 @@ describe('localChat · motor que falla', () => {
     expect(res.text).toContain(RULES_LABEL);
   });
 
-  it('hace streaming incremental de la Prompt API', async () => {
-    stubLanguageModel(async () => ({ promptStreaming: () => fromArray(['Usa ', '10W-40']) }));
-    const parts: string[] = [];
-    const res = await localChat(ask, { tier: 'prompt-api', onToken: (t) => parts.push(t) });
-    expect(res).toMatchObject({ via: 'prompt-api', model: 'gemini-nano' });
-    expect(parts).toEqual(['Usa ', '10W-40']);
+  it('si la Prompt API falla, todavía se intenta el motor WebGPU ya cargado', async () => {
+    stubLanguageModel(async () => {
+      throw new Error('boom');
+    });
+    const { engine, create } = fakeEngine([{ choices: [{ delta: { content: 'respuesta webgpu' } }] }]);
+    const res = await localChat(ask, {
+      tier: 'prompt-api',
+      engine,
+      modelId: DEFAULT_LOCAL_MODEL,
+      excerpts,
+    });
+    expect(res.via).toBe('webgpu');
+    expect(res.text).toBe('respuesta webgpu');
+    expect(create).toHaveBeenCalledWith({ messages: ask, stream: true });
   });
 
   it('al cancelar no añade las reglas encima del texto parcial', async () => {
@@ -96,6 +171,77 @@ describe('localChat · motor que falla', () => {
     const res = await localChat(ask, { tier: 'prompt-api', signal: controller.signal });
     expect(res.text).toBe('parcial');
     expect(res.text).not.toContain(RULES_LABEL);
+  });
+});
+
+describe('localChat · WebLLM', () => {
+  it('usa el motor YA cargado y autorizado y reutiliza el modelo aceptado', async () => {
+    const { engine, create } = fakeEngine();
+    await loadWebllmEngine({ modelId: LOW_MEMORY_LOCAL_MODEL, createEngine: async () => engine });
+    saveConsent(LOW_MEMORY_LOCAL_MODEL);
+
+    const res = await localChat(ask, { tier: 'webgpu' });
+    expect(res.via).toBe('webgpu');
+    expect(res.model).toBe(LOW_MEMORY_LOCAL_MODEL);
+    // Nunca se pasa `signal` a la petición: no existe en el contrato del paquete.
+    expect(create).toHaveBeenCalledWith({ messages: ask, stream: true });
+  });
+
+  it('sin motor cargado no descarga nada: responden las reglas', async () => {
+    saveConsent(DEFAULT_LOCAL_MODEL);
+    const res = await localChat(ask, { tier: 'webgpu', excerpts });
+    expect(res.via).toBe('rules');
+    expect(res.text).toContain(RULES_LABEL);
+    expect(mlc.CreateWebWorkerMLCEngine).not.toHaveBeenCalled();
+  });
+
+  it('nunca usa un motor cargado para OTRO modelo (no cambia el modelo a mitad de consulta)', async () => {
+    const { engine, create } = fakeEngine();
+    await loadWebllmEngine({ modelId: DEFAULT_LOCAL_MODEL, createEngine: async () => engine });
+    // El usuario autorizó después el modelo pequeño, pero el cargado es el grande.
+    saveConsent(LOW_MEMORY_LOCAL_MODEL);
+    const res = await localChat(ask, { tier: 'webgpu', excerpts });
+    expect(res.via).toBe('rules');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('una respuesta vacía del motor cae a las reglas', async () => {
+    const { engine } = fakeEngine([{ choices: [{ delta: {} }] }]);
+    const res = await localChat(ask, {
+      tier: 'webgpu',
+      engine,
+      modelId: DEFAULT_LOCAL_MODEL,
+      excerpts,
+    });
+    expect(res.via).toBe('rules');
+    expect(res.text).toContain(RULES_LABEL);
+  });
+
+  it('al abortar corta la generación con interruptGenerate y no añade reglas', async () => {
+    const controller = new AbortController();
+    const create = vi.fn(async () =>
+      (async function* () {
+        yield { choices: [{ delta: { content: 'parcial' } }] };
+        controller.abort();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        yield { choices: [{ delta: { content: 'tarde' } }] };
+      })(),
+    );
+    const interruptGenerate = vi.fn();
+    const engine: WebllmEngine = { chat: { completions: { create } }, interruptGenerate };
+    const parts: string[] = [];
+    const res = await localChat(ask, {
+      tier: 'webgpu',
+      engine,
+      modelId: DEFAULT_LOCAL_MODEL,
+      signal: controller.signal,
+      excerpts,
+      onToken: (t) => parts.push(t),
+    });
+    expect(interruptGenerate).toHaveBeenCalled();
+    expect(res.text).toBe('parcial');
+    expect(res.text).not.toContain(RULES_LABEL);
+    expect(parts).toEqual(['parcial']);
   });
 });
 
@@ -132,11 +278,24 @@ describe('localInfer · AUI', () => {
     const res = await localInfer('panel', { tier: 'prompt-api' });
     expect(res.spec).toMatchObject({ version: 1 });
   });
+
+  it('usa el motor WebGPU cargado sin descargar nada', async () => {
+    const { engine, create } = fakeEngine([
+      { choices: [{ delta: { content: '{"version":1,"components":[]}' } }] },
+    ]);
+    const res = await localInfer('panel', { tier: 'webgpu', engine, modelId: DEFAULT_LOCAL_MODEL });
+    expect(res.via).toBe('webgpu');
+    expect(res.spec).toMatchObject({ version: 1 });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('sin descargas silenciosas', () => {
   it('detectar y montar la tarjeta no cargan el motor de WebGPU', async () => {
-    Object.defineProperty(globalThis.navigator, 'gpu', { configurable: true, value: { requestAdapter: async () => null } });
+    Object.defineProperty(globalThis.navigator, 'gpu', {
+      configurable: true,
+      value: { requestAdapter: async () => null },
+    });
     const tier = await detectLocalAi();
     expect(tier).toBe('webgpu');
 
@@ -145,7 +304,17 @@ describe('sin descargas silenciosas', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     flushSync();
 
-    expect(mlc.CreateMLCEngine).not.toHaveBeenCalled();
+    expect(mlc.CreateWebWorkerMLCEngine).not.toHaveBeenCalled();
     unmount(app);
+  });
+
+  it('la consulta con WebGPU disponible pero sin consentimiento no descarga', async () => {
+    Object.defineProperty(globalThis.navigator, 'gpu', {
+      configurable: true,
+      value: { requestAdapter: async () => null },
+    });
+    const res = await localChat(ask, { excerpts });
+    expect(res.via).toBe('rules');
+    expect(mlc.CreateWebWorkerMLCEngine).not.toHaveBeenCalled();
   });
 });

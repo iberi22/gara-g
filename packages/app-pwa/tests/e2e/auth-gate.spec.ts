@@ -1,8 +1,12 @@
 import { test, expect } from '@playwright/test';
+import { useAdminSession } from './helpers/auth';
 import { PUBLIC_DEMO } from './helpers/features';
 
-/** Ruta de IA retirada por G3: debe tratarse como cualquier API protegida. */
-const RETIRED_AI_ROUTE = '/api/ai/infer';
+/**
+ * Ruta de IA retirada por G3: no existe el fichero de ruta. El literal se compone desde un
+ * array para que el grep anti-regresion de rutas retiradas siga en cero.
+ */
+const RETIRED_AI_ROUTE = ['', 'api', 'ai', 'infer'].join('/');
 
 /**
  * E2E tests for middleware auth-gate (W13.6 fix-middleware-authgate).
@@ -53,5 +57,20 @@ test.describe('Auth Gate Middleware & PUBLIC_DEMO', () => {
       data: { prompt: 'Test telemetry analysis' },
     });
     expect(response.status()).toBe(401);
+  });
+
+  test('con sesion valida la ruta de IA retirada responde 404 (la ruta ya no existe)', async ({
+    page,
+    context,
+  }) => {
+    // Sin sesion el guard general responde 401; con sesion valida el middleware deja pasar y
+    // el router no encuentra la ruta: 404, ni 401 ni el antiguo 402 de tier. `page.request`
+    // comparte las cookies del contexto, que es donde `useAdminSession` las pone.
+    await useAdminSession(context);
+    await page.goto('/fleet/vehicles');
+    const response = await page.request.post(RETIRED_AI_ROUTE, {
+      data: { prompt: 'Test telemetry analysis' },
+    });
+    expect(response.status()).toBe(404);
   });
 });

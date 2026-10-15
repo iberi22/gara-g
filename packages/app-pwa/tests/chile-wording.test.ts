@@ -117,50 +117,36 @@ describe('N4 · el camion de volco se llama como en el mercado', () => {
   });
 });
 
-describe('N7 · el tier visible ya no se llama SOCIO', () => {
-  const LEGADO: Record<string, string[]> = {
-    'src/components/AuiInterface.svelte': [
-      'Cuenta Socio',
-      'TIER SOCIO',
-      'Modo Socio',
-      'tipo Socio',
-      'tier Socio',
-      'Socio PAYG',
-      'Socio / PAYG',
-    ],
-    'src/components/InterfaceSwitcher.astro': ["badge.textContent = 'SOCIO'", 'cuenta Socio'],
-    'src/components/ProBadge.svelte': ['SOCIO CLOUD', 'SOCIO INACTIVO'],
-  };
+describe('N7 · la app ya no tiene planes ni tiers', () => {
+  const PLAN_MARKERS = /TIER_LABEL|tierLabel|PAYG|data-tier-label|socio-badge/;
 
-  it.each(Object.keys(LEGADO))('%s no muestra el nombre de tier heredado', (f) => {
-    const s = read(f);
-    for (const texto of LEGADO[f]) {
-      expect(s, `${f}: ${texto}`).not.toContain(texto);
-    }
-  });
-
-  it('el nombre visible del tier vive una sola vez, en domain.config.ts', () => {
+  it('domain.config.ts no declara tier, tierLabel ni el nombre visible', () => {
     const cfg = read('src/lib/domain.config.ts');
-    expect(cfg).toMatch(/tierLabel: 'PAYG'/);
-    expect(cfg).toMatch(/export const TIER_LABEL: string = domainConfig\.billing\.tierLabel/);
-    // El identificador del tier sigue siendo `payg` (el cambio es solo del nombre visible).
-    expect(cfg).toMatch(/tier: 'payg' as const/);
+    expect(cfg).not.toMatch(/payg|PAYG|tierLabel|TIER_LABEL/i);
+    expect(cfg).not.toMatch(/tier:\s*'/);
+    expect(cfg).not.toMatch(/billing\s*:\s*\{/);
   });
 
-  it('la AUI local ya no nombra ningun tier; el conmutador y ProBadge siguen importandolo', () => {
-    // G3: la AUI pasa a IA local, sin plan ni tier. El nombre visible queda solo en el
-    // conmutador y ProBadge.
+  it('la AUI local no nombra ningun tier', () => {
     const aui = read('src/components/AuiInterface.svelte');
     expect(aui).not.toMatch(/TIER_LABEL|PAYG|Socio/);
-    for (const f of ['src/components/ProBadge.svelte', 'src/components/InterfaceSwitcher.astro']) {
-      const s = read(f);
-      expect(s, f).toMatch(/TIER_LABEL/);
-      expect(s, f).toMatch(/domain\.config/);
-    }
-    // El script inline del conmutador no puede importar: lee la etiqueta del atributo.
+  });
+
+  it('el conmutador conserva su cobertura (modos y persistencia) y ya no tiene insignia de tier', () => {
     const sw = read('src/components/InterfaceSwitcher.astro');
-    expect(sw).toMatch(/data-tier-label=\{TIER_LABEL\}/);
-    expect(sw).toMatch(/badge\.getAttribute\('data-tier-label'\)/);
+    for (const id of ['switch-btn-admin', 'switch-btn-aui', 'switch-btn-game']) {
+      expect(sw, id).toContain(id);
+    }
+    expect(sw).toMatch(/gara_interface_mode/);
+    expect(sw).toMatch(/data-mode/);
+    expect(sw).not.toMatch(PLAN_MARKERS);
+    expect(sw).not.toContain('domain.config');
+  });
+
+  it('ProBadge solo informa del nodo, sin planes', () => {
+    const badge = read('src/components/ProBadge.svelte');
+    expect(badge).not.toMatch(/TIER_LABEL|tierLabel|PAYG|SOCIO CLOUD|socioBilling/);
+    expect(badge).toMatch(/PRO NODO/);
   });
 
   it('la etiqueta del camion de volco que ve el usuario es la del mercado activo', () => {

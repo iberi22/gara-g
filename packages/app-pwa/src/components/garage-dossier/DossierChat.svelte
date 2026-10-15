@@ -20,6 +20,7 @@ import {
   type IndexedManual,
 } from './chatClient';
 import { detectLocalAi, type AiTier } from '../../lib/localAi/capabilities';
+import { webllmModelId } from '../../lib/localAi/webllmEngine';
 import { runLocalAssistant } from '../../garage/assistant/handler';
 import LocalAiConsent from './LocalAiConsent.svelte';
 import { renderMarkdown } from './markdown';
@@ -46,8 +47,10 @@ let chunks = $state<ManualChunk[]>([]);
 let loadingManuals = $state(false);
 let scroller: HTMLDivElement | undefined = $state();
 let aiTier = $state<AiTier>('rules');
-let consentNeeded = $state(false);
-let consentGranted = $state(false);
+/** Tarjeta de consentimiento visible (nunca carga nada por sí sola). */
+let showConsent = $state(false);
+/** Hay motor cargado en esta pestaña: las consultas lo reutilizan. */
+let modelActive = $state(false);
 let controller: AbortController | null = $state(null);
 
 const SUGGESTIONS: Record<VehicleFamily, string[]> = {
@@ -81,11 +84,12 @@ const indexedCount = $derived(manuals.filter((m) => m.textKey).length);
 
 onMount(() => {
   turns = loadTurns(vehicleId);
-  detectLocalAi().then(tier => {
+  detectLocalAi().then((tier) => {
     aiTier = tier;
-    if (tier === 'webgpu') {
-        consentNeeded = true;
-    }
+    modelActive = Boolean(webllmModelId());
+    // Con WebGPU pero sin motor cargado se ofrece activarlo; la tarjeta solo carga
+    // el modelo si el usuario pulsa el botón (nunca al montar).
+    showConsent = tier === 'webgpu' && !modelActive;
   });
   if (indexedCount > 0) {
     loadingManuals = true;
@@ -121,17 +125,14 @@ async function send(text?: string): Promise<void> {
   };
 
   controller = new AbortController();
-  // Si el navegador solo tiene WebGPU y el usuario aún no acepta la descarga, se responde
-  // con las reglas deterministas (que no descargan nada) en vez de bloquear el chat.
-  const tier: AiTier = aiTier === 'webgpu' && !consentGranted ? 'rules' : aiTier;
-
+  // Sin `tier` forzado: `localChat` usa la Prompt API y, si falla, solo el motor WebGPU
+  // YA cargado y autorizado. Nunca descarga aquí; el peor caso son las reglas.
   try {
     const result = await runLocalAssistant(
       chatHistory.map((t) => ({ role: t.role, content: t.content })),
       { vehicle, history, notes, notesText, manuals: manuals.map((m) => m.name), excerpts },
       {
         signal: controller.signal,
-        tier,
         onToken: (chunk) => {
           thinking = false;
           update({ content: turns[idx].content + chunk });
@@ -165,16 +166,20 @@ function onKey(e: KeyboardEvent): void {
 </script>
 
 <section class="chat" aria-label="Asistente de IA">
-  {#if consentNeeded && !consentGranted && aiTier === 'webgpu'}
+  {#if showConsent && aiTier === 'webgpu'}
     <LocalAiConsent
       onAccept={() => {
-        consentGranted = true;
-        consentNeeded = false;
+        modelActive = true;
+        showConsent = false;
       }}
       onCancel={() => {
-        consentNeeded = false;
+        showConsent = false;
       }}
     />
+  {:else if aiTier === 'webgpu' && !modelActive}
+    <button type="button" class="ghost consent-open" onclick={() => (showConsent = true)}>
+      Activar IA local
+    </button>
   {/if}
   <header class="chat-head">
     <div>
@@ -423,6 +428,9 @@ function onKey(e: KeyboardEvent): void {
     font-size: 12px;
     cursor: pointer;
     white-space: nowrap;
+  }
+  .consent-open {
+    align-self: flex-start;
   }
   .disclaimer {
     margin: 0;

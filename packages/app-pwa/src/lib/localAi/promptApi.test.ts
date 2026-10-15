@@ -1,8 +1,9 @@
 /**
  * promptApi.test.ts — Normalización de la Chrome Prompt API (tier 1).
  *
- * No hay Chrome en el runner: se prueban los adaptadores con dobles, que es justo lo que
- * el módulo abstrae (ReadableStream vs iterable, texto acumulado vs incrementos).
+ * No hay Chrome en el runner: se prueban los adaptadores con dobles (ReadableStream vs
+ * iterable) y el CONTRATO de streaming de la versión soportada: cada trozo es un delta, no
+ * el texto acumulado. La heurística de prefijos perdía texto (["a","a","b"] → "ab").
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -10,6 +11,7 @@ import {
   createPromptSession,
   promptApiStream,
   type PromptApiSession,
+  type PromptInitialMessage,
 } from './promptApi';
 
 async function* fromArray(values: string[]): AsyncGenerator<string> {
@@ -18,10 +20,10 @@ async function* fromArray(values: string[]): AsyncGenerator<string> {
 
 describe('createPromptSession', () => {
   it('sin LanguageModel lanza (la cadena lo convierte en reglas)', async () => {
-    await expect(createPromptSession('sistema', { factory: undefined })).rejects.toThrow(/Prompt API/);
+    await expect(createPromptSession([], { factory: undefined })).rejects.toThrow(/Prompt API/);
   });
 
-  it('pasa el prompt de sistema a create', async () => {
+  it('pasa la conversación completa en initialPrompts', async () => {
     const calls: unknown[] = [];
     const factory = {
       create: async (options: unknown) => {
@@ -29,11 +31,21 @@ describe('createPromptSession', () => {
         return { promptStreaming: () => fromArray(['ok']) } as PromptApiSession;
       },
     };
-    await createPromptSession('SISTEMA', { factory });
-    expect(calls).toHaveLength(1);
-    expect((calls[0] as { initialPrompts?: unknown }).initialPrompts).toEqual([
+    const conversation: PromptInitialMessage[] = [
       { role: 'system', content: 'SISTEMA' },
-    ]);
+      { role: 'user', content: '¿Qué aceite?' },
+      { role: 'assistant', content: '10W-40' },
+    ];
+    await createPromptSession(conversation, { factory });
+    expect(calls).toHaveLength(1);
+    expect((calls[0] as { initialPrompts?: unknown }).initialPrompts).toEqual(conversation);
+  });
+
+  it('propaga la señal de cancelación a create', async () => {
+    const signal = new AbortController().signal;
+    const create = vi.fn(async () => ({ promptStreaming: () => fromArray(['x']) }));
+    await createPromptSession([{ role: 'system', content: 's' }], { factory: { create }, signal });
+    expect(create).toHaveBeenCalledWith({ initialPrompts: [{ role: 'system', content: 's' }], signal });
   });
 });
 
@@ -64,21 +76,29 @@ describe('chunksOf', () => {
 });
 
 describe('promptApiStream', () => {
-  it('convierte el texto acumulado de Chrome viejo en incrementos', async () => {
-    const session: PromptApiSession = {
-      promptStreaming: () => fromArray(['Usa 10W', 'Usa 10W-40', 'Usa 10W-40 JASO MA2']),
-    };
-    const parts: string[] = [];
-    for await (const chunk of promptApiStream(session, 'aceite')) parts.push(chunk);
-    expect(parts.join('')).toBe('Usa 10W-40 JASO MA2');
-    expect(parts[0]).toBe('Usa 10W');
-  });
-
-  it('deja pasar los incrementos de la versión nueva', async () => {
+  it('deja pasar los deltas tal cual (incluidos los repetidos)', async () => {
     const session: PromptApiSession = { promptStreaming: () => fromArray(['Usa ', '10W-40']) };
     const parts: string[] = [];
     for await (const chunk of promptApiStream(session, 'aceite')) parts.push(chunk);
     expect(parts).toEqual(['Usa ', '10W-40']);
+    expect(parts.join('')).toBe('Usa 10W-40');
+  });
+
+  it('regresión: ["a","a","b"] produce "aab", no "ab"', async () => {
+    const session: PromptApiSession = { promptStreaming: () => fromArray(['a', 'a', 'b']) };
+    const parts: string[] = [];
+    for await (const chunk of promptApiStream(session, 'x')) parts.push(chunk);
+    expect(parts).toEqual(['a', 'a', 'b']);
+    expect(parts.join('')).toBe('aab');
+  });
+
+  it('un delta que repite el texto entero no se colapsa (son incrementos)', async () => {
+    // Si un navegador devolviera texto acumulado ("a", "ab"), el delta real sería "b"; el
+    // llamador concatena, no reconstruye prefijos, así que no hay pérdida silenciosa.
+    const session: PromptApiSession = { promptStreaming: () => fromArray(['a', 'ab']) };
+    const parts: string[] = [];
+    for await (const chunk of promptApiStream(session, 'x')) parts.push(chunk);
+    expect(parts.join('')).toBe('aab');
   });
 
   it('propaga la señal de cancelación a promptStreaming', async () => {

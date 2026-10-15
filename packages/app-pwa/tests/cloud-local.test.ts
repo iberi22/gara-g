@@ -17,8 +17,8 @@ afterEach(() => vi.unstubAllGlobals());
 describe('modulo cloud local (por defecto)', () => {
   it('esta apagado: sin facturacion ni anclaje', () => {
     expect(cloud.enabled).toBe(false);
-    expect(cloud.billing.canAffordInference(1_000_000, 1_000_000, 'payg')).toBe(true);
-    expect(cloud.billing.creditStatus(5, 'payg').limit).toBe(Number.POSITIVE_INFINITY);
+    expect(cloud.billing.canAffordInference(1_000_000, 1_000_000, 'local')).toBe(true);
+    expect(cloud.billing.creditStatus(5, 'local').limit).toBe(Number.POSITIVE_INFINITY);
     const pack = {} as Parameters<typeof cloud.anchor.registerOnPolygon>[0];
     expect(cloud.anchor.registerOnPolygon(pack, {})).toBeUndefined();
   });
