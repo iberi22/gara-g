@@ -98,6 +98,24 @@ export const domainConfig = {
     { name: 'adStat', label: 'AdStat', fields: ['campaignId', 'day', 'impressions', 'clicks', 'spendCOP', 'freq'], xavierKind: 'adStat' },
     { name: 'adClick', label: 'AdClick', fields: ['campaignId', 'tokenId', 'chargedCOP'], xavierKind: 'adClick' },
     { name: 'shopPost', label: 'ShopPost', fields: ['kind', 'title', 'body', 'make', 'versionKey', 'imageUrl', 'url', 'advertiserId'], xavierKind: 'shopPost' },
+    {
+      name: 'inventoryItem',
+      label: 'InventoryItem',
+      fields: ['sku', 'name', 'quantity', 'unit', 'minStock', 'cost', 'price', 'warehouseId', 'vehicleTypes', 'notes'],
+      xavierKind: 'inventoryItem',
+    },
+    {
+      name: 'stockMovement',
+      label: 'StockMovement',
+      fields: ['itemId', 'kind', 'qty', 'maintenanceId', 'note'],
+      xavierKind: 'stockMovement',
+    },
+    {
+      name: 'warehouse',
+      label: 'Warehouse',
+      fields: ['name', 'type', 'address'],
+      xavierKind: 'warehouse',
+    },
   ] as const,
   aui: {
     enabled: true,
