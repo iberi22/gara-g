@@ -1,5 +1,6 @@
 import { DEFAULT_INSTANCE_ID } from './lib/domain.config';
 import { defineMiddleware } from 'astro:middleware';
+import type { APIContext, MiddlewareNext } from 'astro';
 /**
  * src/middleware.ts — Inicializa D1Adapter + auth + RBAC en /fleet/* y /api/fleet/*.
  *
@@ -13,6 +14,7 @@ import { defineMiddleware } from 'astro:middleware';
  */
 import { env } from 'cloudflare:workers';
 import type { D1Database, KVNamespace } from '@cloudflare/workers-types';
+import { withSecurityHeaders } from './lib/securityHeaders.js';
 import { getMemoryAdapter, initD1Adapter, setStorageAdapter } from './lib/domain.js';
 import { can, rbacEntityFor } from './lib/rbac.js';
 import { ONBOARDED_COOKIE, ONBOARDING_PATH } from './lib/prefs.config';
@@ -174,6 +176,24 @@ function isProduction(): boolean {
 }
 
 export const onRequest = defineMiddleware(async (context, next) => {
+  // Cabeceras de seguridad (HSTS, nosniff, Referrer-Policy, X-Frame-Options,
+  // Permissions-Policy) sobre TODA respuesta: exito, redirect 303, 401/403/404/402 y
+  // errores. Por eso el envoltorio va por fuera del handler: los `return` tempranos de
+  // abajo (auth, demo, RBAC) no pasarian por aqui si no.
+  //
+  // La CSP la pone Astro (`security.csp` en astro.config.mjs) con los hashes de los
+  // scripts inline; esto solo respeta la que venga y cubre con una de respaldo lo que no
+  // pasa por ahi (404/500 del framework y respuestas no-HTML).
+  //
+  // Excepcion: los documentos del vault (GET /r2/...?inline=1) se embeben en un <iframe>
+  // del propio origen en el lector de manuales, asi que para esa ruta el framing se limita
+  // a `'self'`/SAMEORIGIN en vez de `'none'`/DENY. Ver src/lib/securityHeaders.ts.
+  const { pathname } = context.url;
+  const sameOriginFraming = pathname === '/r2' || pathname.startsWith('/r2/');
+  return withSecurityHeaders(await handleRequest(context, next), { sameOriginFraming });
+});
+
+async function handleRequest(context: APIContext, next: MiddlewareNext): Promise<Response> {
   const { pathname } = context.url;
 
   // --- D1 init ---
@@ -416,4 +436,4 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   return response;
-});
+}

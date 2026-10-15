@@ -10,13 +10,14 @@
  *
  * Tests de ESTRUCTURA sobre el fuente: el vocabulario real lo fijan los tests de lib/market.ts.
  */
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MARKETS } from '../src/lib/market';
 import { VEHICLE_TYPE_LABELS, vehicleDisplayName, vehicleTypeLabel } from '../src/lib/vehicleCatalog';
+import { readWithRaw } from './helpers/inlineSource';
 
-const read = (rel: string) => readFileSync(join(process.cwd(), rel), 'utf8');
+// Los scripts inline de estas plantillas viven en src/lib/inline/*.js (ver el helper).
+const read = (rel: string) => readWithRaw(join(process.cwd(), rel));
 
 describe('N4 · el camion de volco se llama como en el mercado', () => {
   it('el tipo guardado "volqueta" se muestra "Tolva" en Chile y "Volqueta" en Colombia', () => {

@@ -128,7 +128,7 @@ jobs:
         # Skipped by the default `test` script; runs here after the build.
         # Without a build it fails instead of being skipped.
         working-directory: packages/app-pwa
-        run: pnpm exec vitest run tests/deploy-bundle-safety.test.ts
+        run: pnpm exec vitest run tests/deploy-bundle-safety.test.ts tests/csp-built-bundle.test.ts
 
   public-tree:
     name: Public tree has no infra ids or secrets

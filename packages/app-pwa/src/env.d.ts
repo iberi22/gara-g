@@ -1,6 +1,16 @@
 /// <reference path="../.astro/types.d.ts" />
 /// <reference types="astro/client" />
 
+/**
+ * Importar un fichero como texto (`import script from './x.js?raw'`). Lo usan los
+ * `<script is:inline set:html={...}>` de la app: el TEXTO tiene que ser una constante del
+ * build para que la CSP pueda llevar su SHA-256 (ver src/lib/csp.ts).
+ */
+declare module '*?raw' {
+  const content: string;
+  export default content;
+}
+
 declare namespace App {
   interface Locals {
     user?: { email: string; role: string };

@@ -3,11 +3,12 @@
  * 11, 20, 21). Es un test de ESTRUCTURA: Astro no se puede montar en vitest. El comportamiento en
  * navegador (foco, toasts, CLS, lang en vivo) lo cubren tests/e2e/u3-*.spec.ts.
  */
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readWithRaw } from './helpers/inlineSource';
 
-const read = (rel: string) => readFileSync(join(process.cwd(), 'src', rel), 'utf8');
+// Los scripts inline de estas plantillas viven en src/lib/inline/*.js (ver el helper).
+const read = (rel: string) => readWithRaw(join(process.cwd(), 'src', rel));
 
 describe('issue 21 — lang y titulos en espanol', () => {
   for (const f of ['pages/alerts/index.astro', 'pages/documents/index.astro']) {

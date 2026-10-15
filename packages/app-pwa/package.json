@@ -12,7 +12,7 @@
     "preview": "astro preview",
     "astro": "astro",
     "check": "astro check",
-    "test": "vitest run --exclude '**/deploy-bundle-safety.test.ts'"
+    "test": "vitest run --exclude '**/deploy-bundle-safety.test.ts' --exclude '**/csp-built-bundle.test.ts'"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^14.3.4",

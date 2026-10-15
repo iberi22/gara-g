@@ -3,9 +3,11 @@
  * PrefsBootstrap — oculta los modulos y paneles desactivados ANTES de pintar (sin parpadeo).
  * Igual que ThemeBootstrap: lee localStorage y escribe una hoja de estilos para los
  * elementos con data-pref-module / data-pref-panel. Ver lib/swal-prefs/bootstrap.ts.
+ *
+ * El texto del script sale de lib/inline/prefs-bootstrap.ts, que es tambien de donde
+ * src/lib/csp.ts saca su SHA-256: una sola copia, un solo hash.
  */
-import { prefsBootstrapScript } from '../../lib/swal-prefs/bootstrap';
-import { PREFS_STORAGE_KEY } from '../../lib/prefs.config';
+import { PREFS_BOOTSTRAP_SCRIPT } from '../../lib/inline/prefs-bootstrap';
 ---
 
-<script is:inline set:html={prefsBootstrapScript({ storageKey: PREFS_STORAGE_KEY })} />
+<script is:inline set:html={PREFS_BOOTSTRAP_SCRIPT} />
