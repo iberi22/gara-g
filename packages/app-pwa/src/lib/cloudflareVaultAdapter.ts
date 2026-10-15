@@ -23,6 +23,21 @@ export type CloudflareEnv = {
   SWAL_KV?: { get(k: string): Promise<string | null>; put(k: string, v: string): Promise<void> };
 };
 
+export class DeviceShareStoreUnavailable extends Error {
+  constructor(message = 'Device share store unavailable') {
+    super(message);
+    this.name = 'DeviceShareStoreUnavailable';
+  }
+}
+
+function txDone(tx: IDBTransaction): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error('aborted'));
+    tx.onabort = () => reject(tx.error ?? new Error('aborted'));
+  });
+}
+
 export class CloudflareVaultAdapter implements StorageAdapter {
   private env: CloudflareEnv;
   private appId: string;
@@ -47,33 +62,54 @@ export class CloudflareVaultAdapter implements StorageAdapter {
   private async getDBKey(db: IDBDatabase): Promise<CryptoKey> {
     if (this._masterKey) return this._masterKey;
     if (this._keyInitPromise) return this._keyInitPromise;
-    this._keyInitPromise = (async () => {
-      const existingKey = await new Promise<CryptoKey | undefined>((resolve, reject) => {
-        const tx = db.transaction('keys', 'readonly');
-        const req = tx.objectStore('keys').get('master-key');
+    const readKey = async (): Promise<CryptoKey | undefined> => {
+      const tx = db.transaction('keys', 'readonly');
+      const req = tx.objectStore('keys').get('master-key');
+      const done = txDone(tx);
+      const found = await new Promise<CryptoKey | undefined>((resolve, reject) => {
         req.onsuccess = () => resolve(req.result?.key);
         req.onerror = () => reject(req.error);
       });
-
-      if (existingKey) {
-        this._masterKey = existingKey;
-        return existingKey;
-      }
-
-      if (typeof crypto === 'undefined' || !crypto.subtle) throw new Error('Crypto API not available');
-      const key = await crypto.subtle.generateKey(
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['encrypt', 'decrypt']
-      );
-      this._masterKey = key;
-
-      return new Promise<CryptoKey>((resolve, reject) => {
+      await done;
+      return found;
+    };
+    this._keyInitPromise = (async () => {
+      try {
+        if (typeof crypto === 'undefined' || !crypto.subtle) throw new Error('Crypto API not available');
+        // El candidato se genera FUERA de la transaccion (IDB se autocierra si se espera otra cosa dentro).
+        const candidate = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
         const tx = db.transaction('keys', 'readwrite');
-        const req = tx.objectStore('keys').put({ id: 'master-key', key });
-        req.onsuccess = () => resolve(key);
-        req.onerror = () => reject(req.error);
-      });
+        const store = tx.objectStore('keys');
+        let chosen: CryptoKey = candidate;
+        let conflict = false;
+        const done = txDone(tx);
+        done.catch(() => {});
+        const getReq = store.get('master-key');
+        getReq.onsuccess = () => {
+          if (getReq.result?.key) {
+            chosen = getReq.result.key;
+          } else {
+            const addReq = store.add({ id: 'master-key', key: candidate });
+            addReq.onerror = (ev) => {
+              if (addReq.error?.name === 'ConstraintError') {
+                conflict = true;
+                ev.preventDefault();
+              }
+            };
+          }
+        };
+        await done;
+        if (conflict) {
+          const again = await readKey();
+          if (!again) throw new Error('master-key missing after ConstraintError');
+          chosen = again;
+        }
+        this._masterKey = chosen;
+        return chosen;
+      } catch (e) {
+        this._keyInitPromise = null;
+        throw e;
+      }
     })();
     return this._keyInitPromise;
   }
@@ -94,21 +130,27 @@ export class CloudflareVaultAdapter implements StorageAdapter {
 
   private async saveToIndexedDB(id: string, s: { device: any; recovery: any }) {
     const db = await this.openDB();
-    if (!db) return;
+    if (!db) throw new DeviceShareStoreUnavailable('IndexedDB no disponible: el share del dispositivo no puede persistirse');
     try {
       const key = await this.getDBKey(db);
-      const iv = typeof crypto !== 'undefined' ? crypto.getRandomValues(new Uint8Array(12)) : new Uint8Array(12);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
       const data = new TextEncoder().encode(JSON.stringify(s));
       const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
 
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction('shares', 'readwrite');
-        const req = tx.objectStore('shares').put({ id, iv, data: encrypted });
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-      });
+      const tx = db.transaction('shares', 'readwrite');
+      tx.objectStore('shares').put({ id, iv, data: encrypted });
+      await txDone(tx);
     } finally {
       db.close();
+    }
+    // Releer tras el commit: si no se puede leer, la persistencia no es fiable.
+    const back = await this.loadFromIndexedDB(id);
+    if (!back) throw new DeviceShareStoreUnavailable('El share del dispositivo no se pudo releer tras guardarlo');
+    // Best-effort: pedir almacenamiento persistente, sin bloquear ni lanzar.
+    try {
+      void Promise.resolve(navigator.storage?.persist?.()).catch(() => {});
+    } catch {
+      /* ignorar */
     }
   }
 
@@ -145,13 +187,22 @@ export class CloudflareVaultAdapter implements StorageAdapter {
     this.deviceStore = store;
   }
 
-  async recoveryShare(id: string): Promise<any> {
-    const s = await this.deviceStore.load(id);
+  private kvShareKey(entity: string, instanceId: string, id: string): string {
+    return JSON.stringify(['share', this.appId, entity, instanceId, id]);
+  }
+
+  // La clave incluye app, entidad e instancia: dos registros con el mismo id no comparten shares.
+  private shareKey(entity: string, instanceId: string, id: string): string {
+    return JSON.stringify([this.appId, entity, instanceId, id]);
+  }
+
+  async recoveryShare(entity: string, instanceId: string, id: string): Promise<any> {
+    const s = await this.deviceStore.load(this.shareKey(entity, instanceId, id));
     return s?.recovery ?? null;
   }
 
-  private async localShares(id: string): Promise<any[]> {
-    const s = await this.deviceStore.load(id);
+  private async localShares(entity: string, instanceId: string, id: string): Promise<any[]> {
+    const s = await this.deviceStore.load(this.shareKey(entity, instanceId, id));
     if (!s) return [];
     return [s.device, s.recovery].filter(Boolean);
   }
@@ -192,12 +243,21 @@ export class CloudflareVaultAdapter implements StorageAdapter {
       const kvShare = cloudBoundShare(pack.shares ?? []);
       assertCloudSharesSafe(kvShare ? 1 : 0);
 
-      // The createSealedPack generates a new DEK and shares.
-      // Saving these to device store securely.
-      await this.deviceStore.save(record.id, {
-        device: pack.shares?.[0] ?? null,
-        recovery: pack.shares?.[1] ?? null,
-      });
+      // Persistir los shares del dispositivo ANTES de cualquier escritura en la nube (fail closed).
+      try {
+        const key = this.shareKey(entity, record.instance_id, record.id);
+        await this.deviceStore.save(key, {
+          device: pack.shares?.[0] ?? null,
+          recovery: pack.shares?.[1] ?? null,
+        });
+        // Relectura obligatoria, también para un store inyectado: si no hay share duradero, no se sube nada.
+        const back = await this.deviceStore.load(key);
+        if (!back || JSON.stringify(back) !== JSON.stringify({ device: pack.shares?.[0] ?? null, recovery: pack.shares?.[1] ?? null })) {
+          throw new DeviceShareStoreUnavailable('El share del dispositivo no se pudo releer tras guardarlo');
+        }
+      } catch (e) {
+        throw e instanceof DeviceShareStoreUnavailable ? e : new DeviceShareStoreUnavailable(e instanceof Error ? e.message : String(e));
+      }
 
       if (this.env.SWAL_R2?.put) await this.env.SWAL_R2.put(r2Key, JSON.stringify(cloudPack), { httpMetadata: { contentType: 'application/json' } });
       if (this.env.SWAL_D1?.prepare) {
@@ -210,9 +270,10 @@ export class CloudflareVaultAdapter implements StorageAdapter {
       }
       // UN solo share en KV (el índice 3)
       if (this.env.SWAL_KV?.put && kvShare) {
-        await this.env.SWAL_KV.put(`share:${this.appId}:${record.id}`, JSON.stringify([kvShare])).catch(() => {});
+        await this.env.SWAL_KV.put(this.kvShareKey(entity, record.instance_id, record.id), JSON.stringify([kvShare])).catch(() => {});
       }
     } catch (e) {
+      if (e instanceof DeviceShareStoreUnavailable) throw e;
       console.warn('[vaultAdapter] cloud create fallback to mem', e);
       this.memKey(entity).set(record.id, record);
     }
@@ -236,8 +297,8 @@ export class CloudflareVaultAdapter implements StorageAdapter {
               const obj = await this.env.SWAL_R2.get(row.r2_key);
               if (!obj) continue;
               const pack = JSON.parse(await obj.text());
-              const kvShares: any = JSON.parse((await this.env.SWAL_KV?.get(`share:${this.appId}:${row.id}`)) ?? 'null');
-              const deviceShares = await this.localShares(row.id);
+              const kvShares: any = JSON.parse((await this.env.SWAL_KV?.get(this.kvShareKey(entity, row.instance_id ?? instanceId, row.id))) ?? 'null');
+              const deviceShares = await this.localShares(entity, row.instance_id ?? instanceId, row.id);
               const shares = [...deviceShares, ...(kvShares ?? [])];
               if (shares.length < 2) continue;
               const plain = await unpackSealedPack(pack, shares.slice(0, 2));
@@ -261,8 +322,8 @@ export class CloudflareVaultAdapter implements StorageAdapter {
       const obj = await this.env.SWAL_R2?.get(r2Key);
       if (!obj) return mem;
       const pack = JSON.parse(await obj.text());
-      const kvShares: any = JSON.parse((await this.env.SWAL_KV?.get(`share:${this.appId}:${id}`)) ?? 'null');
-      const deviceShares = await this.localShares(id);
+      const kvShares: any = JSON.parse((await this.env.SWAL_KV?.get(this.kvShareKey(entity, instanceId, id))) ?? 'null');
+      const deviceShares = await this.localShares(entity, instanceId, id);
       const shares = [...deviceShares, ...(kvShares ?? [])];
       if (shares.length < 2) return mem;
       const plain = await unpackSealedPack(pack, shares.slice(0, 2));
@@ -290,7 +351,7 @@ export class CloudflareVaultAdapter implements StorageAdapter {
       const r2Key = this.r2Key(entity, id, instanceId);
       await this.env.SWAL_R2?.delete(r2Key);
       await this.env.SWAL_D1?.prepare('DELETE FROM sealed_meta WHERE id=? AND appId=?').bind(id, this.appId).run().catch(() => {});
-      await this.env.SWAL_KV?.put(`share:${this.appId}:${id}`, '').catch(() => {});
+      await this.env.SWAL_KV?.put(this.kvShareKey(entity, instanceId, id), '').catch(() => {});
     } catch {}
     return true;
   }

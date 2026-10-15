@@ -5,8 +5,8 @@
 // reparto es 2-de-3, con lo que habia en R2 se reconstruia la DEK. Ahora R2 guarda el pack sin
 // shares, KV guarda un unico share (x=3) y los shares x=1 (dispositivo) y x=2 (recuperacion) no
 // salen del equipo; por tanto la nube entera suma 1 share y no alcanza el umbral.
-import { describe, it, expect, beforeEach } from 'vitest';
-import { CloudflareVaultAdapter, type CloudflareEnv } from './cloudflareVaultAdapter';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { CloudflareVaultAdapter, DeviceShareStoreUnavailable, type CloudflareEnv } from './cloudflareVaultAdapter';
 import { reconstructDEK, unpackSealedPack } from '@swal/vault/sealedPack.js';
 // Polyfill local para crypto en vitest
 import { webcrypto } from 'node:crypto';
@@ -48,8 +48,19 @@ describe('frontera E2EE — la nube no puede descifrar', () => {
     // Limpiar IndexedDB antes de cada test para el nuevo store persistente
     const dbs = await indexedDB.databases();
     for (const db of dbs) {
-      if (db.name) indexedDB.deleteDatabase(db.name);
+      if (!db.name) continue;
+      await new Promise<void>((resolve, reject) => {
+        const req = indexedDB.deleteDatabase(db.name!);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+        req.onblocked = () => {};
+      });
     }
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('R2 guarda el pack SIN shares (antes iban las 3)', async () => {
@@ -120,7 +131,7 @@ describe('frontera E2EE — la nube no puede descifrar', () => {
     const adapter = new CloudflareVaultAdapter(env, 'app-e2ee');
     await adapter.create('item', rec() as any);
 
-    const recovery = await adapter.recoveryShare('r1');
+    const recovery = await adapter.recoveryShare('item', 'inst1', 'r1');
     expect(recovery?.index).toBe(2);
 
     // En ningun valor de la nube puede aparecer el share de recuperacion.
@@ -147,7 +158,7 @@ describe('frontera E2EE — la nube no puede descifrar', () => {
     });
     const tx = db.transaction('shares', 'readonly');
     const val = await new Promise<any>((resolve, reject) => {
-      const req = tx.objectStore('shares').get('r1');
+      const req = tx.objectStore('shares').get(JSON.stringify(['app-e2ee', 'item', 'inst1', 'r1']));
       req.onerror = () => reject(req.error);
       req.onsuccess = () => resolve(req.result);
     });
@@ -176,5 +187,99 @@ describe('frontera E2EE — la nube no puede descifrar', () => {
     ajeno.setDeviceShareStore(adapter['deviceStore']);
     const gotCloud = await ajeno.get('item', 'r1', 'inst1');
     expect(gotCloud?.secreto).toBe('v1');
+  });
+
+  describe('persistencia durable del share de dispositivo (fail closed)', () => {
+    const countKeys = async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const req = indexedDB.open('vault-device-shares');
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => resolve(req.result);
+      });
+      const n = await new Promise<number>((resolve, reject) => {
+        const req = db.transaction('keys', 'readonly').objectStore('keys').count();
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => resolve(req.result);
+      });
+      db.close();
+      return n;
+    };
+
+    it('abortar la transaccion de shares hace fallar create y no escribe en R2 ni KV', async () => {
+      const { env, r2, kv } = fakeCloud();
+      const r2Put = vi.spyOn(env.SWAL_R2!, 'put');
+      const kvPut = vi.spyOn(env.SWAL_KV!, 'put');
+      const orig = IDBObjectStore.prototype.put;
+      vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, ...a: any[]) {
+        const r = (orig as any).apply(this, a);
+        if (this.name === 'shares') this.transaction.abort();
+        return r;
+      } as any);
+      const adapter = new CloudflareVaultAdapter(env, 'app-e2ee');
+      await expect(adapter.create('item', rec() as any)).rejects.toThrow();
+      expect(r2Put).toHaveBeenCalledTimes(0);
+      expect(kvPut).toHaveBeenCalledTimes(0);
+      expect(r2.size).toBe(0);
+      expect(kv.size).toBe(0);
+    });
+
+    it('sin indexedDB create rechaza con DeviceShareStoreUnavailable y no sube nada', async () => {
+      const { env } = fakeCloud();
+      const r2Put = vi.spyOn(env.SWAL_R2!, 'put');
+      const kvPut = vi.spyOn(env.SWAL_KV!, 'put');
+      vi.stubGlobal('indexedDB', undefined);
+      const adapter = new CloudflareVaultAdapter(env, 'app-e2ee');
+      await expect(adapter.create('item', rec() as any)).rejects.toBeInstanceOf(DeviceShareStoreUnavailable);
+      expect(r2Put).toHaveBeenCalledTimes(0);
+      expect(kvPut).toHaveBeenCalledTimes(0);
+    });
+
+    it('un deviceStore inyectado cuyo save rechaza hace fallar create y no sube nada', async () => {
+      const { env } = fakeCloud();
+      const r2Put = vi.spyOn(env.SWAL_R2!, 'put');
+      const kvPut = vi.spyOn(env.SWAL_KV!, 'put');
+      const adapter = new CloudflareVaultAdapter(env, 'app-e2ee');
+      adapter.setDeviceShareStore({ save: async () => { throw new Error('disco lleno'); }, load: async () => null });
+      await expect(adapter.create('item', rec() as any)).rejects.toThrow();
+      expect(r2Put).toHaveBeenCalledTimes(0);
+      expect(kvPut).toHaveBeenCalledTimes(0);
+    });
+
+    it('la subida ocurre solo tras el commit del share de dispositivo', async () => {
+      const { env } = fakeCloud();
+      const origPut = env.SWAL_R2!.put;
+      let visto: unknown = 'no-ejecutado';
+      env.SWAL_R2!.put = async (k: string, v: string, o?: any) => {
+        const otro = new CloudflareVaultAdapter(env, 'app-e2ee');
+        visto = await otro.recoveryShare('item', 'inst1', 'r1');
+        return origPut(k, v, o);
+      };
+      const adapter = new CloudflareVaultAdapter(env, 'app-e2ee');
+      await adapter.create('item', rec() as any);
+      expect(visto).not.toBeNull();
+      expect(visto).not.toBe('no-ejecutado');
+    });
+
+    it('dos adapters concurrentes producen una sola master-key y un tercero descifra ambos', async () => {
+      const { env } = fakeCloud();
+      const a = new CloudflareVaultAdapter(env, 'app-e2ee');
+      const b = new CloudflareVaultAdapter(env, 'app-e2ee');
+      await Promise.all([
+        a.create('item', { ...rec(), id: 'ra', secreto: 'A' } as any),
+        b.create('item', { ...rec(), id: 'rb', secreto: 'B' } as any),
+      ]);
+      expect(await countKeys()).toBe(1);
+      const c = new CloudflareVaultAdapter(env, 'app-e2ee');
+      expect((await c.get('item', 'ra', 'inst1'))?.secreto).toBe('A');
+      expect((await c.get('item', 'rb', 'inst1'))?.secreto).toBe('B');
+    });
+
+    it('round trip tras reinicio: un adapter nuevo lee lo escrito antes', async () => {
+      const { env } = fakeCloud();
+      await new CloudflareVaultAdapter(env, 'app-e2ee').create('item', rec() as any);
+      const nuevo = new CloudflareVaultAdapter(env, 'app-e2ee');
+      expect((await nuevo.get('item', 'r1', 'inst1'))?.secreto).toBe(SECRETO);
+      expect((await nuevo.recoveryShare('item', 'inst1', 'r1'))?.index).toBe(2);
+    });
   });
 });
