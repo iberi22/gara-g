@@ -111,6 +111,111 @@
       "tests": [
         "packages/app-pwa/tests/e2e/guest-demo-chile.spec.ts"
       ]
+    },
+    {
+      "id": "s0_2_room_key",
+      "title": "S0-2 Room key owner restriction",
+      "progress_pct": 100,
+      "status": "delivered",
+      "tests": [
+        "packages/app-pwa/tests/mesh-room-key-api.test.ts"
+      ],
+      "evidence": "PR #27 (commit a9dabd4): restrict room-key distribution to tenant owner admin accounts; 18 unit tests passing"
+    },
+    {
+      "id": "onboarding_needs",
+      "title": "Onboarding needs selection for modules and panels",
+      "progress_pct": 100,
+      "status": "delivered",
+      "tests": [
+        "packages/app-pwa/src/lib/swal-prefs/needs.test.ts",
+        "packages/app-pwa/src/lib/swal-prefs/OnboardingWizard.test.ts",
+        "packages/app-pwa/tests/e2e/onboarding.spec.ts"
+      ],
+      "evidence": "PR #28 (commit aa82579): Idempotent applyNeeds mapping and onboarding wizard UI; 18 unit tests passing"
+    },
+    {
+      "id": "export_my_data",
+      "title": "Export my data (JSON and SQL dumps)",
+      "progress_pct": 100,
+      "status": "delivered",
+      "tests": [
+        "packages/app-pwa/src/lib/local/exportMyData.test.ts"
+      ],
+      "evidence": "PR #30 (commit 4bbe1be): Client-side plain JSON and SQLite dump export without cloud dependencies; unit test passing"
+    },
+    {
+      "id": "vault_shares_local_persistence",
+      "title": "S0-1 Vault shares local persistence (fail closed)",
+      "progress_pct": 100,
+      "status": "delivered",
+      "tests": [
+        "packages/app-pwa/src/lib/e2eeCloudBoundary.test.ts"
+      ],
+      "evidence": "PR #31 (commit 8a50e95): Restrict cloudflareVaultAdapter to one Shamir share and persist locally before cloud write; 14 tests passing"
+    },
+    {
+      "id": "guest_allowlist_exact",
+      "title": "G1/G1a Guest allowlist by exact paths",
+      "progress_pct": 100,
+      "status": "delivered",
+      "tests": [
+        "packages/app-pwa/tests/page-auth-allowlist.test.ts",
+        "packages/app-pwa/tests/middleware-auth.test.ts"
+      ],
+      "evidence": "PR #33 (commit 1cec6de): Exact allowlist for 15 guest fleet pages without requiring account; 94 allowlist tests passing"
+    },
+    {
+      "id": "r2_strip_device_shares",
+      "title": "S0-1b Strip device shares before R2 pack upload",
+      "progress_pct": 100,
+      "status": "delivered",
+      "tests": [
+        "packages/app-pwa/tests/sealedPack.test.ts"
+      ],
+      "evidence": "PR #34 (commit 08eb5d9): Omit vault shares when generating sealed packs for R2; 5 tests passing"
+    },
+    {
+      "id": "vault_recovery_kit",
+      "title": "Vault recovery kit to restore device shares",
+      "progress_pct": 100,
+      "status": "delivered",
+      "tests": [
+        "packages/app-pwa/src/lib/vaultRecoveryKit.test.ts"
+      ],
+      "evidence": "PR #35 (commit e3a4844): Recovery kit generation and parsing to restore device Shamir shares; 12 tests passing"
+    },
+    {
+      "id": "device_protection_pin_passkey",
+      "title": "G2 PIN/passkey device protection",
+      "progress_pct": 20,
+      "status": "in_progress",
+      "tests": [],
+      "evidence": "Jules session, PR pending (goal-g2-r2)"
+    },
+    {
+      "id": "local_ai_aui",
+      "title": "G3 Local AI in browser + AUI",
+      "progress_pct": 20,
+      "status": "in_progress",
+      "tests": [],
+      "evidence": "Jules session, PR pending (goal-g3-r2)"
+    },
+    {
+      "id": "inventory_entities",
+      "title": "G4-1 Inventory entities",
+      "progress_pct": 20,
+      "status": "in_progress",
+      "tests": [],
+      "evidence": "Jules session, PR pending (apps-w4-gara)"
+    },
+    {
+      "id": "e2e_tester_army",
+      "title": "E2E tester-army fleet test suite",
+      "progress_pct": 15,
+      "status": "in_progress",
+      "tests": [],
+      "evidence": "Jules session, PR pending (e2e-ta-gara)"
     }
   ]
 }
