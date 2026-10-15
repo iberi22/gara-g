@@ -97,7 +97,7 @@ function formatSize(bytes?: number): string {
               method="post"
               action="/api/fleet/files"
               class="upload-item-delete-form"
-              onsubmit={`return confirm('¿Eliminar ${f.name.replace(/'/g, "\\'")}?')`}
+              data-confirm={`¿Eliminar ${f.name}?`}
             >
               <input type="hidden" name="_method" value="DELETE" />
               <input type="hidden" name="key" value={f.key} />
@@ -186,6 +186,11 @@ function formatSize(bytes?: number): string {
 </style>
 
 <script>
+  import { installConfirmSubmit } from '../lib/confirmSubmit';
+
+  // Confirmacion del borrado (data-confirm): la CSP bloquea `onsubmit=` en el atributo.
+  installConfirmSubmit();
+
   // Show selected filename
   //
   // SPA-safe (ViewTransitions): este es un script de modulo, se ejecuta una vez.

@@ -199,7 +199,7 @@ function formatValue(value: unknown, format?: string): string {
                       method="POST"
                       action={`/api/fleet/${entity}?id=${row.id}&instanceId=${instanceId}&_method=DELETE`}
                       class="g-action-form"
-                      onsubmit="return confirm('¿Eliminar este registro? Esta acción no se puede deshacer.')"
+                      data-confirm="¿Eliminar este registro? Esta acción no se puede deshacer."
                       data-testid={`${testId}-delete-${row.id}`}
                     >
                       <input type="hidden" name="_method" value="DELETE" />
@@ -282,6 +282,12 @@ function formatValue(value: unknown, format?: string): string {
     </div>
   )}
 </div>
+
+<script>
+  // Confirmacion de los formularios con data-confirm (la CSP bloquea `onsubmit=`).
+  import { installConfirmSubmit } from '../lib/confirmSubmit';
+  installConfirmSubmit();
+</script>
 
 <script is:inline type="application/json" data-gtable-config set:html={gtableConfigJson}></script>
 <script is:inline set:html={genericTableScript} />

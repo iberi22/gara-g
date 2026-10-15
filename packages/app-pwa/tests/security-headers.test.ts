@@ -14,7 +14,7 @@
  *   - el respaldo no lleva `'unsafe-eval'` ni `'unsafe-inline'` en `script-src`,
  *   - `public/_headers` no se desincroniza de SECURITY_HEADERS.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -174,6 +174,15 @@ describe('cabeceras de seguridad', () => {
       expect(headers, `falta ${name} en public/_headers`).toContain(`${name}: ${value}`);
     }
     expect(headers).toContain(`Content-Security-Policy: ${CSP_NONE}`);
+  });
+
+  it('ninguna plantilla .astro usa manejadores en atributos (la CSP los bloquea)', () => {
+    // `onsubmit="return confirm(...)"` bloqueado = el formulario de borrar se envia sin
+    // preguntar. Para eso esta `data-confirm` (src/lib/confirmSubmit.ts).
+    const dir = join(process.cwd(), 'src');
+    const astro = (readdirSync(dir, { recursive: true }) as string[]).filter((f) => f.endsWith('.astro'));
+    const con = astro.filter((f) => /\son[a-z]+=("|'|\{`)/.test(readFileSync(join(dir, f), 'utf-8')));
+    expect(con).toEqual([]);
   });
 
   it('public/_headers: la CSP va por ruta y no cierra los fetch() de los workers', () => {
