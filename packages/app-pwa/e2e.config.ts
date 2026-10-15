@@ -28,6 +28,8 @@ if (process.env.E2E_LIVE_URL) {
 }
 
 export default {
-  tests: ['e2e-ta/**/*.e2e.ts', '!e2e-ta/findings/**'],
+  tests: process.env.E2E_LIVE_URL
+    ? ['e2e-ta/**/*.e2e.ts', '!e2e-ta/findings/**', '!e2e-ta/local/**']
+    : ['e2e-ta/**/*.e2e.ts', '!e2e-ta/findings/**'],
   targets,
 } satisfies E2EConfig;
