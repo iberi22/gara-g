@@ -55,12 +55,12 @@ Target execution counts measured on `origin/main` at `1cec6de`:
 | --- | --- | --- |
 | 1. landing opens with the main heading | PASSED | PASSED |
 | 2. guest mode opens the fleet area without an account | PASSED | PASSED |
-| 3. onboarding `/fleet/bienvenida` advances through its steps | PASSED | PASSED |
-| 4. a guest can create a vehicle and see it listed | PASSED | PASSED |
+| 3. onboarding `/fleet/bienvenida` advances through its steps (mutating, `local/`) | PASSED | SKIPPED |
+| 4. a guest can create a vehicle and see it listed (mutating, `local/`) | PASSED | SKIPPED |
 | 5. offline: app shell renders with network blocked | PASSED | PASSED |
 | 6. PWA manifest and service worker are served | PASSED | PASSED |
 
-**Total**: 6/6 passed (local), 6/6 passed (live). Zero real app bugs found.
+**Total**: 6/6 passed (local), 4/4 passed (live). Zero real app bugs found.
 
 ---
 
