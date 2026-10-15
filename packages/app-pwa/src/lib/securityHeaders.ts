@@ -46,6 +46,13 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
  */
 export interface SecurityHeaderOptions {
   sameOriginFraming?: boolean;
+  /**
+   * `astro dev` no emite `security.csp` (solo el build lo hace). Sin esta bandera el
+   * respaldo `script-src 'self'` caeria sobre cada pagina de dev y bloquearia todos sus
+   * scripts inline (el E2E de CI corre sobre `astro dev`). En dev el HTML va sin CSP, como
+   * sin este cambio; JSON y demas respuestas siguen con CSP_NONE.
+   */
+  dev?: boolean;
 }
 
 /**
@@ -157,8 +164,9 @@ export function withSecurityHeaders(
   const headers = new Headers(response.headers);
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) headers.set(name, value);
   if (options.sameOriginFraming) headers.set('X-Frame-Options', 'SAMEORIGIN');
-  if (!headers.has('Content-Security-Policy')) {
-    headers.set('Content-Security-Policy', fallbackCsp(isHtmlResponse(response), options));
+  const isHtml = isHtmlResponse(response);
+  if (!headers.has('Content-Security-Policy') && !(options.dev && isHtml)) {
+    headers.set('Content-Security-Policy', fallbackCsp(isHtml, options));
   }
   return new Response(response.body, {
     status: response.status,

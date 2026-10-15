@@ -190,7 +190,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // a `'self'`/SAMEORIGIN en vez de `'none'`/DENY. Ver src/lib/securityHeaders.ts.
   const { pathname } = context.url;
   const sameOriginFraming = pathname === '/r2' || pathname.startsWith('/r2/');
-  return withSecurityHeaders(await handleRequest(context, next), { sameOriginFraming });
+  return withSecurityHeaders(await handleRequest(context, next), {
+    sameOriginFraming,
+    dev: import.meta.env.DEV,
+  });
 });
 
 async function handleRequest(context: APIContext, next: MiddlewareNext): Promise<Response> {

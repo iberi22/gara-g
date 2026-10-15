@@ -17,7 +17,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { env } from 'cloudflare:workers';
 
 import { onRequest } from '../src/middleware.js';
@@ -89,10 +89,13 @@ describe('cabeceras de seguridad', () => {
   });
 
   it('si un HTML llega sin CSP se le pone el respaldo, sin unsafe-inline', async () => {
+    // Como en el build: en dev (`astro dev`, y vitest) el HTML va sin respaldo.
+    vi.stubEnv('DEV', false);
     const res = await onRequest(ctx('/login'), async () => new Response('<html>404</html>', {
       status: 404,
       headers: { 'Content-Type': 'text/html' },
     }));
+    vi.unstubAllEnvs();
     const csp = res.headers.get('Content-Security-Policy') ?? '';
     expect(csp).toBe(CSP_HTML_FALLBACK);
     expect(csp).toContain("script-src 'self'");
@@ -209,6 +212,27 @@ describe('cabeceras de seguridad', () => {
     for (const r of ['/favicon.svg', '/icons/*', '/manifest.json']) {
       expect(bloques.get(r)?.['Content-Security-Policy'], r).toBe(CSP_NONE);
     }
+  });
+});
+
+describe('modo dev (astro dev no emite security.csp)', () => {
+  it('el HTML de dev no recibe la CSP de respaldo, que bloquearia sus scripts inline', () => {
+    const res = withSecurityHeaders(
+      new Response('<!doctype html><script>1</script>', { headers: { 'Content-Type': 'text/html' } }),
+      { dev: true },
+    );
+    expect(res.headers.get('Content-Security-Policy')).toBeNull();
+    expect(res.headers.get('Strict-Transport-Security')).toBe(SECURITY_HEADERS['Strict-Transport-Security']);
+  });
+
+  it('en dev el JSON sigue cerrado y en produccion el HTML lleva el respaldo', () => {
+    const json = withSecurityHeaders(
+      new Response('{}', { headers: { 'Content-Type': 'application/json' } }),
+      { dev: true },
+    );
+    expect(json.headers.get('Content-Security-Policy')).toBe(CSP_NONE);
+    const html = withSecurityHeaders(new Response('<p>x</p>', { headers: { 'Content-Type': 'text/html' } }));
+    expect(html.headers.get('Content-Security-Policy')).toBe(CSP_HTML_FALLBACK);
   });
 });
 
