@@ -66,7 +66,8 @@ export const GUEST_ALLOWED_PATHS = [
 ] as const;
 
 export function isGuestAllowedPath(pathname: string): boolean {
-  if (pathname.startsWith('/fleet/garage/expediente/') && pathname.split('/').length === 5) return true;
+  // Un expediente exige un id no vacio: /fleet/garage/expediente/ sin id no es una ruta permitida.
+  if (/^\/fleet\/garage\/expediente\/[^/]+$/.test(pathname)) return true;
   return GUEST_ALLOWED_PATHS.some((p) => pathname === p);
 }
 
