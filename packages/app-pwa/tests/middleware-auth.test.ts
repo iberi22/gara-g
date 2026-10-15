@@ -261,7 +261,7 @@ describe('middleware: modo invitado (sin cuenta)', () => {
     },
   );
 
-  it.each(['/fleet', '/fleet/vehicles', '/fleet/garagex', '/fleet/aui', '/alerts'])(
+  it.each(['/fleet/vehicles', '/fleet/garagex', '/fleet/aui', '/alerts'])(
     '%s no es de invitado: lleva a cuenta-requerida',
     async (path) => {
       const res = await onRequest(ctx(path, GUEST), next);

@@ -108,7 +108,7 @@ describe('modo invitado: solo GUEST_ALLOWED_PATHS es accesible, y nada mas', () 
   it.each(rutas)('%s: accesible a invitados solo si esta en GUEST_ALLOWED_PATHS', async (ruta) => {
     // Las rutas dinamicas ([id]) se prueban con un valor concreto.
     const concreta = ruta.replace(/\[[^\]]+\]/g, 'x1');
-    const permitida = GUEST_ALLOWED_PATHS.some((g) => concreta === g || concreta.startsWith(`${g}/`));
+    const permitida = (concreta.startsWith('/fleet/garage/expediente/') && concreta.split('/').length === 5) || GUEST_ALLOWED_PATHS.some((g) => concreta === g);
     const res = await onRequest(ctxInvitado(concreta), next);
     if (permitida) {
       expect(res.status, `${concreta} deberia ser accesible a invitados`).toBe(200);
@@ -120,8 +120,36 @@ describe('modo invitado: solo GUEST_ALLOWED_PATHS es accesible, y nada mas', () 
 
   it('GUEST_ALLOWED_PATHS no contiene nada de mas', () => {
     expect([...GUEST_ALLOWED_PATHS].sort()).toEqual(
-      ['/fleet/ajustes', '/fleet/bienvenida', '/fleet/catalog', '/fleet/cuenta-requerida', '/fleet/garage', '/fleet/mercado', '/fleet/radar', '/fleet/respaldo'],
+      [
+        '/fleet',
+        '/fleet/ajustes',
+        '/fleet/bienvenida',
+        '/fleet/catalog',
+        '/fleet/cuenta-requerida',
+        '/fleet/garage',
+        '/fleet/garage/anunciantes',
+        '/fleet/garage/engine-lab',
+        '/fleet/garage/expediente/[id]',
+        '/fleet/garage/flota-demo-chile',
+        '/fleet/garage/lab',
+        '/fleet/mercado',
+        '/fleet/mercado/vender',
+        '/fleet/radar',
+        '/fleet/respaldo',
+      ].sort()
     );
+  });
+
+  it('cada pagina exacta esta permitida y los caminos desconocidos redirigen', async () => {
+    for (const p of GUEST_ALLOWED_PATHS) {
+      const concreta = p.replace(/\[[^\]]+\]/g, 'x1');
+      const res = await onRequest(ctxInvitado(concreta), next);
+      expect(res.status, `${concreta} debe ser accesible`).toBe(200);
+    }
+
+    const res2 = await onRequest(ctxInvitado('/fleet/garagex'), next);
+    expect(res2.status).toBe(303);
+    expect(res2.headers.get('Location')).toContain('/fleet/cuenta-requerida?from=/fleet/garagex');
   });
 });
 

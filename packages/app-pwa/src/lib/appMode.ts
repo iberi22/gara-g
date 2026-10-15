@@ -48,20 +48,27 @@ export const BACKUP_PATH = '/fleet/respaldo';
  * por defecto: tiene que funcionar sin D1 antes de añadirla.
  */
 export const GUEST_ALLOWED_PATHS = [
-  '/fleet/bienvenida',
-  '/fleet/garage',
-  '/fleet/catalog',
+  '/fleet',
   '/fleet/ajustes',
-  // Bandeja del mercado y radar V2V: corren sobre la mesh del navegador, no sobre D1. Publicar
-  // ofertas (/fleet/mercado/vender) cae bajo el prefijo, pero la pagina pide cuenta ella misma.
+  '/fleet/bienvenida',
+  '/fleet/catalog',
+  GUEST_BLOCKED_PATH,
+  '/fleet/garage',
+  '/fleet/garage/anunciantes',
+  '/fleet/garage/engine-lab',
+  '/fleet/garage/expediente/[id]',
+  '/fleet/garage/flota-demo-chile',
+  '/fleet/garage/lab',
   '/fleet/mercado',
+  '/fleet/mercado/vender',
   '/fleet/radar',
   BACKUP_PATH,
-  GUEST_BLOCKED_PATH,
 ] as const;
 
 export function isGuestAllowedPath(pathname: string): boolean {
-  return GUEST_ALLOWED_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  // Un expediente exige un id no vacio: /fleet/garage/expediente/ sin id no es una ruta permitida.
+  if (/^\/fleet\/garage\/expediente\/[^/]+$/.test(pathname)) return true;
+  return GUEST_ALLOWED_PATHS.some((p) => pathname === p);
 }
 
 /** Valor de una cookie en una cabecera `cookie` (o en `document.cookie`). */
