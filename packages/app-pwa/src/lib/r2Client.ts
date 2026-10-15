@@ -44,18 +44,19 @@ export class R2StorageClient {
     }
 
     const key = `packs/${pack.content_hash}.json`;
-    const packJson = JSON.stringify(pack);
+    const packJsonForCloud = JSON.stringify({ ...pack, shares: [] });
+    const packJsonForMemory = JSON.stringify(pack);
 
     const binding = this.r2Binding as
       | { put?: (k: string, v: string, opts?: unknown) => Promise<unknown> }
       | undefined;
     if (binding && typeof binding.put === 'function') {
-      await binding.put(key, packJson, {
+      await binding.put(key, packJsonForCloud, {
         httpMetadata: { contentType: 'application/json' },
       });
     }
 
-    this.memoryStore.set(pack.content_hash, JSON.parse(packJson));
+    this.memoryStore.set(pack.content_hash, JSON.parse(packJsonForMemory));
 
     return {
       contentHash: pack.content_hash,

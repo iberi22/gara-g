@@ -137,11 +137,22 @@ describe('SWAL-GARA 03.03 Telemetry Ingest + Sealed Pack R2', () => {
     const metadata = { vehicleId: 'veh-r2', timestamp: Date.now(), recordCount: 1 };
     const pack = await createSealedPack(payload, metadata);
 
-    const r2Client = new R2StorageClient({ bucketName: 'swal-r2-vault' });
+    let putCalledWithPackStr: string | null = null;
+    const r2Binding = {
+      put: async (key: string, value: string, opts: any) => {
+        putCalledWithPackStr = value;
+      }
+    };
+
+    const r2Client = new R2StorageClient({ bucketName: 'swal-r2-vault', r2Binding });
     const uploadResult = await r2Client.uploadSealedPack(pack);
 
     expect(uploadResult.contentHash).toBe(pack.content_hash);
     expect(uploadResult.url).toContain('swal-r2-vault');
+
+    expect(putCalledWithPackStr).not.toBeNull();
+    const uploadedPack = JSON.parse(putCalledWithPackStr!);
+    expect(uploadedPack.shares).toEqual([]);
 
     const retrievedPack = await r2Client.getSealedPack(pack.content_hash);
     expect(retrievedPack?.content_hash).toBe(pack.content_hash);
