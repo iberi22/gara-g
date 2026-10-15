@@ -31,13 +31,14 @@ export interface AppendMovementOptions {
  */
 export function signedQtyOf(tx: Record<string, unknown>): number {
   const qty = Number(tx.qty);
-  return isTxKind(tx.kind) && Number.isFinite(qty) ? txSign(tx.kind, qty) : 0;
+  const kind = isTxKind(tx.kind) ? tx.kind : 'adjust';
+  return Number.isFinite(qty) ? txSign(kind, qty) : 0;
 }
 
 async function itemMovements(adapter: StorageAdapter, instanceId: string, itemId: string): Promise<DomainRecord[]> {
   const all = await adapter.list('stockMovement', instanceId);
   return all.filter((t) => {
-    const data = t as any;
+    const data = t as Record<string, unknown>;
     return data.itemId === itemId && !data.deletedAt && !data.deleted_at;
   });
 }
@@ -48,8 +49,12 @@ async function itemMovements(adapter: StorageAdapter, instanceId: string, itemId
  */
 async function ensureOpeningBalance(adapter: StorageAdapter, instanceId: string, itemId: string): Promise<void> {
   const item = (await adapter.get('inventoryItem', itemId, instanceId)) as Record<string, unknown> | null;
-  const quantity = Number(item?.quantity ?? 0);
-  if (!item || !Number.isFinite(quantity) || quantity === 0) return;
+  if (!item) return;
+  const quantity = Number(item.quantity ?? 0);
+  if (!Number.isFinite(quantity)) {
+    throw new Error(`Cantidad inicial invalida para insumo: ${itemId}`);
+  }
+  if (quantity === 0) return;
   if ((await itemMovements(adapter, instanceId, itemId)).length > 0) return;
   const now = new Date().toISOString();
   await adapter.create('stockMovement', {
@@ -80,9 +85,19 @@ export async function appendMovement(
   note?: string,
   opts: AppendMovementOptions = {},
 ): Promise<DomainRecord> {
+  if (!isTxKind(kind)) {
+    throw new Error(`Tipo de movimiento invalido: ${kind}`);
+  }
+  if (!Number.isFinite(qty)) {
+    throw new Error(`Cantidad de movimiento invalida: ${qty}`);
+  }
+
   if (opts.id) {
     const existing = await adapter.get('stockMovement', opts.id, instanceId);
     if (existing) {
+      if ((existing as Record<string, unknown>).itemId !== itemId || (existing as Record<string, unknown>).kind !== kind) {
+        throw new Error('Conflicto de movimiento: el id ya existe para otro insumo u operacion');
+      }
       await syncQuantity(adapter, instanceId, itemId);
       return existing;
     }

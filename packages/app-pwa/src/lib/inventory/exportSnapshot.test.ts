@@ -35,7 +35,7 @@ const localStorageMock = (function() {
     }
   };
 })();
-globalThis.localStorage = localStorageMock as any;
+globalThis.localStorage = localStorageMock as Record<string, unknown>;
 
 describe('Inventory Export Snapshot', () => {
   beforeEach(async () => {
@@ -52,7 +52,7 @@ describe('Inventory Export Snapshot', () => {
   it('buildInventorySnapshot correctly maps warehouse, inventoryItem and stockMovement', async () => {
     const adapter = getMemoryAdapter();
     const inst = 'inst-export-1';
-    await adapter.create('warehouse', { id: 'w1', instance_id: inst, name: 'Main', type: 'bodega' } as any);
+    await adapter.create('warehouse', { id: 'w1', instance_id: inst, name: 'Main', type: 'bodega' } as Record<string, unknown>);
     await adapter.create('inventoryItem', {
       id: 'i1',
       instance_id: inst,
@@ -66,14 +66,14 @@ describe('Inventory Export Snapshot', () => {
       warehouseId: 'w1',
       vehicleTypes: 'car,truck',
       notes: 'test note',
-    } as any);
+    } as Record<string, unknown>);
     await adapter.create('stockMovement', {
       id: 'm1',
       instance_id: inst,
       itemId: 'i1',
       kind: 'purchase',
       qty: 10,
-    } as any);
+    } as Record<string, unknown>);
 
     const snapshot = await buildInventorySnapshot(adapter, inst);
 
@@ -106,7 +106,7 @@ describe('Inventory Export Snapshot', () => {
 
   it('seal and open round trip works correctly', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('warehouse', { id: 'w1', instance_id: 'inst1', name: 'Main', type: 'bodega' } as any);
+    await adapter.create('warehouse', { id: 'w1', instance_id: 'inst1', name: 'Main', type: 'bodega' } as Record<string, unknown>);
     const snapshot = await buildInventorySnapshot(adapter, 'inst1');
 
     const passphrase = 'llave de prueba larga';
@@ -134,38 +134,126 @@ describe('Inventory Export Snapshot', () => {
       .rejects.toMatchObject({ kind: 'clave' });
   });
 
+  it('openInventorySnapshot accepts plain document', async () => {
+    const adapter = getMemoryAdapter();
+    const snapshot = await buildInventorySnapshot(adapter, 'inst1');
+
+    const opened = await openInventorySnapshot(snapshot);
+    expect(opened.locations).toHaveLength(0); // empty db
+  });
+
+  it('openInventorySnapshot throws clave error when check is missing and decrypt fails', async () => {
+    const adapter = getMemoryAdapter();
+    const snapshot = await buildInventorySnapshot(adapter, 'inst1');
+    const sealed = await sealInventorySnapshot(snapshot, 'llave de prueba larga');
+    delete sealed.check;
+
+    await expect(openInventorySnapshot(sealed, 'wrong-passphrase'))
+      .rejects.toMatchObject({ kind: 'clave' });
+  });
+
   it('openInventorySnapshot throws alterado error when ciphertext is tampered', async () => {
     const adapter = getMemoryAdapter();
     const snapshot = await buildInventorySnapshot(adapter, 'inst1');
     const sealed = await sealInventorySnapshot(snapshot, 'llave de prueba larga');
 
-    // To trigger 'alterado' and not 'clave' (MAC failure), we can instead tamper with the plaintext
-    // For GCM, ANY tampering of ciphertext causes decrypt() to throw (MAC failure), which our code catches and maps to 'clave'.
-    // To test 'alterado' we can modify the decrypt catch block to distinguish MAC vs other errors,
-    // or just mock it so it parses invalid JSON.
-    // Instead of tampering ciphertext, let's just make the plaintext bad JSON by encrypting bad JSON.
-    const baseKey = await globalThis.crypto.subtle.importKey('raw', new TextEncoder().encode('llave de prueba larga'), 'PBKDF2', false, ['deriveKey']);
+    // Alterado is now when check matches but decrypt fails. Since tampering with ciphertext will fail decrypt,
+    // and check doesn't include ciphertext (it only hashes salt+iv), the check will succeed but decrypt will fail.
+    // Let's flip one byte of the ciphertext.
+    const cipherBuf = new Uint8Array(atob(sealed.ciphertext).split('').map(c => c.charCodeAt(0)));
+    cipherBuf[0] ^= 0x01; // flip a bit
+    sealed.ciphertext = btoa(String.fromCharCode(...cipherBuf));
+
+    await expect(openInventorySnapshot(sealed, 'llave de prueba larga'))
+      .rejects.toMatchObject({ kind: 'alterado' });
+  });
+
+  it('openInventorySnapshot throws alterado error when plaintext is corrupted', async () => {
+    // Modify plaintext by manually encrypting something that is not JSON, but using the correct KDF and check
+    const passphrase = 'llave de prueba larga';
+    const baseKey = await globalThis.crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveBits']);
     const salt = new Uint8Array(16);
-    const aesKey = await globalThis.crypto.subtle.deriveKey(
+    const derivedBits = await globalThis.crypto.subtle.deriveBits(
       { name: 'PBKDF2', salt, iterations: 600000, hash: 'SHA-256' },
       baseKey,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt']
+      512
     );
+    const aesKeyBytes = derivedBits.slice(0, 32);
+    const hmacKeyBytes = derivedBits.slice(32, 64);
+    const aesKey = await globalThis.crypto.subtle.importKey('raw', aesKeyBytes, { name: 'AES-GCM' }, false, ['encrypt']);
+    const hmacKey = await globalThis.crypto.subtle.importKey('raw', hmacKeyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+
     const iv = new Uint8Array(12);
     const cipherBytes = await globalThis.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, new TextEncoder().encode('not-a-json'));
+
+    const enc = new TextEncoder();
+    const saltB64 = btoa(String.fromCharCode(...salt));
+    const ivB64 = btoa(String.fromCharCode(...iv));
+    const macData = enc.encode(`swal-inventory-export-enc/v1|${saltB64}|${ivB64}`);
+    const checkBuf = await globalThis.crypto.subtle.sign('HMAC', hmacKey, macData);
 
     const badSealed = {
       format: 'swal-inventory-export-enc/v1' as const,
       kdf: { name: 'PBKDF2' as const, hash: 'SHA-256' as const, iterations: 600000 },
-      salt: btoa(String.fromCharCode(...salt)),
-      iv: btoa(String.fromCharCode(...iv)),
+      salt: saltB64,
+      iv: ivB64,
       ciphertext: btoa(String.fromCharCode(...new Uint8Array(cipherBytes))),
+      check: btoa(String.fromCharCode(...new Uint8Array(checkBuf))),
     };
 
-    await expect(openInventorySnapshot(badSealed, 'llave de prueba larga'))
-      .rejects.toMatchObject({ kind: 'alterado' });
+    let err: any;
+    try {
+      await openInventorySnapshot(badSealed, passphrase);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(InventoryExportError);
+    expect(err.kind).toBe('alterado');
+  });
+
+  it('openInventorySnapshot throws formato for missing id', async () => {
+    const adapter = getMemoryAdapter();
+    const snapshot = await buildInventorySnapshot(adapter, 'inst1');
+    snapshot.items.push({
+      sku: '123', name: 'name', quantity: 10, minStock: 0, cost: 0, price: 0, customFields: {}
+    } as Record<string, unknown>); // missing id
+
+    await expect(sealInventorySnapshot(snapshot, 'pass')).rejects.toMatchObject({ kind: 'formato' });
+  });
+
+  it('openInventorySnapshot throws formato for NaN qty', async () => {
+    const adapter = getMemoryAdapter();
+    const snapshot = await buildInventorySnapshot(adapter, 'inst1');
+    snapshot.items.push({
+      id: 'id', name: 'name', quantity: NaN, minStock: 0, cost: 0, price: 0, customFields: {}
+    } as Record<string, unknown>);
+
+    await expect(sealInventorySnapshot(snapshot, 'pass')).rejects.toMatchObject({ kind: 'formato' });
+  });
+
+  it('openInventorySnapshot throws formato for bad date', async () => {
+    const adapter = getMemoryAdapter();
+    const snapshot = await buildInventorySnapshot(adapter, 'inst1');
+    snapshot.source.exportedAt = 'not-a-date';
+
+    await expect(sealInventorySnapshot(snapshot, 'pass')).rejects.toMatchObject({ kind: 'formato' });
+  });
+
+  it('openInventorySnapshot throws formato for wrong KDF parameters', async () => {
+    const adapter = getMemoryAdapter();
+    const snapshot = await buildInventorySnapshot(adapter, 'inst1');
+    const sealed = await sealInventorySnapshot(snapshot, 'pass');
+    sealed.kdf.iterations = 1000;
+
+    await expect(openInventorySnapshot(sealed, 'pass')).rejects.toMatchObject({ kind: 'formato' });
+  });
+
+  it('openInventorySnapshot throws formato for items as [null]', async () => {
+    const adapter = getMemoryAdapter();
+    const snapshot = await buildInventorySnapshot(adapter, 'inst1');
+    snapshot.items = [null as Record<string, unknown>];
+
+    await expect(sealInventorySnapshot(snapshot, 'pass')).rejects.toMatchObject({ kind: 'formato' });
   });
 
   it('openInventorySnapshot throws formato error if format is unknown', async () => {
@@ -173,7 +261,7 @@ describe('Inventory Export Snapshot', () => {
     const snapshot = await buildInventorySnapshot(adapter, 'inst1');
     const sealed = await sealInventorySnapshot(snapshot, 'llave de prueba larga');
 
-    sealed.format = 'bad-format' as any;
+    sealed.format = 'bad-format' as Record<string, unknown>;
 
     await expect(openInventorySnapshot(sealed, 'llave de prueba larga'))
       .rejects.toMatchObject({ kind: 'formato' });
@@ -181,7 +269,7 @@ describe('Inventory Export Snapshot', () => {
 
   it('buildInventorySnapshot maps unknown kind to adjust', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('stockMovement', { id: 'm1', instance_id: 'inst1', itemId: 'i1', kind: 'magic', qty: 10 } as any);
+    await adapter.create('stockMovement', { id: 'm1', instance_id: 'inst1', itemId: 'i1', kind: 'magic', qty: 10 } as Record<string, unknown>);
 
     const snapshot = await buildInventorySnapshot(adapter, 'inst1');
     expect(snapshot.movements[0].kind).toBe('adjust');
@@ -189,7 +277,7 @@ describe('Inventory Export Snapshot', () => {
 
   it('assert no secret keys in output', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('warehouse', { id: 'w1', instance_id: 'inst1', name: 'Main', type: 'bodega' } as any);
+    await adapter.create('warehouse', { id: 'w1', instance_id: 'inst1', name: 'Main', type: 'bodega' } as Record<string, unknown>);
     const snapshot = await buildInventorySnapshot(adapter, 'inst1');
     const sealed = await sealInventorySnapshot(snapshot, 'llave de prueba larga');
 
@@ -206,9 +294,9 @@ describe('Inventory Export Snapshot', () => {
     const { LOCAL_INSTANCE_ID } = await import('../appMode');
 
     const now = new Date().toISOString();
-    await adapter.create('warehouse', { id: 'w-local', instance_id: LOCAL_INSTANCE_ID, name: 'Local W', created_at: now, updated_at: now } as any);
-    await adapter.create('inventoryItem', { id: 'i-local', instance_id: LOCAL_INSTANCE_ID, sku: 'LCL', name: 'Local I', created_at: now, updated_at: now } as any);
-    await adapter.create('stockMovement', { id: 'm-local', instance_id: LOCAL_INSTANCE_ID, itemId: 'i-local', kind: 'adjust', qty: 1, created_at: now, updated_at: now } as any);
+    await adapter.create('warehouse', { id: 'w-local', instance_id: LOCAL_INSTANCE_ID, name: 'Local W', created_at: now, updated_at: now } as Record<string, unknown>);
+    await adapter.create('inventoryItem', { id: 'i-local', instance_id: LOCAL_INSTANCE_ID, sku: 'LCL', name: 'Local I', created_at: now, updated_at: now } as Record<string, unknown>);
+    await adapter.create('stockMovement', { id: 'm-local', instance_id: LOCAL_INSTANCE_ID, itemId: 'i-local', kind: 'adjust', qty: 1, created_at: now, updated_at: now } as Record<string, unknown>);
 
     const dump = await exportLocalData();
     expect(dump.entities.warehouse).toHaveLength(1);
@@ -233,16 +321,40 @@ describe('Inventory Export Snapshot', () => {
 
   it('buildInventorySnapshot defaults to bodega for unknown types', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('warehouse', { id: 'w1', instance_id: 'inst1', name: 'Main', type: 'supermarket' } as any);
+    await adapter.create('warehouse', { id: 'w1', instance_id: 'inst1', name: 'Main', type: 'supermarket' } as Record<string, unknown>);
     const snapshot = await buildInventorySnapshot(adapter, 'inst1');
     expect(snapshot.locations[0].type).toBe('bodega');
+  });
+
+  it('can round-trip 5000 items without error', async () => {
+    const adapter = getMemoryAdapter();
+    const inst = 'inst-large';
+    await adapter.create('warehouse', { id: 'w-large', instance_id: inst, name: 'Large W', type: 'bodega' } as Record<string, unknown>);
+
+    for (let i = 0; i < 5000; i++) {
+      await adapter.create('inventoryItem', {
+        id: `i-${i}`,
+        instance_id: inst,
+        name: `Item ${i}`,
+        quantity: 1,
+        warehouseId: 'w-large'
+      } as Record<string, unknown>);
+    }
+
+    const snapshot = await buildInventorySnapshot(adapter, inst);
+    expect(snapshot.items).toHaveLength(5000);
+
+    const sealed = await sealInventorySnapshot(snapshot, 'large-pass');
+    const opened = await openInventorySnapshot(sealed, 'large-pass');
+
+    expect(opened.items).toHaveLength(5000);
   });
 });
 
   it('buildInventorySnapshot applies signedQtyOf to movements and maps maintenanceId', async () => {
     const adapter = getMemoryAdapter();
     const inst = 'inst-export-signed';
-    await adapter.create('inventoryItem', { id: 'i2', instance_id: inst, sku: 'SKU2', name: 'Oil', quantity: 5 } as any);
+    await adapter.create('inventoryItem', { id: 'i2', instance_id: inst, sku: 'SKU2', name: 'Oil', quantity: 5 } as Record<string, unknown>);
     await adapter.create('stockMovement', {
       id: 'm-use',
       instance_id: inst,
@@ -250,7 +362,7 @@ describe('Inventory Export Snapshot', () => {
       kind: 'use',
       qty: 10,
       maintenanceId: 'maint-123'
-    } as any);
+    } as Record<string, unknown>);
 
     const snapshot = await buildInventorySnapshot(adapter, inst);
     expect(snapshot.movements).toHaveLength(1);
@@ -262,9 +374,9 @@ describe('Inventory Export Snapshot', () => {
     const adapter = getMemoryAdapter();
     const inst = 'inst-export-deleted';
 
-    await adapter.create('warehouse', { id: 'w-del', instance_id: inst, name: 'Del', deleted_at: '2023-01-01' } as any);
-    await adapter.create('inventoryItem', { id: 'i-del', instance_id: inst, name: 'DelItem', deletedAt: '2023-01-01' } as any);
-    await adapter.create('stockMovement', { id: 'm-del', instance_id: inst, itemId: 'i-del', kind: 'use', qty: 10, deleted_at: '2023-01-01' } as any);
+    await adapter.create('warehouse', { id: 'w-del', instance_id: inst, name: 'Del', deleted_at: '2023-01-01' } as Record<string, unknown>);
+    await adapter.create('inventoryItem', { id: 'i-del', instance_id: inst, name: 'DelItem', deletedAt: '2023-01-01' } as Record<string, unknown>);
+    await adapter.create('stockMovement', { id: 'm-del', instance_id: inst, itemId: 'i-del', kind: 'use', qty: 10, deleted_at: '2023-01-01' } as Record<string, unknown>);
 
     const snapshot = await buildInventorySnapshot(adapter, inst);
     expect(snapshot.locations).toHaveLength(0);
