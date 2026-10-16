@@ -46,6 +46,26 @@ async function itemMovements(adapter: StorageAdapter, instanceId: string, itemId
 const OPENING_NOTE = 'saldo inicial (stock anterior al libro de movimientos)';
 
 /**
+ * Prefijo reservado de los saldos iniciales. El `:` separa el id del insumo:
+ * como el libro rechaza los ids manuales con este prefijo, el id del saldo
+ * inicial nunca colisiona con un movimiento de otro insumo (codificacion
+ * libre de colisiones) y es determinista por insumo: dos pestanas reservan
+ * el MISMO id y el `createIfAbsent` atomico deja una sola apertura.
+ */
+export const OPENING_ID_PREFIX = 'mov-open:';
+
+/** Id determinista del saldo inicial de un insumo (unicidad atomica por insumo). */
+export function openingIdFor(itemId: string): string {
+  return `${OPENING_ID_PREFIX}${itemId}`;
+}
+
+/** Intentos de la cadena de reserva del saldo inicial antes de rendirse. */
+const OPENING_FALLBACK_ATTEMPTS = 8;
+
+/** Intentos de sincronizacion del stock antes de rendirse (contienda alta). */
+const SYNC_MAX_ATTEMPTS = 10;
+
+/**
  * Cola por id de movimiento: dentro de un mismo contexto serializa el
  * "comprueba si existe y crea" para que dos llamadas concurrentes con el mismo
  * id no se pisen (IndexedDB usa `put`, que sobrescribe).
@@ -95,32 +115,74 @@ async function ensureOpeningBalance(adapter: StorageAdapter, instanceId: string,
   }
   if (quantity === 0) return;
 
-  const openingId = `mov-open-${itemId}`;
-  await withMovementIdLock(openingId, async () => {
+  const baseId = openingIdFor(itemId);
+  await withMovementIdLock(baseId, async () => {
     if ((await itemMovements(adapter, instanceId, itemId)).length > 0) return;
-    // El id reservado puede pertenecer a otro insumo (alguien pudo usar
-    // "mov-open-b" como id manual de "a"): en ese caso NO se sobrescribe.
-    const owner = (await adapter.get('stockMovement', openingId, instanceId)) as Record<string, unknown> | null;
-    const id = owner && owner.itemId !== itemId ? `${openingId}-${genId()}` : openingId;
+    // Cadena determinista: si el id esta ocupado por otro insumo (basura
+    // historica: el libro ya rechaza plantar estos ids a mano), se prueba con
+    // los sufijos `:2`, `:3`, ... — identicos en todas las pestanas, asi que el
+    // `createIfAbsent` atomico sigue dejando una sola apertura. Nunca aleatorio.
     const now = new Date().toISOString();
-    await claimMovement(adapter, instanceId, {
-      id,
-      instance_id: instanceId,
-      itemId,
-      kind: 'adjust',
-      qty: quantity,
-      note: OPENING_NOTE,
-      created_at: now,
-      updated_at: now,
-    } as DomainRecord);
+    let candidateId = baseId;
+    for (let attempt = 0; ; attempt++) {
+      const created = await claimMovement(adapter, instanceId, {
+        id: candidateId,
+        instance_id: instanceId,
+        itemId,
+        kind: 'adjust',
+        qty: quantity,
+        note: OPENING_NOTE,
+        created_at: now,
+        updated_at: now,
+      } as DomainRecord);
+      if (created) return;
+      const existing = (await adapter.get('stockMovement', candidateId, instanceId)) as Record<
+        string,
+        unknown
+      > | null;
+      // La otra pestana gano la carrera con el mismo id: apertura unica, listo.
+      if (existing && existing.itemId === itemId) return;
+      if (attempt + 1 >= OPENING_FALLBACK_ATTEMPTS) {
+        throw new Error('Conflicto de movimiento: no se pudo reservar el saldo inicial');
+      }
+      candidateId = `${baseId}:${attempt + 2}`;
+    }
   });
 }
 
-/** Recalcula el stock del insumo desde el libro y lo guarda. */
+/**
+ * Recalcula el stock del insumo desde el libro y lo guarda con compare-and-set
+ * sobre `updated_at` (relee version y suma en cada intento). Si otra pestana
+ * escribio entre la lectura y la escritura, el intento se descarta y se
+ * reintenta: la ultima escritura ganadora siempre suma todos los movimientos
+ * visibles en su relectura, asi que al cesar la contienda el insumo converge
+ * al total del libro en vez de quedarse con un valor obsoleto.
+ */
 export async function syncQuantity(adapter: StorageAdapter, instanceId: string, itemId: string): Promise<number> {
-  const quantity = await quantityOf(adapter, instanceId, itemId);
-  await adapter.update('inventoryItem', itemId, { quantity }, instanceId);
-  return quantity;
+  for (let attempt = 0; ; attempt++) {
+    if (!adapter.updateIfCurrent) {
+      const quantity = await quantityOf(adapter, instanceId, itemId);
+      await adapter.update('inventoryItem', itemId, { quantity }, instanceId);
+      return quantity;
+    }
+    // Version primero: todo movimiento creado antes de esta lectura queda
+    // incluido en la suma posterior; si el CAS tiene exito, ningun escritor se
+    // intercalo y la suma es completa.
+    const item = (await adapter.get('inventoryItem', itemId, instanceId)) as Record<string, unknown> | null;
+    if (!item) return quantityOf(adapter, instanceId, itemId);
+    const quantity = await quantityOf(adapter, instanceId, itemId);
+    const next = await adapter.updateIfCurrent(
+      'inventoryItem',
+      itemId,
+      { quantity },
+      instanceId,
+      String(item.updated_at ?? ''),
+    );
+    if (next) return quantity;
+    if (attempt + 1 >= SYNC_MAX_ATTEMPTS) {
+      throw new Error('Conflicto de concurrencia al sincronizar el stock: reintente la operacion');
+    }
+  }
 }
 
 export async function appendMovement(
@@ -148,6 +210,11 @@ export async function appendMovement(
   await ensureOpeningBalance(adapter, instanceId, itemId);
 
   const fixedId = opts.id;
+  // El prefijo del saldo inicial esta reservado: plantarlo a mano colisionaria
+  // con la reserva determinista (misma codificacion en todas las pestanas).
+  if (fixedId?.startsWith(OPENING_ID_PREFIX)) {
+    throw new Error('Conflicto de movimiento: id reservado para el saldo inicial');
+  }
   const now = new Date().toISOString();
   const candidate = {
     id: fixedId ?? genId(),

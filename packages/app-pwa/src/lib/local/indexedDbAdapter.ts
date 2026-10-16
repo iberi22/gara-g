@@ -18,7 +18,7 @@
  */
 import { type DBSchema, type IDBPDatabase, openDB } from 'idb';
 import { LOCAL_CHANGED_EVENT, LOCAL_INSTANCE_ID } from '../appMode';
-import type { DomainRecord, StorageAdapter } from '../domain';
+import { type DomainRecord, type StorageAdapter, nextUpdatedAt } from '../domain';
 import type { LocalDump, LocalTombstone } from './types';
 
 export const LOCAL_DB_NAME = 'gara-local';
@@ -149,6 +149,31 @@ export class IndexedDbAdapter implements StorageAdapter {
       return null;
     }
     const next = { ...row.record, ...patch, updated_at: new Date().toISOString() } as DomainRecord;
+    await Promise.all([tx.store.put({ entity, id, record: next }), tx.done]);
+    notifyChanged();
+    return next;
+  }
+
+  /**
+   * Escritura condicional en la MISMA transaccion readwrite: el `get` y el
+   * `put` no pueden intercalarse con otra pestana (IndexedDB serializa las
+   * transacciones readwrite por store). Sello monotono como en D1/memoria.
+   */
+  async updateIfCurrent(
+    entity: string,
+    id: string,
+    patch: Record<string, unknown>,
+    instanceId: string,
+    expectedUpdatedAt: string,
+  ): Promise<DomainRecord | null> {
+    const db = await openLocalDb();
+    const tx = db.transaction('records', 'readwrite');
+    const row = await tx.store.get([entity, id]);
+    if (!row || row.record.instance_id !== instanceId || row.record.updated_at !== expectedUpdatedAt) {
+      await tx.done;
+      return null;
+    }
+    const next = { ...row.record, ...patch, updated_at: nextUpdatedAt(row.record.updated_at) } as DomainRecord;
     await Promise.all([tx.store.put({ entity, id, record: next }), tx.done]);
     notifyChanged();
     return next;

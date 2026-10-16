@@ -1,6 +1,67 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { getMemoryAdapter, setStorageAdapter, type DomainRecord } from '../domain';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { getMemoryAdapter, setStorageAdapter, type DomainRecord, type StorageAdapter } from '../domain';
 import { appendMovement, movementHistory, quantityOf, txSign, syncQuantity } from './ledger';
+
+/**
+ * Adapter que comparte el almacenamiento entre "pestanas" y retiene la PRIMERA
+ * escritura del stock para forzar el entrelazado: la primera llamada a
+ * `update`/`updateIfCurrent` avisa (`onFirstWrite`) y espera (`holdFirst`)
+ * mientras la segunda operacion completa su ciclo. Reproduce dos pestanas
+ * IndexedDB/D1 concurrentes sin necesidad de un navegador real.
+ */
+class GatedWritesAdapter implements StorageAdapter {
+  private firstWriteTaken = false;
+  constructor(
+    private readonly inner: StorageAdapter,
+    private readonly hooks: { holdFirst: Promise<void>; onFirstWrite: () => void },
+  ) {}
+  create(entity: string, record: DomainRecord): Promise<DomainRecord> {
+    return this.inner.create(entity, record);
+  }
+  createIfAbsent(entity: string, record: DomainRecord): Promise<boolean> {
+    if (!this.inner.createIfAbsent) throw new Error('sin createIfAbsent');
+    return this.inner.createIfAbsent(entity, record);
+  }
+  list(entity: string, instanceId: string): Promise<DomainRecord[]> {
+    return this.inner.list(entity, instanceId);
+  }
+  get(entity: string, id: string, instanceId: string): Promise<DomainRecord | null> {
+    return this.inner.get(entity, id, instanceId);
+  }
+  async update(
+    entity: string,
+    id: string,
+    patch: Record<string, unknown>,
+    instanceId: string,
+  ): Promise<DomainRecord | null> {
+    await this.maybeGate(entity);
+    return this.inner.update(entity, id, patch, instanceId);
+  }
+  async updateIfCurrent(
+    entity: string,
+    id: string,
+    patch: Record<string, unknown>,
+    instanceId: string,
+    expectedUpdatedAt: string,
+  ): Promise<DomainRecord | null> {
+    await this.maybeGate(entity);
+    if (this.inner.updateIfCurrent) {
+      return this.inner.updateIfCurrent(entity, id, patch, instanceId, expectedUpdatedAt);
+    }
+    const cur = (await this.inner.get(entity, id, instanceId)) as Record<string, unknown> | null;
+    if (!cur || String(cur.updated_at ?? '') !== expectedUpdatedAt) return null;
+    return this.inner.update(entity, id, patch, instanceId);
+  }
+  del(entity: string, id: string, instanceId: string): Promise<boolean> {
+    return this.inner.del(entity, id, instanceId);
+  }
+  private async maybeGate(entity: string): Promise<void> {
+    if (entity !== 'inventoryItem' || this.firstWriteTaken) return;
+    this.firstWriteTaken = true;
+    this.hooks.onFirstWrite();
+    await this.hooks.holdFirst;
+  }
+}
 
 describe('Inventory Ledger', () => {
   beforeEach(() => {
@@ -175,8 +236,8 @@ describe('Inventory Ledger', () => {
     await adapter.create('inventoryItem', { id: 'a', instance_id: 'inst1', quantity: 15, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     // Trying to use opening balance id manually should throw conflict because the system will generate it first and it will clash or be created.
-    // Wait, the test says: "{id:"mov-open-a"} on an item with initial 15 throws conflict, stock 15, then normal purchase(10) -> 25"
-    await expect(appendMovement(adapter, 'inst1', 'a', 'purchase', 10, undefined, { id: 'mov-open-a' }))
+    // Wait, the test says: "{id:"mov-open:a"} on an item with initial 15 throws conflict, stock 15, then normal purchase(10) -> 25"
+    await expect(appendMovement(adapter, 'inst1', 'a', 'purchase', 10, undefined, { id: 'mov-open:a' }))
       .rejects.toThrow(/Conflicto de movimiento/);
     expect(await quantityOf(adapter, 'inst1', 'a')).toBe(15);
 
@@ -225,5 +286,65 @@ describe('Inventory Ledger', () => {
     expect(history).toHaveLength(1);
     // El stock refleja exactamente el unico movimiento que gano la carrera.
     expect(await quantityOf(adapter, 'inst1', 'c')).toBe(Number((history[0] as unknown as DomainRecord).qty));
+  });
+
+  it('dos compras concurrentes crean un solo saldo inicial aunque el id determinista este ocupado', async () => {
+    const adapter = getMemoryAdapter();
+    // Legado: el id determinista del saldo inicial ocupado por otro insumo.
+    // Se planta por las dos codificaciones (guion historico y `:` actual)
+    // directo en el adapter, porque el libro rechaza el prefijo reservado.
+    await adapter.create('inventoryItem', { id: 'a', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
+    const now = new Date().toISOString();
+    for (const legacyId of ['mov-open-b', 'mov-open:b']) {
+      await adapter.create('stockMovement', {
+        id: legacyId, instance_id: 'inst1', itemId: 'a', kind: 'purchase', qty: 1,
+        created_at: now, updated_at: now,
+      } as unknown as DomainRecord);
+    }
+    await adapter.create('inventoryItem', { id: 'b', instance_id: 'inst1', quantity: 15, created_at: '', updated_at: '' } as unknown as DomainRecord);
+
+    // Dos "pestanas": dos instancias del modulo (sin cerrojo en memoria
+    // compartido) sobre el mismo almacenamiento, como dos tabs IndexedDB.
+    vi.resetModules();
+    const tab1 = await import('./ledger');
+    vi.resetModules();
+    const tab2 = await import('./ledger');
+    await Promise.all([
+      tab1.appendMovement(adapter, 'inst1', 'b', 'purchase', 5),
+      tab2.appendMovement(adapter, 'inst1', 'b', 'purchase', 7),
+    ]);
+
+    // 15 (un solo saldo inicial) + 5 + 7 = 27, nunca 42 (doble apertura).
+    expect(await quantityOf(adapter, 'inst1', 'b')).toBe(27);
+    const item = (await adapter.get('inventoryItem', 'b', 'inst1')) as unknown as DomainRecord;
+    expect(item.quantity).toBe(27);
+    // El movimiento heredado de `a` sigue intacto.
+    expect(await quantityOf(adapter, 'inst1', 'a')).toBe(2);
+  });
+
+  it('una escritura de stock retrasada no pisa una mas nueva (libro 109, insumo 109)', async () => {
+    const inner = getMemoryAdapter();
+    let release!: () => void;
+    const holdFirst = new Promise<void>((r) => {
+      release = r;
+    });
+    let enteredResolve!: () => void;
+    const entered = new Promise<void>((r) => {
+      enteredResolve = r;
+    });
+    const adapter = new GatedWritesAdapter(inner, { holdFirst, onFirstWrite: enteredResolve });
+    await inner.create('inventoryItem', { id: 'race-stock', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
+
+    // Primera compra: calcula 10 y se queda retenida justo antes de guardar el stock.
+    const slow = appendMovement(adapter, 'inst1', 'race-stock', 'purchase', 10);
+    await entered;
+    // Segunda compra: ciclo completo mientras la primera sigue retenida.
+    await appendMovement(adapter, 'inst1', 'race-stock', 'purchase', 99);
+    release();
+    await slow;
+
+    expect(await quantityOf(adapter, 'inst1', 'race-stock')).toBe(109);
+    const item = (await inner.get('inventoryItem', 'race-stock', 'inst1')) as unknown as DomainRecord;
+    expect(item.quantity).toBe(109);
   });
 });
