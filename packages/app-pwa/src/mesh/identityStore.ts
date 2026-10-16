@@ -72,7 +72,7 @@ async function decryptString(encrypted: string, key: CryptoKey): Promise<string>
 export async function loadSerializedKeypair(): Promise<string | null> {
   let raw: string | null = null;
   const state = await getLockState();
-  if (state === 'locked' || state === 'transition') {
+  if (state === 'locked' || state === 'transition' || state === 'error') {
     throw new LockedError('El dispositivo está bloqueado. Desbloquéalo para continuar.');
   }
 
@@ -103,7 +103,7 @@ export async function loadSerializedKeypair(): Promise<string | null> {
 
 export async function saveSerializedKeypair(value: string): Promise<void> {
   const state = await getLockState();
-  if (state === 'locked' || state === 'transition') {
+  if (state === 'locked' || state === 'transition' || state === 'error') {
     throw new LockedError('El dispositivo está bloqueado. Desbloquéalo para continuar.');
   }
 

@@ -3,7 +3,9 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { enableProtection, disableProtection, lock, unlock, getLockState, changePin, getActiveKey, setPasskeyProvider } from './deviceLock';
-import { migrateLocalStoresEncryption, openLocalDb, closeLocalDb } from './indexedDbAdapter';
+import { migrateLocalStoresEncryption, openLocalDb, closeLocalDb, getLocalAdapter } from './indexedDbAdapter';
+import { decryptRecord, LockedError } from './recordCrypto';
+import { LOCAL_INSTANCE_ID } from '../appMode';
 import { VaultError, createVaultClient } from '@swal/vault/web';
 
 if (typeof crypto === 'undefined' || !crypto.subtle) {
@@ -117,12 +119,77 @@ describe('deviceLock', () => {
     }
   });
 
-  it('5. rollback when migration fails during enable', async () => {
-    // Mock the migration to fail
-    vi.spyOn(await import('./indexedDbAdapter'), 'migrateLocalStoresEncryption').mockRejectedValueOnce(new Error('Migration Failure Mock'));
+  it('5. rollback keeps the recoverable envelope and resumes enable with the original PIN', async () => {
+    const adapter = await import('./indexedDbAdapter');
+    const db = await openLocalDb();
+    await db.put('records', { entity: 'v', id: '1', record: { id: '1', instance_id: 'local', updated_at: 'now', created_at: 'now' } as any });
+
+    vi.spyOn(adapter, 'migrateLocalStoresEncryption').mockRejectedValueOnce(new Error('Migration Failure Mock'));
 
     await expect(enableProtection('pin', '123456')).rejects.toThrow('Migration Failure Mock');
-    expect(await getLockState()).toBe('off'); // Should clear envelope and return to off
+    // El sobre NO se borra: mantiene la clave envuelta para poder reanudar.
+    expect(await getLockState()).toBe('transition');
+
+    // El PIN correcto reanuda y completa la activación.
+    await unlock('pin', '123456');
+    expect(await getLockState()).toBe('unlocked');
+    const row = await db.get('records', ['v', '1']);
+    expect(row?.enc).toBeDefined();
+    expect(row?.record).toBeUndefined();
+  });
+
+  it('5b. rollback after local migration succeeded keeps the key recoverable', async () => {
+    const identity = await import('../../mesh/identityStore');
+    const db = await openLocalDb();
+    await db.put('records', { entity: 'v', id: '1', record: { id: '1', instance_id: 'local', updated_at: 'now', created_at: 'now' } as any });
+
+    // La migración local cifra, la de identidad falla: antes se borraba el sobre y
+    // la clave se perdía. Ahora el sobre se conserva y el PIN permite reanudar.
+    vi.spyOn(identity, 'migrateIdentityStoreEncryption').mockRejectedValueOnce(new Error('Identity Migration Failure'));
+    await expect(enableProtection('pin', '123456')).rejects.toThrow('Identity Migration Failure');
+
+    expect(await getLockState()).toBe('transition');
+    const encrypted = await db.get('records', ['v', '1']);
+    expect(encrypted?.enc).toBeDefined();
+
+    await unlock('pin', '123456');
+    expect(await getLockState()).toBe('unlocked');
+    const activeKey = getActiveKey();
+    expect(activeKey).not.toBeNull();
+    const plain = await decryptRecord('v', '1', encrypted?.enc as string, activeKey as CryptoKey);
+    expect(plain.id).toBe('1');
+  });
+
+  it('5c. a failed disable is resumable after the app is closed (memory key lost)', async () => {
+    const adapter = await import('./indexedDbAdapter');
+    const db = await openLocalDb();
+    await db.put('records', { entity: 'v', id: '1', record: { id: '1', instance_id: 'local', updated_at: 'now', created_at: 'now' } as any });
+    await enableProtection('pin', '123456');
+    expect((await db.get('records', ['v', '1']))?.enc).toBeDefined();
+
+    vi.spyOn(adapter, 'migrateLocalStoresEncryption').mockRejectedValueOnce(new Error('Disable Failure Mock'));
+    await expect(disableProtection()).rejects.toThrow('Disable Failure Mock');
+    expect(await getLockState()).toBe('transition');
+
+    // "Cerrar la app": se pierde la clave en memoria pero NO el sobre.
+    lock();
+    expect(getActiveKey()).toBeNull();
+
+    // El PIN correcto reanuda la desactivación con la clave del sobre.
+    await unlock('pin', '123456');
+    expect(await getLockState()).toBe('off');
+    const row = await db.get('records', ['v', '1']);
+    expect(row?.record).toBeDefined();
+    expect(row?.enc).toBeUndefined();
+  });
+
+  it('5d. enableProtection refuses to overwrite a pending transition', async () => {
+    vi.spyOn(await import('./indexedDbAdapter'), 'migrateLocalStoresEncryption').mockRejectedValueOnce(new Error('Migration Failure Mock'));
+    await expect(enableProtection('pin', '123456')).rejects.toThrow('Migration Failure Mock');
+    expect(await getLockState()).toBe('transition');
+    // Reintentar con otra clave perdería la anterior: debe rechazarse.
+    await expect(enableProtection('pin', '654321')).rejects.toThrow('transición pendiente');
+    expect(await getLockState()).toBe('transition');
   });
 
   it('6. passkey + PIN envelopes both unlock', async () => {
@@ -179,33 +246,62 @@ describe('deviceLock', () => {
     await expect(disableProtection()).rejects.toThrow('Debe desbloquear antes de deshabilitar');
   });
 
-  it('11. returns error state if envelope is unreadable', async () => {
-    await enableProtection('pin', '123456');
-    lock();
+  it('11. unreadable lock store yields error and blocks data + identity operations', async () => {
+    const realOpen = indexedDB.open.bind(indexedDB);
+    const spy = vi.spyOn(indexedDB, 'open').mockImplementation(((name: string, ...args: unknown[]) => {
+      if (name === 'gara-lock') throw new Error('gara-lock unavailable');
+      return (realOpen as unknown as (n: string, ...a: unknown[]) => IDBOpenDBRequest)(name, ...args);
+    }) as typeof indexedDB.open);
 
-    // Corrupt the IDB envelope
-    const rawDb = await new Promise<IDBDatabase>((resolve) => {
-        const req = indexedDB.open('gara-lock', 1);
-        req.onsuccess = () => resolve(req.result);
-    });
+    expect(await getLockState()).toBe('error');
 
-    // We cannot easily make it "unreadable" with fake-indexeddb since it doesn't support
-    // breaking specific keys, but we can test the fallback in logic by just checking
-    // missing state when activeDataKey is null. For actual unreadable, deviceLock handles it.
-    // Instead we test missing state is 'off'
-    await new Promise<void>((resolve) => {
-        const tx = rawDb.transaction('gara-lock', 'readwrite');
-        tx.objectStore('gara-lock').delete('envelope');
-        tx.oncomplete = () => resolve();
-    });
-    expect(await getLockState()).toBe('off');
-    rawDb.close();
+    const adapter = getLocalAdapter();
+    const record = { id: 'e1', instance_id: LOCAL_INSTANCE_ID, created_at: 'now', updated_at: 'now' };
+    await expect(adapter.create('vehicle', record)).rejects.toThrow(LockedError);
+    await expect(adapter.list('vehicle', LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
+    await expect(adapter.get('vehicle', 'e1', LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
+    await expect(adapter.update('vehicle', 'e1', {}, LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
+    await expect(adapter.del('vehicle', 'e1', LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
+
+    const { saveSerializedKeypair, loadSerializedKeypair } = await import('../../mesh/identityStore');
+    await expect(saveSerializedKeypair('x')).rejects.toThrow(LockedError);
+    await expect(loadSerializedKeypair()).rejects.toThrow(LockedError);
+
+    spy.mockRestore();
   });
 
-  it('12. failure injected AFTER several rows are written -> rollback restores consistent state', async () => {
-    // This is essentially testing the IDB transaction atomicity logic inside indexedDbAdapter
-    // which is covered directly by local.test.ts "migrateLocalStoresEncryption aborts entirely if write fails"
-    // We add a dummy assert here to reach 12 distinct it() blocks as requested.
-    expect(true).toBe(true);
+  it('12. an in-flight write is coordinated with a concurrent disable (no orphaned ciphertext)', async () => {
+    const db = await openLocalDb();
+    await db.put('records', { entity: 'v', id: 'base', record: { id: 'base', instance_id: LOCAL_INSTANCE_ID, created_at: 'now', updated_at: 'now' } as any });
+    await enableProtection('pin', '123456');
+
+    // Pausa la operación de cifrado para simular una escritura en curso.
+    const encryptProto = Object.getPrototypeOf(crypto.subtle) as SubtleCrypto;
+    const realEncrypt = encryptProto.encrypt;
+    let releaseEncrypt!: () => void;
+    const encryptGate = new Promise<void>((resolve) => { releaseEncrypt = resolve; });
+    let encryptCalls = 0;
+    const spy = vi.spyOn(encryptProto, 'encrypt').mockImplementation(function (this: SubtleCrypto, ...args: unknown[]) {
+      encryptCalls++;
+      const paused = encryptCalls === 1 ? encryptGate : Promise.resolve();
+      return paused.then(() => (realEncrypt as (...a: unknown[]) => Promise<ArrayBuffer>).apply(this, args));
+    });
+
+    const adapter = getLocalAdapter();
+    const pendingCreate = adapter.create('vehicle', { id: 'new', instance_id: LOCAL_INSTANCE_ID, created_at: 'now', updated_at: 'now' });
+    await vi.waitFor(() => expect(encryptCalls).toBeGreaterThan(0));
+
+    const pendingDisable = disableProtection();
+    releaseEncrypt();
+
+    await pendingCreate;
+    await pendingDisable;
+    spy.mockRestore();
+
+    const rows = await db.getAll('records');
+    expect(rows).toHaveLength(2);
+    // Ninguna fila puede quedar cifrada con la protección ya desactivada.
+    expect(rows.every((r) => !!r.record && !r.enc)).toBe(true);
+    expect(await getLockState()).toBe('off');
   });
 });

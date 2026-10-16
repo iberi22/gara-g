@@ -110,15 +110,67 @@ function calculateDelay(attempts: number): number {
   return Math.min(delaySec * 1000, 300000);
 }
 
+/** Un PIN válido son EXACTAMENTE seis dígitos (no cualquier cadena de 6 caracteres). */
+const PIN_PATTERN = /^\d{6}$/;
+
+/**
+ * Reanuda una transición interrumpida (app cerrada o fallo) usando la clave ya
+ * recuperada del sobre. "off" termina la desactivación; cualquier otro target
+ * termina la activación. El sobre NO se borra hasta confirmar la migración, así
+ * que la clave siempre sigue siendo recuperable si esto vuelve a fallar.
+ */
+async function resumeTransition(env: DeviceLockStore, key: CryptoKey): Promise<void> {
+  const { migrateLocalStoresEncryption } = await import('./indexedDbAdapter');
+  const { migrateIdentityStoreEncryption } = await import('../../mesh/identityStore');
+
+  if (env.targetMethod === 'off') {
+    // Desactivación interrumpida: terminar de descifrar y quitar el sobre.
+    activeDataKey = key; // necesaria para descifrar durante la migración a texto plano
+    try {
+      await migrateLocalStoresEncryption(null);
+      await migrateIdentityStoreEncryption(null);
+    } finally {
+      activeDataKey = null;
+    }
+    await clearEnvelope();
+    currentMethod = null;
+    if (vaultClientInstance) vaultClientInstance.lock();
+    return;
+  }
+
+  // Activación interrumpida: terminar de cifrar y marcar el sobre como activo.
+  const method: 'pin' | 'passkey' = env.targetMethod === 'passkey' ? 'passkey' : 'pin';
+  await migrateLocalStoresEncryption(key);
+  await migrateIdentityStoreEncryption(key);
+  env.state = 'active';
+  env.targetMethod = undefined;
+  await saveEnvelope(env);
+  activeDataKey = key;
+  currentMethod = method;
+}
+
 // Devuelve código de recuperación de alta entropía (16 bytes en hex) al habilitar
 export async function enableProtection(method: 'pin' | 'passkey', secret?: string): Promise<string> {
   const currentState = await getLockState();
-  if (currentState !== 'off' && currentState !== 'transition') {
+  if (currentState === 'error') {
+    throw new Error('Estado de protección ilegible: no se puede habilitar.');
+  }
+  if (currentState === 'transition') {
+    throw new Error('Hay una transición pendiente. Desbloquea para reanudarla antes de volver a habilitar.');
+  }
+  if (currentState !== 'off') {
     throw new Error('La protección ya está habilitada');
   }
 
-  // Si ya estábamos en transition de antes, podríamos limpiar o continuar.
-  // Pero lo seguro es regenerar todo si intentan habilitar de nuevo (sobreescribir).
+  // El PIN de respaldo (seis dígitos) es obligatorio también con passkey: si el PRF
+  // deja de estar disponible no debe quedar sin alternativa.
+  const pin = secret ?? '';
+  if (!PIN_PATTERN.test(pin)) {
+    if (method === 'passkey') throw new Error('Se requiere un PIN de 6 dígitos como respaldo de la passkey');
+    if (method === 'pin') throw new Error('PIN debe tener exactamente 6 dígitos');
+    throw new Error('Método desconocido');
+  }
+
   const rawKey = crypto.getRandomValues(new Uint8Array(32));
   const newActiveDataKey = await crypto.subtle.importKey(
     'raw',
@@ -132,19 +184,15 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
   let pinEnvelope: string | undefined;
   let passkeyEnvelope: string | undefined;
 
-  // We should try to create passkey, and if secret is provided, create PIN envelope as fallback
   if (method === 'passkey') {
     await vc.unlock({ passkey: true });
     passkeyEnvelope = await vc.wrapKey(rawKey);
-    // User can provide a PIN as fallback when enabling passkey
-    if (secret && secret.length === 6) {
-      await vc.lock();
-      await vc.unlock({ passphrase: secret });
-      pinEnvelope = await vc.wrapKey(rawKey);
-    }
-  } else if (method === 'pin') {
-    if (!secret || secret.length !== 6) throw new Error('PIN debe tener exactamente 6 dígitos');
-    await vc.unlock({ passphrase: secret });
+    // Respaldo obligatorio por PIN.
+    await vc.lock();
+    await vc.unlock({ passphrase: pin });
+    pinEnvelope = await vc.wrapKey(rawKey);
+  } else {
+    await vc.unlock({ passphrase: pin });
     pinEnvelope = await vc.wrapKey(rawKey);
   }
 
@@ -157,38 +205,38 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
     lockedUntil: 0
   };
 
-  // 1. Write 'transition' marker
+  // 1. Write 'transition' marker (con la clave envuelta: nunca se pierde si algo falla)
   await saveEnvelope(envelopeStore);
 
-  try {
-    // 2. Migrate
-    const { migrateLocalStoresEncryption } = await import('./indexedDbAdapter');
-    await migrateLocalStoresEncryption(newActiveDataKey);
+  // 2. Migrar (coordinada con las escrituras en curso dentro del adaptador).
+  // Si algo falla, el sobre NO se borra: es la única forma de recuperar la clave. La
+  // transición queda pendiente y unlock() la reanuda o revierte con la credencial original.
+  const { migrateLocalStoresEncryption } = await import('./indexedDbAdapter');
+  await migrateLocalStoresEncryption(newActiveDataKey);
 
-    const { migrateIdentityStoreEncryption } = await import('../../mesh/identityStore');
-    await migrateIdentityStoreEncryption(newActiveDataKey);
+  const { migrateIdentityStoreEncryption } = await import('../../mesh/identityStore');
+  await migrateIdentityStoreEncryption(newActiveDataKey);
 
-    // 3. Mark as active
-    envelopeStore.state = 'active';
-    await saveEnvelope(envelopeStore);
+  // 3. Mark as active
+  envelopeStore.state = 'active';
+  envelopeStore.targetMethod = undefined;
+  await saveEnvelope(envelopeStore);
 
-    // 4. Publish state in memory
-    activeDataKey = newActiveDataKey;
-    currentMethod = method;
+  // 4. Publish state in memory
+  activeDataKey = newActiveDataKey;
+  currentMethod = method;
 
-    // TODO: recovery flow must go through the vault recovery kit of PR #35
-    // and the same phone's biometrics/pattern. For now return dummy
-    return "00000000000000000000000000000000";
-  } catch (e) {
-    // Revert attempt on failure during migration
-    await clearEnvelope();
-    throw e;
-  }
+  // TODO: recovery flow must go through the vault recovery kit of PR #35
+  // and the same phone's biometrics/pattern. For now return dummy
+  return "00000000000000000000000000000000";
 }
 
 export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: string): Promise<void> {
   const env = await getEnvelope();
-  if (env === 'unreadable' || !env || env.state !== 'active') throw new Error('No hay protección habilitada o estado corrupto');
+  if (env === 'unreadable') throw new Error('Estado de protección ilegible');
+  if (!env || (env.state !== 'active' && env.state !== 'transition')) {
+    throw new Error('No hay protección habilitada o estado corrupto');
+  }
 
   // Verify PIN limits
   if (env.lockedUntil && Date.now() < env.lockedUntil) {
@@ -200,7 +248,7 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
 
   try {
     if (method === 'pin') {
-      if (!secret || secret.length !== 6) throw new Error('PIN debe tener exactamente 6 dígitos');
+      if (!secret || !PIN_PATTERN.test(secret)) throw new Error('PIN debe tener exactamente 6 dígitos');
       if (!env.pinEnvelope) throw new Error('No hay PIN configurado');
       await vc.unlock({ passphrase: secret });
       rawKey = await vc.unwrapKey(env.pinEnvelope);
@@ -233,14 +281,22 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
     throw err;
   }
 
-  activeDataKey = await crypto.subtle.importKey(
+  const key = await crypto.subtle.importKey(
     'raw',
     rawKey as unknown as BufferSource,
     { name: 'AES-GCM' },
     false,
     ['encrypt', 'decrypt']
   );
-  currentMethod = method === 'passkey' && !env.passkeyEnvelope ? 'pin' : method as 'pin' | 'passkey';
+
+  // Si la app se cerró a mitad de una transición, reanudarla con la clave recuperada.
+  if (env.state === 'transition') {
+    await resumeTransition(env, key);
+    return;
+  }
+
+  activeDataKey = key;
+  currentMethod = method === 'passkey' ? 'passkey' : 'pin';
 }
 
 export function lock(): void {
@@ -260,30 +316,26 @@ export async function disableProtection(): Promise<void> {
   env.targetMethod = 'off';
   await saveEnvelope(env);
 
-  try {
-    // 2. Migrate back to plain text
-    const { migrateLocalStoresEncryption } = await import('./indexedDbAdapter');
-    await migrateLocalStoresEncryption(null);
+  // 2. Migrate back to plain text. Si falla, se conserva el estado 'transition' y el
+  // sobre, de modo que unlock() puede reanudar o revertir sin perder la clave.
+  const { migrateLocalStoresEncryption } = await import('./indexedDbAdapter');
+  await migrateLocalStoresEncryption(null);
 
-    const { migrateIdentityStoreEncryption } = await import('../../mesh/identityStore');
-    await migrateIdentityStoreEncryption(null);
+  const { migrateIdentityStoreEncryption } = await import('../../mesh/identityStore');
+  await migrateIdentityStoreEncryption(null);
 
-    // 3. Clear envelope
-    await clearEnvelope();
+  // 3. Clear envelope
+  await clearEnvelope();
 
-    // 4. Clear memory
-    activeDataKey = null;
-    currentMethod = null;
-    if (vaultClientInstance) vaultClientInstance.lock();
-  } catch (e) {
-    // If it fails, we keep the transition state so we know it's broken and needs fixing
-    throw e;
-  }
+  // 4. Clear memory
+  activeDataKey = null;
+  currentMethod = null;
+  if (vaultClientInstance) vaultClientInstance.lock();
 }
 
 export async function changePin(oldPin: string, newPin: string): Promise<void> {
   if (!activeDataKey) throw new Error('Debe desbloquear antes de cambiar PIN');
-  if (newPin.length !== 6) throw new Error('El nuevo PIN debe tener exactamente 6 dígitos');
+  if (!PIN_PATTERN.test(newPin)) throw new Error('El nuevo PIN debe tener exactamente 6 dígitos');
 
   const vc = getVaultClient();
   const env = await getEnvelope();
