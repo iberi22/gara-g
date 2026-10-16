@@ -5,12 +5,13 @@
  * tests/e2e/sidebar-foco, interface-switcher, cls-skeleton y navigation).
  * Cubre las issues wave-32 05, 06, 17, 24 y 25 (lado FleetLayout).
  */
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import { readWithRaw } from './helpers/inlineSource';
 
-const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
+// Los scripts inline de estas plantillas viven en src/lib/inline/*.js (ver el helper).
+const read = (p: string) => readWithRaw(join(process.cwd(), p));
 const layout = read('src/layouts/FleetLayout.astro');
 const switcher = read('src/components/InterfaceSwitcher.astro');
 const fleetList = read('src/components/FleetList.astro');

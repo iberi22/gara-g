@@ -24,7 +24,7 @@
  * funcione. El comportamiento en navegador se cubre en tests/e2e.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -34,7 +34,7 @@ function ficheros(dir = SRC, acc: string[] = []) {
   for (const e of readdirSync(dir)) {
     const p = join(dir, e);
     if (statSync(p).isDirectory()) ficheros(p, acc);
-    else if (e.endsWith('.astro') || e.endsWith('.svelte')) acc.push(p);
+    else if (e.endsWith('.astro') || e.endsWith('.svelte') || e.endsWith('.js')) acc.push(p);
   }
   return acc;
 }
@@ -56,6 +56,27 @@ function scriptsDe(src: string): string[] {
   return cuerpos;
 }
 
+/** Cuerpos a auditar de un fichero: sus <script> inline o el .js entero (src/lib/inline). */
+function cuerposAuditables(f: string): string[] {
+  if (f.endsWith('.js')) return [readFileSync(f, 'utf8')];
+  return scriptsDe(readFileSync(f, 'utf8'));
+}
+
+/**
+ * El texto que la plantilla emite de verdad: sus `<script>` inline mas el contenido de cada
+ * import `?raw` (desde el 2026-10-15 los cuerpos de los scripts inline viven en
+ * `src/lib/inline/*.js`, fuera del .astro, para que la CSP pueda llevar su SHA-256). Asi la
+ * auditoria cubre los dos caminos en vez de quedarse mirando plantillas ya vacias.
+ */
+function textoEmitido(f: string): string {
+  const src = readFileSync(f, 'utf8');
+  const partes = [src, ...scriptsDe(src)];
+  for (const m of src.matchAll(/import\s+\w+\s+from\s+['"]([^'"]+)\?raw['"]/g)) {
+    partes.push(readFileSync(resolve(dirname(f), m[1]), 'utf8'));
+  }
+  return partes.join('\n');
+}
+
 const ATA_LISTENER =
   /addEventListener\s*\(\s*['"](?:click|input|change|submit|keydown|keyup|mouseenter|focus)['"]/;
 
@@ -69,8 +90,7 @@ describe('los scripts con listeners se re-ejecutan en cada navegacion', () => {
   it('ningun script ata listeners sin re-ejecutarse en astro:page-load', () => {
     const culpables: string[] = [];
     for (const f of todos) {
-      const src = readFileSync(f, 'utf8');
-      scriptsDe(src).forEach((cuerpo, i) => {
+      cuerposAuditables(f).forEach((cuerpo, i) => {
         // Un MediaQueryList (`window.matchMedia(...)`) no es un nodo: sobrevive a la
         // navegacion igual que `document`, asi que su 'change' no cuenta (ThemeBootstrap).
         const sinMedia = cuerpo.replace(/\bmedia(?:Query)?\.addEventListener\s*\(\s*['"]change['"]/g, '');
@@ -93,8 +113,7 @@ describe('los scripts con listeners se re-ejecutan en cada navegacion', () => {
     // que conecta en ambos por si la app se sirve sin ViewTransitions).
     const culpables: string[] = [];
     for (const f of todos) {
-      const src = readFileSync(f, 'utf8');
-      for (const cuerpo of scriptsDe(src)) {
+      for (const cuerpo of cuerposAuditables(f)) {
         const usaDOMContent = /DOMContentLoaded/.test(cuerpo);
         if (!usaDOMContent) continue;
         const tambienSPA = /astro:page-load/.test(cuerpo);
@@ -127,7 +146,7 @@ describe('los scripts con listeners se re-ejecutan en cada navegacion', () => {
       ],
       [
         'components/GenericTableAstro.astro',
-        /addEventListener\(\s*['"]astro:page-load['"]\s*,\s*initTable\s*\)/,
+        /addEventListener\(\s*['"]astro:page-load['"]\s*,\s*initAllTables\s*\)/,
       ],
       [
         'pages/fleet/users/index.astro',
@@ -135,7 +154,7 @@ describe('los scripts con listeners se re-ejecutan en cada navegacion', () => {
       ],
     ];
     for (const [fichero, patron] of esperados) {
-      const src = readFileSync(join(SRC, fichero), 'utf8');
+      const src = textoEmitido(join(SRC, fichero));
       expect(src, `${fichero} debe re-vincular en astro:page-load`).toMatch(patron);
     }
   });

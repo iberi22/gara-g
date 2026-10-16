@@ -1,0 +1,34 @@
+# public/_headers — cabeceras de los ASSETS estaticos (Workers Assets los sirve directamente,
+# sin pasar por el Worker, asi que src/middleware.ts no los ve: /sw.js, /manifest.json,
+# /favicon.svg, /icons/*, y los bundles /_astro/*.js|css).
+#
+# Mismos nombres y valores que SECURITY_HEADERS y CSP_NONE de src/lib/securityHeaders.ts.
+# tests/security-headers.test.ts comprueba que los dos ficheros no se desincronicen.
+#
+# Aqui no hay `Content-Security-Policy` de HTML: la app es SSR y la CSP de cada pagina la
+# emite Astro (`security.csp`, con los hashes de sus scripts inline).
+#
+# La CSP de los assets va por ruta y NO en `/*`: Cloudflare concatena los valores cuando dos
+# reglas casan, y dos CSP en una cabecera se aplican las dos (la mas estricta gana). Ojo con
+# los scripts que arrancan como worker: un service worker o un Web Worker se rige por la CSP
+# de su propia respuesta, asi que `default-src 'none'` en /sw.js o /_astro/* le bloquearia
+# todos los fetch(). /_astro/* no lleva CSP: lo que carga la pagina lo gobierna la del
+# documento.
+/*
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(self), geolocation=(self), microphone=()
+
+/sw.js
+  Content-Security-Policy: default-src 'self'; base-uri 'none'
+
+/favicon.svg
+  Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'
+
+/icons/*
+  Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'
+
+/manifest.json
+  Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'

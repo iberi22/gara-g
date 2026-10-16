@@ -6,6 +6,11 @@
  * Delete usa form HTML con confirmation (no JS cliente necesario).
  */
 import { DEFAULT_INSTANCE_ID } from '../lib/domain.config';
+// El TEXTO del script vive en un fichero aparte para que su SHA-256 sea una constante del
+// build y la CSP pueda permitirlo (ver src/lib/csp.ts y src/lib/inline/generic-table.js).
+// Los datos que antes interpolaba `define:vars` van ahora en un bloque JSON que el
+// navegador no ejecuta (no le aplica `script-src`).
+import genericTableScript from '../lib/inline/generic-table.js?raw';
 
 interface Column {
   key: string;
@@ -73,6 +78,21 @@ const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
 const currentPage = Math.min(safePage, totalPages);
 const offset = (currentPage - 1) * pageSize;
 const pagedRows = rows.slice(offset, offset + pageSize);
+
+/**
+ * Datos de la tabla que lee src/lib/inline/generic-table.js (los que antes pasaba
+ * `define:vars`). El `<` va escapado a proposito: un `</script>` dentro de un valor
+ * —una placa, una nota— cerraria el bloque y romperia la pagina. `\u003c` es un escape
+ * JSON valido, asi que `JSON.parse` devuelve el mismo texto.
+ */
+const gtableConfigJson = JSON.stringify({
+  testId,
+  pagedRows: pagedRows.length,
+  columns,
+  rows,
+  entity,
+  instanceId,
+}).replace(/</g, '\\u003c');
 
 function pageUrl(p: number) {
   const u = new URL(Astro.url);
@@ -179,7 +199,7 @@ function formatValue(value: unknown, format?: string): string {
                       method="POST"
                       action={`/api/fleet/${entity}?id=${row.id}&instanceId=${instanceId}&_method=DELETE`}
                       class="g-action-form"
-                      onsubmit="return confirm('¿Eliminar este registro? Esta acción no se puede deshacer.')"
+                      data-confirm="¿Eliminar este registro? Esta acción no se puede deshacer."
                       data-testid={`${testId}-delete-${row.id}`}
                     >
                       <input type="hidden" name="_method" value="DELETE" />
@@ -263,97 +283,14 @@ function formatValue(value: unknown, format?: string): string {
   )}
 </div>
 
-<script lang="ts" define:vars={{ testId, pagedRows: pagedRows.length, columns, rows, entity, instanceId }}>
-  // SPA-safe (ViewTransitions).
-  //
-  // `define:vars` implica `is:inline`: el navegador ejecuta este bloque UNA vez,
-  // en la carga inicial, y no en las navegaciones del ClientRouter. Con
-  // `document` persistente pero nodos sustituidos, el buscador y el botón
-  // Exportar quedaban muertos en cuanto el usuario llegaba a la página por
-  // navegación interna (es decir, casi siempre).
-  //
-  // Los guards `data-bound` evitan que esta función se ejecute dos veces sobre
-  // el mismo DOM, que duplicaría los listeners. Es el patrón de EntityForm.astro.
-  function initTable() {
-    // Filter behavior
-    const input = document.getElementById(`${testId}-search`);
-    if (input && !input.hasAttribute('data-bound')) {
-      input.setAttribute('data-bound', '1');
-      input.addEventListener('input', () => {
-        const q = input.value.toLowerCase().trim();
-        const tbody = document.querySelector(`[data-testid="${testId}"] tbody`);
-        if (!tbody) return;
-        let visible = 0;
-        tbody.querySelectorAll('tr[data-row-id]').forEach((tr) => {
-          // Fila entera, sin la celda de acciones (sus iconos no son datos).
-          const clone = tr.cloneNode(true);
-          clone.querySelectorAll('.g-actions-cell').forEach((c) => c.remove());
-          const val = (clone.textContent || '').toLowerCase();
-          const show = !q || val.includes(q);
-          (tr).style.display = show ? '' : 'none';
-          if (show) visible++;
-        });
-        const noMatch = tbody.querySelector('tr.g-no-match');
-        if (noMatch) noMatch.hidden = !(q && visible === 0);
-        const count = document.querySelector(`[data-testid="${testId}-count"]`);
-        if (count) {
-          count.textContent = q
-            ? `${visible} de ${pagedRows} resultado${pagedRows !== 1 ? 's' : ''} filtrado${visible !== 1 ? 's' : ''}`
-            : `${pagedRows} resultado${pagedRows !== 1 ? 's' : ''}`;
-        }
-      });
-    }
-
-    // Client-side CSV export function
-    function escapeCSVCell(val, delimiter) {
-      if (val === null || val === undefined) return '';
-      let str = typeof val === 'object' ? JSON.stringify(val) : String(val);
-      const needsQuotes = str.includes(delimiter) || str.includes('"') || str.includes('\n') || str.includes('\r');
-      return needsQuotes ? `"${str.replace(/"/g, '""')}"` : str;
-    }
-
-    const exportBtn = document.getElementById(`${testId}-export-btn`);
-    if (exportBtn && !exportBtn.hasAttribute('data-bound')) {
-      exportBtn.setAttribute('data-bound', '1');
-      exportBtn.addEventListener('click', () => {
-        const delimiter = ';';
-        // Filter rows based on active search input across all columns and values
-        // Script con define:vars: va tal cual al navegador, sin TypeScript (un `as` rompia
-        // el script entero y con el la busqueda y el CSV de todas las tablas).
-        const search = document.getElementById(`${testId}-search`);
-        const q = search ? search.value.toLowerCase().trim() : '';
-        const visibleRows = q
-          ? rows.filter((r) =>
-              columns.some((col) => String(r[col.key] ?? '').toLowerCase().includes(q)) ||
-              Object.values(r).some((v) => String(v ?? '').toLowerCase().includes(q))
-            )
-          : rows;
-
-        const header = columns.map((col) => escapeCSVCell(col.label, delimiter)).join(delimiter);
-        const dataLines = visibleRows.map((r) =>
-          columns.map((col) => escapeCSVCell(r[col.key], delimiter)).join(delimiter)
-        );
-
-        const csvContent = '\uFEFF' + [header, ...dataLines].join('\r\n');
-        const filename = `${entity || 'export'}_${instanceId}.csv`;
-
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.setAttribute('href', url);
-        link.setAttribute('download', filename);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      });
-    }
-  }
-
-  document.addEventListener('astro:page-load', initTable);
-  initTable();
+<script>
+  // Confirmacion de los formularios con data-confirm (la CSP bloquea `onsubmit=`).
+  import { installConfirmSubmit } from '../lib/confirmSubmit';
+  installConfirmSubmit();
 </script>
+
+<script is:inline type="application/json" data-gtable-config set:html={gtableConfigJson}></script>
+<script is:inline set:html={genericTableScript} />
 
 <style>
   .g-table-controls {
