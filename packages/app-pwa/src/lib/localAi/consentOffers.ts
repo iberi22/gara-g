@@ -12,11 +12,12 @@
  * LocalAiConsent solo pinta las opciones ofrecidas. Función pura: el estado entra
  * por parámetros para poder probarla sin navegador.
  */
+import { PROMPT_API_DOWNLOAD_STATES } from './capabilities';
 import { LOCAL_MODELS } from './config';
 import { PROMPT_API_CONSENT_MODEL_ID } from './consent';
 
 /** Estados de la Prompt API que aún exigen descargar Gemini Nano. */
-const NANO_DOWNLOAD_STATES: ReadonlySet<string> = new Set(['downloadable', 'downloading']);
+const NANO_DOWNLOAD_STATES: ReadonlySet<string> = new Set(PROMPT_API_DOWNLOAD_STATES);
 
 export interface ConsentOfferState {
   /** Estado crudo de `LanguageModel.availability()` (`undefined` si no hay Prompt API). */
