@@ -11,6 +11,7 @@ export interface DeviceLockStore {
   failedAttempts?: number;
   lockedUntil?: number; // timestamp
   startedAt?: number; // timestamp de creación del marcador de transición (lease N1)
+  markerId?: string; // id único del intento de habilitación: valla CAS entre pestañas (L2)
 }
 
 /** Error reintentable: el sobre cambió entre la foto y la escritura. */
@@ -119,12 +120,22 @@ async function getEnvelope(): Promise<DeviceLockStore | null | 'unreadable'> {
   // enableProtection sin esperar al lease.
   if (env && env !== 'unreadable' && isAbandonedMarker(env)) {
     try {
-      await clearEnvelope();
-      broadcastLockChange();
+      // L2: borrado condicional en UNA transacción (releer+comparar+borrar):
+      // si otra pestaña reemplazó el marcador mientras tanto, no se toca.
+      const deleted = await casDeleteOwnMarker(env, true);
+      if (deleted) {
+        broadcastLockChange();
+        return null;
+      }
     } catch {
       /* best-effort */
     }
-    return null;
+    // Alguien lo reemplazó mientras tanto: releer sin limpiar.
+    try {
+      return await getEnvelopeRaw();
+    } catch {
+      return 'unreadable';
+    }
   }
   return env;
 }
@@ -176,6 +187,113 @@ async function casInsertTransitionMarker(marker: DeviceLockStore): Promise<boole
         tx.onabort = () => resolve(false);
       })
   );
+}
+
+function newMarkerId(): string {
+  try {
+    const rc = globalThis as unknown as { crypto?: { randomUUID?: () => string } };
+    if (rc.crypto && typeof rc.crypto.randomUUID === 'function') return rc.crypto.randomUUID();
+  } catch {
+    /* fallback */
+  }
+  return `m-${Date.now().toString(36)}-${Math.floor(Math.random() * 2 ** 32).toString(36)}`;
+}
+
+/** ¿Sigue almacenado el marcador `markerId` en transición (nuestro intento)? */
+function isOurMarker(cur: unknown, markerId: string): cur is DeviceLockStore {
+  if (!cur || typeof cur !== 'object') return false;
+  const env = cur as DeviceLockStore;
+  return env.state === 'transition' && env.markerId === markerId;
+}
+
+/**
+ * Escritura condicional en UNA sola transacción (L2): solo guarda `next` si el
+ * sobre almacenado sigue siendo nuestro marcador `markerId` en transición.
+ * Devuelve true si escribió; false si otra pestaña lo reemplazó (abortar sin
+ * tocar nada: ni sobre, ni migración).
+ */
+async function casWriteEnvelopeIfMarker(markerId: string, next: DeviceLockStore): Promise<boolean> {
+  return withLockDb(
+    (db) =>
+      new Promise<boolean>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const get = store.get(KEY_NAME);
+        get.onsuccess = () => {
+          if (!isOurMarker(get.result, markerId)) {
+            try {
+              tx.abort();
+            } catch {
+              /* ya terminó */
+            }
+            resolve(false);
+            return;
+          }
+          store.put(next, KEY_NAME);
+        };
+        get.onerror = () => reject(get.error);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      })
+  );
+}
+
+/**
+ * Borrado condicional en UNA sola transacción (L2): solo borra si el sobre
+ * almacenado sigue siendo el marcador esperado, sin sobres persistidos (la
+ * migración solo empieza DESPUÉS de persistirlos) y —si `onlyIfAbandoned`—
+ * con el lease vencido. Así la limpieza de un marcador huérfano nunca borra
+ * el marcador fresco (o el sobre activo) de otra pestaña.
+ */
+async function casDeleteOwnMarker(
+  expected: DeviceLockStore,
+  onlyIfAbandoned: boolean
+): Promise<boolean> {
+  return withLockDb(
+    (db) =>
+      new Promise<boolean>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const get = store.get(KEY_NAME);
+        get.onsuccess = () => {
+          const cur = get.result as DeviceLockStore | undefined;
+          const matches =
+            !!cur &&
+            cur.state === 'transition' &&
+            (cur.markerId ?? null) === (expected.markerId ?? null) &&
+            (cur.startedAt ?? null) === (expected.startedAt ?? null) &&
+            !cur.pinEnvelope &&
+            !cur.passkeyEnvelope &&
+            (!onlyIfAbandoned || isAbandonedMarker(cur));
+          if (!matches) {
+            try {
+              tx.abort();
+            } catch {
+              /* ya terminó */
+            }
+            resolve(false);
+            return;
+          }
+          store.delete(KEY_NAME);
+        };
+        get.onerror = () => reject(get.error);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      })
+  );
+}
+
+/**
+ * Renueva el lease del marcador (L2) solo si sigue siendo nuestro: extiende
+ * `startedAt` al ahora para que un prompt lento (passkey) no lo caduque
+ * innecesariamente. Devuelve false si otra pestaña tomó el relevo.
+ */
+async function touchTransitionMarker(marker: DeviceLockStore): Promise<boolean> {
+  if (!marker.markerId) return true;
+  marker.startedAt = Date.now();
+  return casWriteEnvelopeIfMarker(marker.markerId, marker);
 }
 
 async function clearEnvelope(): Promise<void> {
@@ -563,7 +681,11 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
       failedAttempts: 0,
       lockedUntil: 0,
       startedAt: Date.now(),
+      markerId: newMarkerId(),
     };
+    // La valla CAS exige markerId: sin él no se puede distinguir nuestro
+    // intento del de otra pestaña.
+    const markerId = envelopeStore.markerId as string;
     const won = await casInsertTransitionMarker(envelopeStore);
     if (!won) {
       throw new Error('La protección ya está habilitada');
@@ -585,6 +707,14 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
       let passkeyEnvelope: string | undefined;
 
       if (method === 'passkey') {
+        // L2: renovar el lease justo antes del prompt (lento) para que no
+        // caduque innecesariamente; si otra pestaña tomó el relevo, abortar
+        // ya sin tocar nada.
+        if (!(await touchTransitionMarker(envelopeStore))) {
+          throw new Error(
+            'La protección cambió en otra pestaña durante la habilitación; operación cancelada sin modificar tus datos.'
+          );
+        }
         await vc.unlock({ passkey: true });
         passkeyEnvelope = await vc.wrapKey(rawKey);
         // Respaldo obligatorio por PIN.
@@ -598,9 +728,17 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
 
       // Persistir la clave envuelta junto al marcador: si algo falla después,
       // unlock() puede reanudar la transición con la credencial original.
+      // L2: escritura vallada — si el marcador ya no es el nuestro (otra
+      // pestaña limpió el lease y habilitó), abortar SIN migrar y SIN tocar
+      // el sobre ajeno. Se renueva el lease para cubrir la migración.
       envelopeStore.pinEnvelope = pinEnvelope;
       envelopeStore.passkeyEnvelope = passkeyEnvelope;
-      await saveEnvelope(envelopeStore);
+      envelopeStore.startedAt = Date.now();
+      if (!(await casWriteEnvelopeIfMarker(markerId, envelopeStore))) {
+        throw new Error(
+          'La protección cambió en otra pestaña durante la habilitación; operación cancelada sin modificar tus datos.'
+        );
+      }
 
       // 2. Migrar (coordinada con las escrituras en curso dentro del adaptador).
       // Si algo falla, el sobre NO se borra: es la única forma de recuperar la clave. La
@@ -611,10 +749,14 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
       const { migrateIdentityStoreEncryption } = await import('../../mesh/identityStore');
       await migrateIdentityStoreEncryption(newActiveDataKey);
 
-      // 3. Mark as active
+      // 3. Mark as active (vallado: el sobre sigue siendo nuestro).
       envelopeStore.state = 'active';
       envelopeStore.targetMethod = undefined;
-      await saveEnvelope(envelopeStore);
+      if (!(await casWriteEnvelopeIfMarker(markerId, envelopeStore))) {
+        throw new StaleTicketError(
+          'La protección cambió en otra pestaña durante la habilitación; operación cancelada sin modificar tus datos.'
+        );
+      }
       broadcastLockChange();
 
       // 4. Publish state in memory
@@ -636,21 +778,13 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
         /* best-effort */
       }
       // N1: si el fallo fue ANTES de persistir los sobres (passkey cancelada,
-      // KDF interrumpida), el marcador quedó huérfano: borrarlo si sigue
-      // siendo nuestro y sin sobres. La migración solo empieza después de
-      // persistirlos, así que borrarlo no pierde nada recuperable.
+      // KDF interrumpida), el marcador quedó huérfano: borrarlo solo si sigue
+      // siendo nuestro y sin sobres (L2: borrado condicional en una
+      // transacción). La migración solo empieza después de persistirlos, así
+      // que borrarlo no pierde nada recuperable.
       try {
-        const cur = await getEnvelopeRaw();
-        if (
-          cur &&
-          cur !== 'unreadable' &&
-          cur.state === 'transition' &&
-          !cur.pinEnvelope &&
-          !cur.passkeyEnvelope
-        ) {
-          await clearEnvelope();
-          broadcastLockChange();
-        }
+        const deleted = await casDeleteOwnMarker(envelopeStore, false);
+        if (deleted) broadcastLockChange();
       } catch {
         /* best-effort */
       }
@@ -685,12 +819,20 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
     if (!env || (env.state !== 'active' && env.state !== 'transition')) {
       throw new Error('No hay protección habilitada o estado corrupto');
     }
-    // N4: revalidar el lockout DENTRO del mutex con el sobre recién leído:
-    // los intentos encolados en paralelo veían todos el mismo contador y el
-    // correcto se colaba reseteando los fallos. Un fallo en lockout sigue
-    // contando (extiende el bloqueo, como exige T5); un éxito en lockout se
-    // rechaza sin resetear ni desbloquear.
-    const wasLocked = !!env.lockedUntil && Date.now() < env.lockedUntil;
+    // N4/L1: revalidar el lockout DENTRO del mutex con el sobre recién leído
+    // ANTES de cualquier comprobación de clave (KDF/unwrap). Los intentos
+    // encolados en paralelo veían todos el mismo contador; si el bloqueado
+    // llegara al KDF, un PIN erróneo devolvería BAD_KEY y el correcto LOCKED,
+    // y ese oráculo permitiría al atacante localizar el PIN y esperar al
+    // desbloqueo. En lockout la respuesta es idéntica sea cual sea el PIN:
+    // el intento cuenta (extiende el bloqueo, como exige T5) y se rechaza.
+    if (env.lockedUntil && Date.now() < env.lockedUntil) {
+      env.failedAttempts = (env.failedAttempts || 0) + 1;
+      env.lockedUntil = Date.now() + calculateDelay(env.failedAttempts);
+      await saveEnvelope(env);
+      broadcastLockChange();
+      throw new VaultError('LOCKED', 'Demasiados intentos. Inténtalo más tarde.');
+    }
 
     const vc = getVaultClient();
     let rawKey: Uint8Array;
@@ -717,10 +859,7 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
       throw err;
     }
 
-    // Success - reset attempts (salvo que el lockout nos haya alcanzado en la cola).
-    if (wasLocked) {
-      throw new VaultError('LOCKED', 'Demasiados intentos. Inténtalo más tarde.');
-    }
+    // Success - reset attempts.
     if (env.failedAttempts && env.failedAttempts > 0) {
       env.failedAttempts = 0;
       env.lockedUntil = 0;

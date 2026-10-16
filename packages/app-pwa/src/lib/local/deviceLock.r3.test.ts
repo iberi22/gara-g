@@ -133,12 +133,14 @@ describe('r3 regressions', () => {
     const res = await Promise.allSettled(guesses.map((g) => dl.unlock('pin', g)));
     // The 8 wrong ones are rejected AND the correct one queued behind them is
     // rejected as locked instead of being accepted and resetting the counter.
+    // R4-L1: every attempt past the pre-check counts —including locked ones—
+    // and returns the same LOCKED, so no BAD_KEY/LOCKED oracle (9 = 8 + correct).
     expect(res.slice(0, 8).every((r) => r.status === 'rejected')).toBe(true);
     expect(res[8].status).toBe('rejected');
     expect(await dl.getLockState()).toBe('locked');
     const env = (await rawGet('gara-lock', 'gara-lock', 'envelope')) as {
       failedAttempts?: number;
     };
-    expect(env.failedAttempts).toBe(8);
+    expect(env.failedAttempts).toBe(9);
   }, 120000);
 });
