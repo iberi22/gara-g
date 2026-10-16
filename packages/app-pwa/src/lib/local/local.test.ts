@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { LOCAL_CHANGED_EVENT, LOCAL_INSTANCE_ID } from '../appMode';
+import { exportLocalData, importLocalData, mergeLocalDumps } from './dump';
+import { closeLocalDb, getLocalAdapter, replaceLocalStores } from './indexedDbAdapter';
+import type { LocalDump } from './types';
 import { createEntity, deleteEntity, getEntity, listEntities, setStorageAdapter, updateEntity, getMemoryAdapter } from '../domain';
 import type { DomainRecord } from '../domain';
-import { exportLocalData, importLocalData, mergeLocalDumps } from './dump';
-import { closeLocalDb, getLocalAdapter } from './indexedDbAdapter';
-import type { LocalDump } from './types';
+import { LOCAL_CHANGED_EVENT, LOCAL_INSTANCE_ID } from '../appMode';
+import { enableProtection, lock } from './deviceLock';
+import { LockedError } from './recordCrypto';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const rec = (id: string, updated_at: string, extra: Record<string, unknown> = {}): DomainRecord => ({
   id,
@@ -34,6 +36,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  lock();
   setStorageAdapter(getMemoryAdapter());
 });
 
@@ -49,6 +52,46 @@ describe('IndexedDbAdapter vía domain.ts', () => {
     expect(up?.plate).toBe('XYZ999');
     expect(up!.updated_at > v.updated_at).toBe(true);
     expect((await getEntity('vehicle', v.id, LOCAL_INSTANCE_ID))?.plate).toBe('XYZ999');
+  });
+
+  it('actualizaciones concurrentes sobre campos distintos no se pisan', async () => {
+    const v = await createEntity('vehicle', { plate: 'A', color: 'rojo' }, LOCAL_INSTANCE_ID);
+
+    await Promise.all([
+      updateEntity('vehicle', v.id, { plate: 'B' }, LOCAL_INSTANCE_ID),
+      updateEntity('vehicle', v.id, { color: 'azul' }, LOCAL_INSTANCE_ID),
+    ]);
+
+    const got = await getEntity('vehicle', v.id, LOCAL_INSTANCE_ID);
+    expect(got?.plate).toBe('B');
+    expect(got?.color).toBe('azul');
+  });
+
+  it('una actualización pendiente no resucita una fila borrada', async () => {
+    const v = await createEntity('vehicle', { plate: 'A' }, LOCAL_INSTANCE_ID);
+    await enableProtection('pin', '123456');
+
+    // Pausa el cifrado de la escritura para intercalar el borrado.
+    const encryptProto = Object.getPrototypeOf(crypto.subtle) as SubtleCrypto;
+    const realEncrypt = encryptProto.encrypt;
+    let releaseEncrypt!: () => void;
+    const encryptGate = new Promise<void>((resolve) => { releaseEncrypt = resolve; });
+    let encryptPaused = false;
+    const spy = vi.spyOn(encryptProto, 'encrypt').mockImplementation(function (this: SubtleCrypto, ...args: unknown[]) {
+      encryptPaused = true;
+      return encryptGate.then(() => (realEncrypt as (...a: unknown[]) => Promise<ArrayBuffer>).apply(this, args));
+    });
+
+    const pendingUpdate = updateEntity('vehicle', v.id, { plate: 'B' }, LOCAL_INSTANCE_ID);
+    await vi.waitFor(() => expect(encryptPaused).toBe(true));
+    await deleteEntity('vehicle', v.id, LOCAL_INSTANCE_ID);
+    releaseEncrypt();
+
+    await expect(pendingUpdate).resolves.toBeNull();
+    spy.mockRestore();
+
+    expect(await getEntity('vehicle', v.id, LOCAL_INSTANCE_ID)).toBeNull();
+    expect(await listEntities('vehicle', LOCAL_INSTANCE_ID)).toHaveLength(0);
   });
 
   it('no mezcla tenants', async () => {
@@ -201,41 +244,56 @@ describe('mergeLocalDumps', () => {
   });
 });
 
-  it('migrateLocalStoresEncryption aborts entirely if write fails', async () => {
-    // 1. Setup unencrypted data
-    await createEntity('vehicle', { plate: 'PLAIN' }, LOCAL_INSTANCE_ID);
-    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+describe('LockedError checks', () => {
+  it('bloquea todas las operaciones de IDB cuando está protegido', async () => {
+    await createEntity('vehicle', { plate: 'ABC' }, LOCAL_INSTANCE_ID);
+    await enableProtection('pin', '123456');
+    lock();
 
-    // 2. Mock a failure during IDB put operation
+    await expect(listEntities('vehicle', LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
+    await expect(createEntity('vehicle', { plate: 'XYZ' }, LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
+    await expect(updateEntity('vehicle', '1', { plate: 'XYZ' }, LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
+    await expect(exportLocalData()).rejects.toThrow(LockedError);
+    await expect(replaceLocalStores(dump())).rejects.toThrow(LockedError);
+  });
+});
+
+describe('migrateLocalStoresEncryption', () => {
+  it('aborts entirely if a later write fails (no partial commit)', async () => {
+    // 1. Setup three unencrypted rows (fail on the SECOND write, not the first).
+    for (let i = 0; i < 3; i++) {
+      await createEntity('vehicle', { plate: `P${i}` }, LOCAL_INSTANCE_ID);
+    }
+    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
     const db = await (await import('./indexedDbAdapter')).openLocalDb();
 
-    // Let's modify the IDBTransaction prototype strictly for this test
     const txProto = Object.getPrototypeOf(db.transaction('records', 'readwrite'));
     const originalStore = txProto.objectStore;
     let puts = 0;
 
-    // Mock the store.put to fail on the first call
-    vi.spyOn(txProto, 'objectStore').mockImplementation(function(this: any, name: string) {
-       const store = originalStore.call(this, name);
-       if (name === 'records') {
-           const origPut = store.put;
-           store.put = function(this: any, ...args: any[]) {
-               puts++;
-               if (puts === 1) throw new Error('Simulated atomic write failure');
-               return origPut.apply(this, args);
-           };
-       }
-       return store;
+    vi.spyOn(txProto, 'objectStore').mockImplementation(function (this: unknown, name: string) {
+      const store = originalStore.call(this, name);
+      if (name === 'records') {
+        const origPut = store.put;
+        store.put = function (this: unknown, ...args: unknown[]) {
+          puts++;
+          if (puts === 2) throw new Error('Simulated atomic write failure');
+          return origPut.apply(this, args);
+        };
+      }
+      return store;
     });
 
-    // 3. Attempt migration which should throw
+    // 2. Attempt migration which should throw and abort the whole transaction.
     await expect((await import('./indexedDbAdapter')).migrateLocalStoresEncryption(key)).rejects.toThrow('Simulated atomic write failure');
-
-    // Restore the prototype
     vi.restoreAllMocks();
 
-    // 4. Verify no row changed (still readable as plain)
+    // 3. No row may be left encrypted: either all or nothing.
+    const rows = await db.getAll('records');
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.record !== undefined && r.enc === undefined)).toBe(true);
+
     const list = await listEntities('vehicle', LOCAL_INSTANCE_ID);
-    expect(list.length).toBe(1);
-    expect(list[0].plate).toBe('PLAIN');
+    expect(list).toHaveLength(3);
   });
+});

@@ -56,18 +56,18 @@ describe('identityStore', () => {
     await saveSerializedKeypair('test-secret-keypair');
 
     lock();
-    await expect(loadSerializedKeypair()).rejects.toThrow('Base de datos bloqueada');
+    await expect(loadSerializedKeypair()).rejects.toThrow('El dispositivo está bloqueado. Desbloquéalo para continuar.');
   });
 
   it('no guarda cuando está bloqueado (porque no tiene la clave)', async () => {
     await enableProtection('pin', '123456');
     lock();
 
-    await saveSerializedKeypair('new-data');
+    await expect(saveSerializedKeypair('new-data')).rejects.toThrow('El dispositivo está bloqueado. Desbloquéalo para continuar.');
 
     // Intentamos cargar (desbloqueando primero)
     await unlock('pin', '123456');
     const loaded = await loadSerializedKeypair();
-    expect(loaded).toBeNull(); // No debio guardar nada porque falló
+    expect(loaded).toBeNull(); // No debio guardar nada porque falló antes de desbloquear
   });
 });
