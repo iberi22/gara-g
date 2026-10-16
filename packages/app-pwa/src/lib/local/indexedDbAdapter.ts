@@ -97,6 +97,31 @@ export class IndexedDbAdapter implements StorageAdapter {
     return record;
   }
 
+  /**
+   * Inserta sin sobrescribir. El `get` y el `add` van en la MISMA transaccion
+   * readwrite: IndexedDB serializa esas transacciones por store, asi que dos
+   * llamadas concurrentes con el mismo id no pueden pisarse (a diferencia de
+   * `create`, que usa `put`).
+   */
+  async createIfAbsent(entity: string, record: DomainRecord): Promise<boolean> {
+    const db = await openLocalDb();
+    const tx = db.transaction(['records', 'tombstones'], 'readwrite');
+    const records = tx.objectStore('records');
+    const existing = await records.get([entity, record.id]);
+    if (existing) {
+      await tx.done;
+      return false;
+    }
+    await Promise.all([
+      // `add` (no `put`): nunca sobrescribe; si el id ya existiera, IndexedDB lanza ConstraintError.
+      records.add({ entity, id: record.id, record }),
+      tx.objectStore('tombstones').delete([entity, record.id]),
+      tx.done,
+    ]);
+    notifyChanged();
+    return true;
+  }
+
   async list(entity: string, instanceId: string): Promise<DomainRecord[]> {
     const db = await openLocalDb();
     const rows = await db.getAllFromIndex('records', 'by-entity', entity);

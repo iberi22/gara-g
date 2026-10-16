@@ -21,6 +21,13 @@ export type DomainRecord<T = Record<string, unknown>> = T & {
 
 export interface StorageAdapter {
   create(entity: string, record: DomainRecord): Promise<DomainRecord>;
+  /**
+   * Inserta solo si el id no existe: `true` si creo el registro, `false` si ya estaba.
+   * A diferencia de `create` (que es un upsert), nunca sobrescribe. Los adapters
+   * que pueden tener escrituras concurrentes (IndexedDB `put`, D1) lo implementan
+   * de forma atomica; el resto queda serializado por el llamador.
+   */
+  createIfAbsent?(entity: string, record: DomainRecord): Promise<boolean>;
   list(entity: string, instanceId: string): Promise<DomainRecord[]>;
   get(entity: string, id: string, instanceId: string): Promise<DomainRecord | null>;
   update(entity: string, id: string, patch: Record<string, unknown>, instanceId: string): Promise<DomainRecord | null>;
@@ -39,6 +46,12 @@ class MemoryAdapter implements StorageAdapter {
   async create(entity: string, record: DomainRecord): Promise<DomainRecord> {
     this.key(entity).set(record.id, record);
     return record;
+  }
+  async createIfAbsent(entity: string, record: DomainRecord): Promise<boolean> {
+    const bucket = this.key(entity);
+    if (bucket.has(record.id)) return false;
+    bucket.set(record.id, record);
+    return true;
   }
   async list(entity: string, instanceId: string): Promise<DomainRecord[]> {
     return [...this.key(entity).values()].filter((r) => r.instance_id === instanceId);
@@ -215,6 +228,17 @@ export class D1Adapter implements StorageAdapter {
       .bind(instance_id, entity, id, data, created_at, updated_at)
       .run();
     return record;
+  }
+
+  async createIfAbsent(entity: string, record: DomainRecord): Promise<boolean> {
+    const { id, instance_id, created_at, updated_at } = record;
+    const data = this.serialize(record);
+    // INSERT OR IGNORE: si la clave (instance_id, entity, id) ya existe no toca la fila.
+    const result = await this.d1
+      .prepare('INSERT OR IGNORE INTO entity (instance_id, entity, id, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(instance_id, entity, id, data, created_at, updated_at)
+      .run();
+    return (result.meta?.changes ?? 0) > 0;
   }
 
   async list(entity: string, instanceId: string): Promise<DomainRecord[]> {

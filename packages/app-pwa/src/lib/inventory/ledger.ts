@@ -43,6 +43,45 @@ async function itemMovements(adapter: StorageAdapter, instanceId: string, itemId
   });
 }
 
+const OPENING_NOTE = 'saldo inicial (stock anterior al libro de movimientos)';
+
+/**
+ * Cola por id de movimiento: dentro de un mismo contexto serializa el
+ * "comprueba si existe y crea" para que dos llamadas concurrentes con el mismo
+ * id no se pisen (IndexedDB usa `put`, que sobrescribe).
+ */
+const movementOps = new Map<string, Promise<void>>();
+
+async function withMovementIdLock<T>(movementId: string, task: () => Promise<T>): Promise<T> {
+  const previous = movementOps.get(movementId) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queued = previous.then(() => gate);
+  movementOps.set(movementId, queued);
+  try {
+    await previous;
+    return await task();
+  } finally {
+    release();
+    if (movementOps.get(movementId) === queued) movementOps.delete(movementId);
+  }
+}
+
+/**
+ * Reserva un movimiento por id: `true` si lo creo, `false` si el id ya existia.
+ * Delega en `createIfAbsent` cuando el adapter lo soporta (atomico, incluso
+ * entre pestanas); si no, el llamador lo serializa con `withMovementIdLock`.
+ */
+async function claimMovement(adapter: StorageAdapter, instanceId: string, movement: DomainRecord): Promise<boolean> {
+  if (adapter.createIfAbsent) return adapter.createIfAbsent('stockMovement', movement);
+  const existing = await adapter.get('stockMovement', movement.id, instanceId);
+  if (existing) return false;
+  await adapter.create('stockMovement', movement);
+  return true;
+}
+
 /**
  * Un insumo con stock pero sin ningun movimiento recibe un
  * movimiento de saldo inicial: si no, el primer movimiento recalcula desde cero y ese stock desaparece.
@@ -55,18 +94,26 @@ async function ensureOpeningBalance(adapter: StorageAdapter, instanceId: string,
     throw new Error(`Cantidad inicial invalida para insumo: ${itemId}`);
   }
   if (quantity === 0) return;
-  if ((await itemMovements(adapter, instanceId, itemId)).length > 0) return;
-  const now = new Date().toISOString();
-  await adapter.create('stockMovement', {
-    id: `mov-open-${itemId}`,
-    instance_id: instanceId,
-    itemId,
-    kind: 'adjust',
-    qty: quantity,
-    note: 'saldo inicial (stock anterior al libro de movimientos)',
-    created_at: now,
-    updated_at: now,
-  } as DomainRecord);
+
+  const openingId = `mov-open-${itemId}`;
+  await withMovementIdLock(openingId, async () => {
+    if ((await itemMovements(adapter, instanceId, itemId)).length > 0) return;
+    // El id reservado puede pertenecer a otro insumo (alguien pudo usar
+    // "mov-open-b" como id manual de "a"): en ese caso NO se sobrescribe.
+    const owner = (await adapter.get('stockMovement', openingId, instanceId)) as Record<string, unknown> | null;
+    const id = owner && owner.itemId !== itemId ? `${openingId}-${genId()}` : openingId;
+    const now = new Date().toISOString();
+    await claimMovement(adapter, instanceId, {
+      id,
+      instance_id: instanceId,
+      itemId,
+      kind: 'adjust',
+      qty: quantity,
+      note: OPENING_NOTE,
+      created_at: now,
+      updated_at: now,
+    } as DomainRecord);
+  });
 }
 
 /** Recalcula el stock del insumo desde el libro y lo guarda. */
@@ -100,26 +147,10 @@ export async function appendMovement(
 
   await ensureOpeningBalance(adapter, instanceId, itemId);
 
-  if (opts.id) {
-    const existing = await adapter.get('stockMovement', opts.id, instanceId) as Record<string, unknown> | null;
-    if (existing) {
-      if (
-        existing.itemId !== itemId ||
-        existing.kind !== kind ||
-        Number(existing.qty) !== Number(qty) ||
-        (existing.note ?? null) !== (note ?? null) ||
-        (existing.maintenanceId ?? undefined) !== opts.maintenanceId
-      ) {
-        throw new Error('Conflicto de movimiento: el id ya existe con datos diferentes');
-      }
-      await syncQuantity(adapter, instanceId, itemId);
-      return existing as DomainRecord;
-    }
-  }
-
+  const fixedId = opts.id;
   const now = new Date().toISOString();
-  const tx = (await adapter.create('stockMovement', {
-    id: opts.id ?? genId(),
+  const candidate = {
+    id: fixedId ?? genId(),
     instance_id: instanceId,
     itemId,
     kind,
@@ -128,10 +159,37 @@ export async function appendMovement(
     ...(opts.maintenanceId !== undefined ? { maintenanceId: opts.maintenanceId } : {}),
     created_at: now,
     updated_at: now,
-  } as DomainRecord)) as DomainRecord;
+  } as DomainRecord;
+
+  if (fixedId) {
+    // Reserva y comprobacion juntas: si dos peticiones traen el mismo id, solo una
+    // crea; la otra ve el movimiento existente y compara (o falla por conflicto).
+    return withMovementIdLock(fixedId, async () => {
+      const created = await claimMovement(adapter, instanceId, candidate);
+      if (!created) {
+        const existing = (await adapter.get('stockMovement', fixedId, instanceId)) as Record<string, unknown> | null;
+        if (
+          !existing ||
+          existing.itemId !== itemId ||
+          existing.kind !== kind ||
+          Number(existing.qty) !== Number(qty) ||
+          (existing.note ?? null) !== (note ?? null) ||
+          (existing.maintenanceId ?? undefined) !== opts.maintenanceId
+        ) {
+          throw new Error('Conflicto de movimiento: el id ya existe con datos diferentes');
+        }
+        await syncQuantity(adapter, instanceId, itemId);
+        return existing as DomainRecord;
+      }
+      await syncQuantity(adapter, instanceId, itemId);
+      return candidate;
+    });
+  }
+
+  await adapter.create('stockMovement', candidate);
 
   await syncQuantity(adapter, instanceId, itemId);
-  return tx;
+  return candidate;
 }
 
 export async function quantityOf(adapter: StorageAdapter, instanceId: string, itemId: string): Promise<number> {

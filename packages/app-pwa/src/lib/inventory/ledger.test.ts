@@ -184,4 +184,46 @@ describe('Inventory Ledger', () => {
     await appendMovement(adapter, 'inst1', 'a', 'purchase', 10);
     expect(await quantityOf(adapter, 'inst1', 'a')).toBe(25);
   });
+
+  it('el saldo inicial no sobrescribe un movimiento de otro insumo con el mismo id reservado', async () => {
+    const adapter = getMemoryAdapter();
+    await adapter.create('inventoryItem', { id: 'a', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
+
+    // "mov-open-b" es el id reservado del saldo inicial de b, pero se usa como id manual de a.
+    await appendMovement(adapter, 'inst1', 'a', 'purchase', 10, undefined, { id: 'mov-open-b' });
+    expect(await quantityOf(adapter, 'inst1', 'a')).toBe(10);
+
+    await adapter.create('inventoryItem', { id: 'b', instance_id: 'inst1', quantity: 15, created_at: '', updated_at: '' } as unknown as DomainRecord);
+    await appendMovement(adapter, 'inst1', 'b', 'purchase', 5);
+
+    expect(await quantityOf(adapter, 'inst1', 'a')).toBe(10); // el saldo inicial de b no lo pisa
+    expect(await quantityOf(adapter, 'inst1', 'b')).toBe(20); // 15 saldo inicial + 5
+
+    const aHistory = await movementHistory(adapter, 'inst1', 'a');
+    expect(aHistory).toHaveLength(1);
+    expect((aHistory[0] as unknown as DomainRecord).id).toBe('mov-open-b');
+    expect((aHistory[0] as unknown as DomainRecord).itemId).toBe('a');
+  });
+
+  it('dos altas concurrentes con el mismo id rechazan la incompatible', async () => {
+    const adapter = getMemoryAdapter();
+    await adapter.create('inventoryItem', { id: 'c', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
+
+    const results = await Promise.allSettled([
+      appendMovement(adapter, 'inst1', 'c', 'purchase', 10, undefined, { id: 'race-id' }),
+      appendMovement(adapter, 'inst1', 'c', 'purchase', 99, undefined, { id: 'race-id' }),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(Error);
+    expect(((rejected[0] as PromiseRejectedResult).reason as Error).message).toMatch(/Conflicto de movimiento/);
+
+    const history = await movementHistory(adapter, 'inst1', 'c');
+    expect(history).toHaveLength(1);
+    // El stock refleja exactamente el unico movimiento que gano la carrera.
+    expect(await quantityOf(adapter, 'inst1', 'c')).toBe(Number((history[0] as unknown as DomainRecord).qty));
+  });
 });
