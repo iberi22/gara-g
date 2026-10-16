@@ -89,6 +89,13 @@ export default defineConfig({
     build: {
       target: 'esnext',
     },
+    // El worker de WebLLM se crea con `{ type: 'module' }` y usa `import()`
+    // dinámico dentro (src/lib/localAi/webllm.worker.ts): con el formato `iife`
+    // por defecto el build rompe (top-level await) y el `import()` no existiría
+    // en ejecución (classic worker). Es el único `new Worker` de la app.
+    worker: {
+      format: 'es',
+    },
     ssr: {
       noExternal: ['astro'],
     },
