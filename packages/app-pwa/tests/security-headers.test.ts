@@ -21,8 +21,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { env } from 'cloudflare:workers';
 
 import { onRequest } from '../src/middleware.js';
-import { cspDirectives, signalOriginsFrom } from '../src/lib/csp.js';
+import { cspConfig, cspDirectives, signalOriginsFrom } from '../src/lib/csp.js';
 import {
+  CLOUDFLARE_INSIGHTS_BEACON_ORIGIN,
+  CLOUDFLARE_INSIGHTS_SCRIPT_ORIGIN,
   CSP_HTML_FALLBACK,
   CSP_NONE,
   CSP_SERVICE_WORKER,
@@ -140,15 +142,49 @@ describe('cabeceras de seguridad', () => {
     const csp = cspDirectives().join('; ');
     expect(csp).toContain('https://0.peerjs.com');
     expect(csp).toContain('wss://0.peerjs.com');
+    // Cloudflare Web Analytics (inyectado en el edge): el beacon carga de
+    // static.cloudflareinsights.com y mide a cloudflareinsights.com.
+    expect(csp).toContain(CLOUDFLARE_INSIGHTS_BEACON_ORIGIN);
+    expect(CSP_HTML_FALLBACK).toContain(CLOUDFLARE_INSIGHTS_SCRIPT_ORIGIN);
     // Xavier se habla por /api/xavier (mismo origen): no es un origen del navegador.
     expect(csp).not.toContain('xavier.swal.network');
     // Es de Fi'ze; en esta app no aparece.
     expect(csp).not.toContain('gos.swal.network');
     // Surreal/edge-hive es codigo muerto (src/lib/surreal.ts no lo importa nadie).
     expect(csp).not.toContain('edge.swal.dev');
+    // Inventario cerrado: fuera de la senalizacion y los dos hosts de Cloudflare Web
+    // Analytics no hay ningun otro origen externo.
+    const hosts = new Set(
+      [...csp.matchAll(/(?:https?|wss):\/\/[^\s'";]+/g)].map((m) => m[0]),
+    );
+    expect([...hosts].sort()).toEqual(
+      [
+        'https://0.peerjs.com',
+        'wss://0.peerjs.com',
+        CLOUDFLARE_INSIGHTS_BEACON_ORIGIN,
+      ].sort(),
+    );
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("frame-src 'self'");
+  });
+
+  it('la CSP permite el beacon de Cloudflare Web Analytics y nada mas', () => {
+    // script-src del respaldo: 'self' + el script del beacon, sin inline ni comodines.
+    const scriptSrc = CSP_HTML_FALLBACK.split('; ').find((d) => d.startsWith('script-src')) ?? '';
+    expect(scriptSrc).toContain("'self'");
+    expect(scriptSrc).toContain(CLOUDFLARE_INSIGHTS_SCRIPT_ORIGIN);
+    expect(scriptSrc).not.toContain('unsafe-inline');
+    expect(scriptSrc).not.toContain('*');
+    // connect-src: 'self' + senalizacion + el endpoint del beacon.
+    const connectSrc = cspDirectives().join('; ').split('; ').find((d) => d.startsWith('connect-src')) ?? '';
+    expect(connectSrc).toContain(CLOUDFLARE_INSIGHTS_BEACON_ORIGIN);
+    expect(connectSrc).not.toContain('*');
+    // security.csp de Astro: mismos recursos ('self' se repite porque `resources`
+    // sobreescribe el defecto de Astro) y la lista de hashes intacta.
+    const config = cspConfig();
+    expect(config.scriptDirective.resources).toEqual(["'self'", CLOUDFLARE_INSIGHTS_SCRIPT_ORIGIN]);
+    expect(config.scriptDirective.hashes.length).toBeGreaterThanOrEqual(9);
   });
 
   it('el origen de senalizacion configurado en el build entra en connect-src', () => {

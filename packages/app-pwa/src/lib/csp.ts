@@ -33,7 +33,11 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { GENERATED_INLINE_SCRIPTS } from './inline/prefs-bootstrap';
-import { cspDirectives, signalOriginsFrom } from './securityHeaders';
+import {
+  CLOUDFLARE_INSIGHTS_SCRIPT_ORIGIN,
+  cspDirectives,
+  signalOriginsFrom,
+} from './securityHeaders';
 
 const INLINE_DIR = fileURLToPath(new URL('./inline/', import.meta.url));
 
@@ -73,7 +77,14 @@ export function cspConfig(signalUrl: string | undefined = MESH_SIGNAL_URL) {
   return {
     algorithm: 'SHA-256' as const,
     directives: cspDirectives(signalUrl),
-    scriptDirective: { hashes: scriptHashes() },
+    scriptDirective: {
+      hashes: scriptHashes(),
+      // Cloudflare Web Analytics (inyectado en el edge): el beacon carga de
+      // static.cloudflareinsights.com. `resources` SOBREESCRIBE las fuentes por defecto
+      // de Astro, asi que hay que repetir `'self'` o se pierde (ver la doc de
+      // security.csp.scriptDirective.resources). Sin comodines ni 'unsafe-inline'.
+      resources: ["'self'", CLOUDFLARE_INSIGHTS_SCRIPT_ORIGIN],
+    },
     styleDirective: {
       // Los `style="..."` (los usa el shell y varias paginas) los gobierna
       // `style-src-attr`, que cae a `style-src` cuando no se declara: con hashes en
@@ -84,4 +95,9 @@ export function cspConfig(signalUrl: string | undefined = MESH_SIGNAL_URL) {
   };
 }
 
-export { cspDirectives, signalOriginsFrom };
+export {
+  CLOUDFLARE_INSIGHTS_BEACON_ORIGIN,
+  CLOUDFLARE_INSIGHTS_SCRIPT_ORIGIN,
+  cspDirectives,
+  signalOriginsFrom,
+};

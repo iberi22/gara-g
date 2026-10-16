@@ -73,6 +73,17 @@ describe('CSP del bundle construido', () => {
     expect(CSP_HTML_FALLBACK).not.toContain('unsafe-eval');
   });
 
+  it('el bundle lleva los origenes de Cloudflare Web Analytics (script + beacon)', () => {
+    // El beacon lo inyecta Cloudflare en el edge: la unica prueba de que la CSP lo deja
+    // pasar es que estos dos hosts lleguen al bundle del servidor.
+    expect(bundle).toContain('static.cloudflareinsights.com');
+    expect(bundle).toContain('https://cloudflareinsights.com');
+    expect(cspConfig().scriptDirective.resources).toContain(
+      'https://static.cloudflareinsights.com',
+    );
+    expect(CSP_HTML_FALLBACK).toContain('https://static.cloudflareinsights.com');
+  });
+
   it('dist/client/_headers lleva las cabeceras de los assets estaticos', () => {
     const headers = readFileSync(join(DIST, 'client', '_headers'), 'utf8');
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) {

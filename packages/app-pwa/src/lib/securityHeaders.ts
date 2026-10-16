@@ -18,7 +18,8 @@
  *   - una CSP de respaldo para lo que no pasa por `security.csp`: los 404/500 que pinta
  *     el framework y las respuestas que no son HTML (JSON de la API, redirecciones). El
  *     respaldo NO lleva `'unsafe-inline'` en `script-src` ni `'unsafe-eval'` en ninguna
- *     parte; en HTML se queda en `script-src 'self'` y en no-HTML se cierra todo.
+ *     parte; en HTML se queda en `script-src 'self'` mas el beacon de Cloudflare Web
+ *     Analytics (`static.cloudflareinsights.com`) y en no-HTML se cierra todo.
  *
  * Este modulo corre en el Worker: solo usa `import.meta.env` (sin `node:*`). El calculo de
  * hashes vive en src/lib/csp.ts, que es de build.
@@ -67,6 +68,13 @@ export interface SecurityHeaderOptions {
  *   defecto de la malla (src/mesh/node.ts DEFAULT_SIGNAL_URL). PeerJS usa el HTTP para
  *   pedir el id de peer y el WSS para el socket.
  *
+ * - `https://static.cloudflareinsights.com` (script-src) +
+ *   `https://cloudflareinsights.com` (connect-src): Cloudflare Web Analytics. Cloudflare
+ *   lo inyecta en el edge (`beacon.min.js`), asi que no hay literal en el repo que lo
+ *   pida: sin estos dos origenes la CSP que emite Astro desde #44 (`script-src-elem`)
+ *   bloquea el beacon y la analitica que funcionaba antes de la CSP se pierde. Solo
+ *   estos dos hosts, sin comodines ni 'unsafe-inline'.
+ *
  * Fuera, con motivo (inventario completo en el informe de la tarea):
  *   - xavier: el navegador usa `/api/xavier/*` (mismo origen); el salto a Xavier lo da el
  *     Worker (src/pages/api/xavier/_proxy.ts).
@@ -79,6 +87,14 @@ export interface SecurityHeaderOptions {
  *   - `rtc.live.cloudflare.com` (TURN): lo llama el Worker en src/pages/api/mesh/ice.ts.
  */
 export const DEFAULT_SIGNAL_ORIGINS = ['https://0.peerjs.com', 'wss://0.peerjs.com'];
+
+/**
+ * Cloudflare Web Analytics (inyectado por Cloudflare en el edge, sin literal en el
+ * repo): el script del beacon y el endpoint al que envia las mediciones. Ver el
+ * inventario de arriba.
+ */
+export const CLOUDFLARE_INSIGHTS_SCRIPT_ORIGIN = 'https://static.cloudflareinsights.com';
+export const CLOUDFLARE_INSIGHTS_BEACON_ORIGIN = 'https://cloudflareinsights.com';
 
 /** Origenes `https`/`wss` de un servidor de senalizacion PeerJS (HTTP(S) + WS(S)). */
 export function signalOriginsFrom(signalUrl?: string): string[] {
@@ -122,7 +138,7 @@ export function cspDirectives(signalUrl?: string): string[] {
     "media-src 'self'",
     "manifest-src 'self'",
     "worker-src 'self'",
-    `connect-src 'self' ${signalOrigins(signalUrl).join(' ')}`,
+    `connect-src 'self' ${signalOrigins(signalUrl).join(' ')} ${CLOUDFLARE_INSIGHTS_BEACON_ORIGIN}`,
   ];
 }
 
@@ -131,7 +147,11 @@ function frameDirective(options: SecurityHeaderOptions): string {
 }
 
 /** HTML que no pasa por `security.csp` (404/500 del framework). */
-export const CSP_HTML_FALLBACK = [...cspDirectives(), "script-src 'self'", "style-src 'self'"].join('; ');
+export const CSP_HTML_FALLBACK = [
+  ...cspDirectives(),
+  `script-src 'self' ${CLOUDFLARE_INSIGHTS_SCRIPT_ORIGIN}`,
+  "style-src 'self'",
+].join('; ');
 
 /** Respuestas que no son HTML: no cargan subrecursos, asi que se cierra todo. */
 export const CSP_NONE = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
@@ -148,7 +168,7 @@ export const CSP_SERVICE_WORKER = "default-src 'self'; base-uri 'none'";
 function fallbackCsp(isHtml: boolean, options: SecurityHeaderOptions): string {
   if (!options.sameOriginFraming) return isHtml ? CSP_HTML_FALLBACK : CSP_NONE;
   return isHtml
-    ? [...cspDirectives(), `script-src 'self'`, "style-src 'self'", frameDirective(options)].join('; ')
+    ? [...cspDirectives(), `script-src 'self' ${CLOUDFLARE_INSIGHTS_SCRIPT_ORIGIN}`, "style-src 'self'", frameDirective(options)].join('; ')
     : `default-src 'none'; ${frameDirective(options)}; base-uri 'none'`;
 }
 
