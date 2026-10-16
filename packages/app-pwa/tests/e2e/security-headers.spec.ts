@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 /**
  * tests/e2e/security-headers.spec.ts — las cabeceras de seguridad en el despliegue real.
@@ -13,7 +13,9 @@ import { test, expect } from '@playwright/test';
  * mano: `pnpm exec playwright test tests/e2e/security-headers.spec.ts`.
  */
 test.describe('cabeceras de seguridad', () => {
-  test('la respuesta HTML lleva CSP con hashes, HSTS, nosniff y Referrer-Policy', async ({ request }) => {
+  test('la respuesta HTML lleva CSP con hashes, HSTS, nosniff y Referrer-Policy', async ({
+    request,
+  }) => {
     const res = await request.get('/login');
     expect(res.status()).toBe(200);
 
@@ -24,33 +26,57 @@ test.describe('cabeceras de seguridad', () => {
     expect(csp).toMatch(/script-src 'self' 'sha256-[A-Za-z0-9+/=]+'/);
     expect(csp).not.toContain('unsafe-eval');
 
-    // La CSP es inutil si el HTML trae scripts inline que no estan hasheados: cada
-    // <script> sin src del documento tiene que aparecer en la politica.
+    expect(res.headers()['strict-transport-security']).toBe(
+      'max-age=31536000; includeSubDomains; preload',
+    );
+    expect(res.headers()['x-content-type-options']).toBe('nosniff');
+    expect(res.headers()['referrer-policy']).toBe('strict-origin-when-cross-origin');
+    expect(res.headers()['x-frame-options']).toBe('DENY');
+  });
+
+  test('todos los scripts inline del HTML tienen hash en la CSP', async ({
+    request,
+    baseURL,
+  }, testInfo) => {
+    const resolvedBaseURL = baseURL ?? testInfo.project.use.baseURL;
+    const isDevServer = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(
+      new URL(resolvedBaseURL ?? '').host,
+    );
+    test.skip(
+      isDevServer,
+      'astro dev injects its own inline scripts; the hashed CSP only applies to a build',
+    );
+
+    const res = await request.get('/login');
+    expect(res.status()).toBe(200);
+
+    const csp = res.headers()['content-security-policy'] ?? '';
     const html = await res.text();
-    for (const [, attrs, contenido] of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script[^>]*>/gi)) {
+    for (const [, attrs, contenido] of html.matchAll(
+      /<script\b([^>]*)>([\s\S]*?)<\/script[^>]*>/gi,
+    )) {
       if (/\bsrc\s*=/i.test(attrs) || contenido === '') continue;
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(contenido));
       const hash = `'sha256-${Buffer.from(new Uint8Array(digest)).toString('base64')}'`;
       expect(csp, `script inline sin hash en la CSP: ${contenido.slice(0, 60)}`).toContain(hash);
     }
-
-    expect(res.headers()['strict-transport-security']).toBe('max-age=31536000; includeSubDomains; preload');
-    expect(res.headers()['x-content-type-options']).toBe('nosniff');
-    expect(res.headers()['referrer-policy']).toBe('strict-origin-when-cross-origin');
-    expect(res.headers()['x-frame-options']).toBe('DENY');
   });
 
   test('un asset estatico sale con las cabeceras de public/_headers', async ({ request }) => {
     const res = await request.get('/manifest.json');
     expect(res.status()).toBe(200);
     expect(res.headers()['x-content-type-options']).toBe('nosniff');
-    expect(res.headers()['strict-transport-security']).toBe('max-age=31536000; includeSubDomains; preload');
+    expect(res.headers()['strict-transport-security']).toBe(
+      'max-age=31536000; includeSubDomains; preload',
+    );
     expect(res.headers()['content-security-policy']).toContain("default-src 'none'");
   });
 
   test('el redirect del guard de sesion no sale sin HSTS', async ({ request }) => {
     const res = await request.get('/fleet', { maxRedirects: 0 });
     expect([200, 302, 303, 307, 308]).toContain(res.status());
-    expect(res.headers()['strict-transport-security']).toBe('max-age=31536000; includeSubDomains; preload');
+    expect(res.headers()['strict-transport-security']).toBe(
+      'max-age=31536000; includeSubDomains; preload',
+    );
   });
 });
