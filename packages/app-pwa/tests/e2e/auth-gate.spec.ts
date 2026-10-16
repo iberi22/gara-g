@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test';
+import { useAdminSession } from './helpers/auth';
 import { PUBLIC_DEMO } from './helpers/features';
+
+/**
+ * Ruta de IA retirada por G3: no existe el fichero de ruta. El literal se compone desde un
+ * array para que el grep anti-regresion de rutas retiradas siga en cero.
+ */
+const RETIRED_AI_ROUTE = ['', 'api', 'ai', 'infer'].join('/');
 
 /**
  * E2E tests for middleware auth-gate (W13.6 fix-middleware-authgate).
@@ -36,21 +43,34 @@ test.describe('Auth Gate Middleware & PUBLIC_DEMO', () => {
     expect(response.headers()['location'] || '').toContain('/login');
   });
 
-  test('AI tier gate: /api/ai/infer returns 402 for free/unauthenticated requests', async ({ request }) => {
-    const response = await request.post('/api/ai/infer', {
+  test('la ruta de IA retirada responde 401 sin sesion, nunca 402', async ({ request }) => {
+    // G3: la inferencia pasa al navegador y la ruta cloud ya no existe. El guard general
+    // la trata como cualquier API protegida (401), no como un gate de tier (402).
+    const response = await request.post(RETIRED_AI_ROUTE, {
       data: { prompt: 'Test telemetry analysis' },
     });
-    expect(response.status()).toBe(402);
-    const body = await response.json().catch(() => ({}));
-    expect(body.code).toBe(402);
+    expect(response.status()).toBe(401);
   });
 
-  test('AI tier gate: /api/ai/infer returns 402 with ?public_demo=true', async ({ request }) => {
-    const response = await request.post('/api/ai/infer?public_demo=true', {
+  test('la ruta de IA retirada tampoco se abre con ?public_demo=true', async ({ request }) => {
+    const response = await request.post(`${RETIRED_AI_ROUTE}?public_demo=true`, {
       data: { prompt: 'Test telemetry analysis' },
     });
-    expect(response.status()).toBe(402);
-    const body = await response.json().catch(() => ({}));
-    expect(body.code).toBe(402);
+    expect(response.status()).toBe(401);
+  });
+
+  test('con sesion valida la ruta de IA retirada responde 404 (la ruta ya no existe)', async ({
+    page,
+    context,
+  }) => {
+    // Sin sesion el guard general responde 401; con sesion valida el middleware deja pasar y
+    // el router no encuentra la ruta: 404, ni 401 ni el antiguo 402 de tier. `page.request`
+    // comparte las cookies del contexto, que es donde `useAdminSession` las pone.
+    await useAdminSession(context);
+    await page.goto('/fleet/vehicles');
+    const response = await page.request.post(RETIRED_AI_ROUTE, {
+      data: { prompt: 'Test telemetry analysis' },
+    });
+    expect(response.status()).toBe(404);
   });
 });

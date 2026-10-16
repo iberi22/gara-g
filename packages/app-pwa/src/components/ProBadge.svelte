@@ -1,17 +1,11 @@
 <script lang="ts">
   import type { SwalNodeStatus } from '../lib/nodeGate';
-  import type { SocioBillingInfo } from '../lib/socioGate';
   import { isProEnabled } from '../lib/nodeGate';
-  import { isSocioActivo } from '../lib/socioGate';
-  // Nombre visible del tier de facturacion: domain.config.ts. "socio" es solo el nombre interno
-  // del gate (socioGate.ts); la insignia ya no lo muestra.
-  import { TIER_LABEL } from '../lib/domain.config';
 
+  // G3: la app no tiene planes ni tiers; esta insignia solo informa del estado del nodo.
   export let node: SwalNodeStatus | null = null;
-  export let socioBilling: SocioBillingInfo | null = null;
 
   $: proActive = isProEnabled(node);
-  $: socioActive = isSocioActivo(socioBilling);
 </script>
 
 <div class="pro-badge-container">
@@ -24,18 +18,6 @@
     <span class="badge badge-inactive" title="No active @swal/node heartbeat <= 60s">
       <span class="dot inactive"></span>
       NODO INACTIVO
-    </span>
-  {/if}
-
-  {#if socioActive}
-    <span class="badge badge-socio" title="Active Stripe infrastructure subscription (R2 Quota)">
-      <span class="dot socio"></span>
-      {TIER_LABEL} CLOUD
-    </span>
-  {:else}
-    <span class="badge badge-nosocio" title="No active Stripe socio subscription">
-      <span class="dot inactive"></span>
-      {TIER_LABEL} INACTIVO
     </span>
   {/if}
 </div>

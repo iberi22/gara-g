@@ -57,6 +57,9 @@ importers:
       '@fontsource/jetbrains-mono':
         specifier: 5.3.0
         version: 5.3.0
+      '@mlc-ai/web-llm':
+        specifier: ^0.2.86
+        version: 0.2.86
       '@swal/edge-mesh':
         specifier: ^0.1.1
         version: 0.1.1(idb@8.0.4)(peerjs@1.5.5)
@@ -1469,6 +1472,9 @@ packages:
 
   '@kurkle/color@0.3.4':
     resolution: {integrity: sha512-M5UknZPHRu3DEDWoipU6sE8PdkZ6Z/S+v4dD+Ke8IaNlpdSQah50lz1KtcFBa2vsdOnwbbnxJwVM4wty6udA5w==}
+
+  '@mlc-ai/web-llm@0.2.86':
+    resolution: {integrity: sha512-plciXBCYtY7iTKHzEcsqOfSO+s5u8NqMYFPnHmRbsN8CEdKcolgXIoGLPbzO6FtJHV43m7YP00x6qQ6Kb8CJJw==}
 
   '@modelcontextprotocol/core@2.3.0':
     resolution: {integrity: sha512-09BHFaNVBe5pB2AhzCfLj0cqmsKLERvZQ4FblzP90UMGLaXVqdZPByFjURwsUYCmxonUW2yAwgTTvle+8O2/8w==}
@@ -3734,6 +3740,10 @@ packages:
 
   lodash.debounce@4.0.8:
     resolution: {integrity: sha512-FT1yDzDYEoYWhnSGnpE/4Kj1fLZkDFyqRb7fNt6FdYOSxlUWAtp42Eh6Wb0rGIv/m9Bgo7x4GhQbm5Ys4SG5ow==}
+
+  loglevel@1.9.2:
+    resolution: {integrity: sha512-HgMmCqIJSAKqo68l0rS2AanEWfkxaZ5wNiEFb5ggm08lDs9Xl2KxBlX3PTcaD2chBM1gXAYf491/M2Rv8Jwayg==}
+    engines: {node: '>= 0.6.0'}
 
   lru-cache@11.5.3:
     resolution: {integrity: sha512-U4N8FgzmWxc8k1VH8Kr6lQg18U7Fjvby6wXHVRX/ZZ7IwWbRMgrRbP0Wrb5q5NVinryp4SQampHKdvtecItxUg==}
@@ -6440,6 +6450,10 @@ snapshots:
 
   '@kurkle/color@0.3.4': {}
 
+  '@mlc-ai/web-llm@0.2.86':
+    dependencies:
+      loglevel: 1.9.2
+
   '@modelcontextprotocol/core@2.3.0':
     dependencies:
       zod: 4.6.5
@@ -8474,6 +8488,8 @@ snapshots:
   locate-character@3.0.0: {}
 
   lodash.debounce@4.0.8: {}
+
+  loglevel@1.9.2: {}
 
   lru-cache@11.5.3: {}
 

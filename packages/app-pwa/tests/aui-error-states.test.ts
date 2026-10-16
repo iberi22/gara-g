@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 /**
- * tests/aui-error-states.test.ts — un fallo de la inferencia AI no se pinta como resultado.
+ * tests/aui-error-states.test.ts — un fallo de la inferencia NO se pinta como resultado.
  *
- * Antes, el `catch` de handleGenerate() llamaba a loadDefaultSpec() con cualquier error:
- * un 500 del Worker enseñaba la tabla de flota inventada (FL-01 Toyota Hilux, Carlos Mendez)
- * igual que una respuesta real, con solo un toast como rastro. Y Enter no miraba `loading`.
+ * Con G3 la AUI genera con la IA local del navegador: sin Prompt API ni WebGPU solo hay
+ * reglas deterministas, que no pueden componer una interfaz. La página debe decir en
+ * español que hace falta la IA local y vaciar el lienzo, nunca dejar los datos de ejemplo
+ * como si fueran la respuesta.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import AuiInterface from '../src/components/AuiInterface.svelte';
-import { TIER_LABEL } from '../src/lib/domain.config';
+import { RULES_NEEDS_LOCAL_AI } from '../src/lib/localAi/rules';
 
 let app: ReturnType<typeof mount> | undefined;
 
@@ -18,117 +19,94 @@ const tick = async () => {
   flushSync();
 };
 
-function setOnline(v: boolean) {
-  Object.defineProperty(window.navigator, 'onLine', { configurable: true, get: () => v });
-}
-
 async function montar() {
-  localStorage.setItem('gara_demo_socio', 'true');
-  app = mount(AuiInterface as any, { target: document.body, props: {} });
+  app = mount(AuiInterface, { target: document.body, props: {} });
   await tick();
   return {
     input: () => document.querySelector<HTMLInputElement>('#aui-prompt-input')!,
     canvas: () => document.querySelector('[data-testid="aui-rendered-content"]')!,
-    alert: () => document.querySelector('[role="alert"]'),
+    alert: () => document.querySelector('[data-testid="aui-error"]'),
     sample: () => document.querySelector('[data-testid="aui-sample-note"]'),
-    async enviar(texto: string) {
+    localAiNote: () => document.querySelector('[data-testid="aui-local-ai-note"]'),
+    async escribir(texto: string) {
       const i = this.input();
       i.value = texto;
       i.dispatchEvent(new Event('input', { bubbles: true }));
       await tick();
+    },
+    async enviar(texto: string) {
+      await this.escribir(texto);
       document.querySelector<HTMLButtonElement>('[data-testid="aui-submit-btn"]')!.click();
       await tick();
+    },
+    enter() {
+      this.input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     },
   };
 }
 
 beforeEach(() => {
-  setOnline(true);
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 afterEach(() => {
   if (app) unmount(app);
   app = undefined;
   document.body.innerHTML = '';
-  localStorage.clear();
-  vi.unstubAllGlobals();
+  delete (globalThis as { LanguageModel?: unknown }).LanguageModel;
   vi.restoreAllMocks();
 });
 
-describe('AuiInterface: fallos de inferencia', () => {
-  it('un 500 anuncia un error y NO pinta los datos de demo', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 500 })));
+describe('AuiInterface: IA local y fallos', () => {
+  it('con solo reglas avisa de que hace falta IA local y no pinta datos de demo', async () => {
     const ui = await montar();
     await ui.enviar('flota en taller');
-    expect(ui.alert()?.textContent).toContain('No se pudo generar la interfaz');
+    expect(ui.alert()?.textContent).toContain(RULES_NEEDS_LOCAL_AI);
     expect(ui.canvas().textContent).not.toContain('FL-01');
-    expect(ui.canvas().textContent).not.toContain('Carlos Méndez');
     expect(ui.sample()).toBeNull();
+    expect(ui.localAiNote()).not.toBeNull();
   });
 
-  it('un 402 muestra el mensaje de cuota y tampoco hay datos de demo', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 402 })));
+  it('el ejemplo inicial va marcado como no real', async () => {
     const ui = await montar();
-    await ui.enviar('flota en taller');
-    // El nombre del tier sale de domain.config.ts: ya no se nombra el tier heredado "Socio".
-    expect(ui.alert()?.textContent).toContain(TIER_LABEL);
-    expect(ui.alert()?.textContent).not.toContain('Socio');
-    expect(document.body.textContent).not.toContain('FL-01');
-  });
-
-  it('una respuesta 200 sin spec es un fallo, no un lienzo mudo', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
-    const ui = await montar();
-    await ui.enviar('flota en taller');
-    expect(ui.alert()).not.toBeNull();
-    expect(ui.canvas().textContent).not.toContain('FL-01');
-  });
-
-  it('sin red SI muestra el ejemplo local, pero marcado como no real', async () => {
-    setOnline(false);
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
-    const ui = await montar();
-    await ui.enviar('flota en taller');
     expect(ui.canvas().textContent).toContain('FL-01');
     expect(ui.sample()?.textContent).toContain('datos no reales');
     expect(ui.sample()?.getAttribute('role')).toBe('status');
-    expect(ui.alert()).toBeNull();
-  });
-
-  it('el ejemplo inicial del socio tambien va marcado', async () => {
-    vi.stubGlobal('fetch', vi.fn());
-    const ui = await montar();
-    expect(ui.canvas().textContent).toContain('FL-01');
-    expect(ui.sample()).not.toBeNull();
   });
 
   it('un fallo vacia el lienzo: el ejemplo inicial no reaparece solo', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 503 })));
     const ui = await montar();
     expect(ui.canvas().textContent).toContain('FL-01');
     await ui.enviar('x');
     await tick();
     expect(ui.canvas().textContent).not.toContain('FL-01');
+    expect(ui.alert()).not.toBeNull();
+  });
+
+  it('sin pedido no genera ni falla', async () => {
+    const ui = await montar();
+    await ui.enviar('   ');
+    expect(ui.alert()).toBeNull();
+    expect(ui.canvas().textContent).toContain('FL-01');
   });
 
   it('Enter con una peticion en curso no lanza otra', async () => {
-    let llamadas = 0;
-    let soltar!: () => void;
-    vi.stubGlobal('fetch', vi.fn(() => {
-      llamadas++;
-      return new Promise<Response>((res) => { soltar = () => res(new Response('boom', { status: 500 })); });
-    }));
+    let createCalls = 0;
+    (globalThis as { LanguageModel?: unknown }).LanguageModel = {
+      availability: async () => 'available',
+      create: async () => {
+        createCalls++;
+        return {
+          promptStreaming: () => (async function* () {
+            await new Promise<void>(() => {});
+          })(),
+        };
+      },
+    };
     const ui = await montar();
-    const i = ui.input();
-    i.value = 'hola';
-    i.dispatchEvent(new Event('input', { bubbles: true }));
+    await ui.escribir('hola');
+    ui.enter();
+    ui.enter();
     await tick();
-    const enter = () => i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    enter();
-    enter();
-    await tick();
-    expect(llamadas).toBe(1);
-    soltar();
-    await tick();
+    expect(createCalls).toBe(1);
   });
 });

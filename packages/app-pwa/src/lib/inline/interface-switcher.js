@@ -2,19 +2,10 @@
   // Vanilla sin imports: Astro inlinea este script en el HTML (sin submódulo
   // `?astro&type=script`), que es lo que workerd-dev falla en resolver
   // intermitentemente (952). Lógica espejo de lib/interfaceManager.ts:
-  // MODES, localStorage 'gara_interface_mode' + cookie, gate ?game_enabled,
-  // badge socio (tier default 'payg' → true salvo demo flag 'false').
+  // MODES, localStorage 'gara_interface_mode' + cookie, gate ?game_enabled.
+  // G3: ya no hay insignia ni detección de tier (la app no tiene planes).
   var INTERFACE_MODES = ['admin', 'aui', 'game'];
   var STORAGE_KEY = 'gara_interface_mode';
-  var DEMO_SOCIO_KEY = 'gara_demo_socio';
-
-  function isSocioInline() {
-    try {
-      var demoVal = window.localStorage.getItem(DEMO_SOCIO_KEY);
-      if (demoVal === 'false') return false;
-    } catch (e) {}
-    return true; // tier default 'payg' → socio
-  }
 
   function gameAllowedFromQuery() {
     try {
@@ -45,13 +36,6 @@
         var queryAllowed = gameAllowedFromQuery();
         var gameAllowed =
           attrAllowed !== null ? attrAllowed === 'true' : queryAllowed !== null ? queryAllowed : true;
-
-        // Sync badge del tier (solo cliente): el nombre sale del atributo, no de un literal.
-        var badge = root.querySelector('[data-testid="socio-badge"]');
-        if (badge && isSocioInline()) {
-          badge.textContent = badge.getAttribute('data-tier-label') || 'PAYG';
-          badge.classList.add('socio');
-        }
 
         root.querySelectorAll('[data-mode]').forEach(function (btn) {
           btn.addEventListener('click', function () {
