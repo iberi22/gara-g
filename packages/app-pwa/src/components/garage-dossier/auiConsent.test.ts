@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import AuiInterface from '../AuiInterface.svelte';
-import { clearConsent, saveConsent } from '../../lib/localAi/consent';
+import { clearConsent, PROMPT_API_CONSENT_MODEL_ID, saveConsent } from '../../lib/localAi/consent';
 import { DEFAULT_LOCAL_MODEL } from '../../lib/localAi/config';
 import {
   disposeWebllmEngine,
@@ -59,6 +59,33 @@ describe('AuiInterface · consentimiento de IA local', () => {
     const app = await mountAui();
     expect(document.body.querySelector('[data-testid="local-ai-consent"]')).toBeNull();
     expect(document.body.querySelector('[data-testid="aui-consent-note"]')).toBeNull();
+    unmount(app);
+  });
+
+  it('Nano consentida + Prompt API no disponible + WebGPU usable → ofrece WebLLM', async () => {
+    stubGpu();
+    saveConsent(PROMPT_API_CONSENT_MODEL_ID);
+    (globalThis as { LanguageModel?: unknown }).LanguageModel = {
+      availability: async () => 'unavailable',
+    };
+    const app = await mountAui();
+    // La tarjeta SÍ se muestra (antes el consentimiento de Nano la ocultaba).
+    expect(document.body.querySelector('[data-testid="local-ai-consent"]')).not.toBeNull();
+    // Nano ya está autorizada: no se vuelve a ofrecer; WebLLM sí.
+    expect(document.body.querySelector('[data-testid="local-ai-prompt-api-option"]')).toBeNull();
+    expect(document.body.querySelector('fieldset.models')).not.toBeNull();
+    unmount(app);
+  });
+
+  it('sin WebGPU + Prompt API downloadable → ofrece Nano sin WebLLM', async () => {
+    (globalThis as { LanguageModel?: unknown }).LanguageModel = {
+      availability: async () => 'downloadable',
+    };
+    const app = await mountAui();
+    // La tarjeta SÍ se muestra aunque no haya WebGPU (antes pedía tier webgpu).
+    expect(document.body.querySelector('[data-testid="local-ai-consent"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="local-ai-prompt-api-option"]')).not.toBeNull();
+    expect(document.body.querySelector('fieldset.models')).toBeNull();
     unmount(app);
   });
 });

@@ -41,6 +41,12 @@ export {
   saveConsent,
 } from './consent';
 export { RULES_LABEL, RULES_MODEL, RULES_NEEDS_LOCAL_AI, RULES_NO_MATCH } from './rules';
+export {
+  consentOffers,
+  hasConsentOffer,
+  type ConsentOffers,
+  type ConsentOfferState,
+} from './consentOffers';
 
 export interface LocalChatMessage {
   role: 'system' | 'user' | 'assistant';

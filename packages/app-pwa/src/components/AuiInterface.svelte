@@ -10,8 +10,9 @@ import { untrack } from 'svelte';
 import { toast } from '../lib/toast';
 import { generateAui, type AuiSpec } from '../lib/aui';
 import { MARKET } from '../lib/market';
-import { detectLocalAi, isPromptApiDownloadState, promptApiState, type AiTier } from '../lib/localAi/capabilities';
-import { hasPromptApiConsent } from '../lib/localAi/consent';
+import { detectLocalAi, isPromptApiDownloadState, localAiEnvironment, promptApiState, type AiTier } from '../lib/localAi/capabilities';
+import { authorisedModelId } from '../lib/localAi/consent';
+import { consentOffers, hasConsentOffer, type ConsentOffers } from '../lib/localAi/consentOffers';
 import { webllmModelId } from '../lib/localAi/webllmEngine';
 import LocalAiConsent from './garage-dossier/LocalAiConsent.svelte';
 import AuiRenderer from './AuiRenderer.svelte';
@@ -38,12 +39,11 @@ let modelActive = $state(false);
 /** La Prompt API aún tiene que descargar Gemini Nano. */
 let promptDownloadPending = $state(false);
 /**
- * Sin motor autorizado la AUI usa el motor de reglas: se ofrece activar la IA local con
- * la misma tarjeta que el asistente (WebGPU descargable o Gemini Nano pendiente).
+ * Qué motores se pueden ofrecer ahora mismo (regla única en `consentOffers`): la
+ * tarjeta se muestra cuando hay al menos una oferta y solo pinta las ofrecidas.
  */
-const needsConsent = $derived(
-  (tier === 'webgpu' || promptDownloadPending) && !modelActive && !hasPromptApiConsent(),
-);
+let offers = $state<ConsentOffers>({ nano: false, webllm: false });
+const needsConsent = $derived(hasConsentOffer(offers) && !modelActive);
 
 const PRESET_PROMPTS = [
   'Generar panel de Mantenimiento Preventivo y Alertas de Taller',
@@ -52,19 +52,31 @@ const PRESET_PROMPTS = [
   'Auditoría de Consumo de Combustible y Kilometraje Mensual',
 ];
 
+/** Recalcula las ofertas con el estado crudo (Prompt API, WebGPU, consentimiento, motor). */
+function refreshOffers(promptState: string | undefined): void {
+  const gpu = localAiEnvironment().gpu;
+  offers = consentOffers({
+    promptApiAvailability: promptState,
+    webgpuUsable: Boolean(gpu && typeof gpu.requestAdapter === 'function'),
+    authorisedModelId: authorisedModelId(),
+    loadedWebllmModelId: webllmModelId(),
+  });
+  modelActive = Boolean(webllmModelId());
+  // Con oferta pero sin motor autorizado se ofrece activarlo; la tarjeta solo
+  // descarga si el usuario pulsa el botón.
+  if (hasConsentOffer(offers) && !modelActive) showConsent = true;
+}
+
 $effect(() => {
   if (typeof window !== 'undefined') {
     untrack(() => {
       detectLocalAi().then((detected) => {
         tier = detected;
-        modelActive = Boolean(webllmModelId());
-        // Con WebGPU (o Gemini Nano pendiente de descarga) pero sin motor autorizado se
-        // ofrece activarlo; la tarjeta solo descarga si el usuario pulsa el botón.
-        showConsent = (detected === 'webgpu' || promptDownloadPending) && !modelActive;
-      });
-      void promptApiState().then((state) => {
-        promptDownloadPending = isPromptApiDownloadState(state);
-        if ((tier === 'webgpu' || promptDownloadPending) && !modelActive) showConsent = true;
+        refreshOffers(undefined);
+        void promptApiState().then((state) => {
+          promptDownloadPending = isPromptApiDownloadState(state);
+          refreshOffers(state);
+        });
       });
       if (!currentSpec && !errorMsg) loadDefaultSpec();
     });
@@ -184,6 +196,8 @@ async function handleGenerate(customPrompt?: string) {
     </div>
     {#if showConsent}
       <LocalAiConsent
+        offerNano={offers.nano}
+        offerWebllm={offers.webllm}
         onAccept={() => {
           modelActive = true;
           showConsent = false;

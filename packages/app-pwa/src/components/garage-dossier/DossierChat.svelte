@@ -19,7 +19,9 @@ import {
   type ChatTurn,
   type IndexedManual,
 } from './chatClient';
-import { detectLocalAi, type AiTier } from '../../lib/localAi/capabilities';
+import { localAiEnvironment, promptApiState } from '../../lib/localAi/capabilities';
+import { authorisedModelId } from '../../lib/localAi/consent';
+import { consentOffers, hasConsentOffer, type ConsentOffers } from '../../lib/localAi/consentOffers';
 import { webllmModelId } from '../../lib/localAi/webllmEngine';
 import { runLocalAssistant } from '../../garage/assistant/handler';
 import LocalAiConsent from './LocalAiConsent.svelte';
@@ -46,11 +48,13 @@ let thinking = $state(false);
 let chunks = $state<ManualChunk[]>([]);
 let loadingManuals = $state(false);
 let scroller: HTMLDivElement | undefined = $state();
-let aiTier = $state<AiTier>('rules');
 /** Tarjeta de consentimiento visible (nunca carga nada por sí sola). */
 let showConsent = $state(false);
 /** Hay motor cargado en esta pestaña: las consultas lo reutilizan. */
 let modelActive = $state(false);
+/** Qué motores se pueden ofrecer ahora mismo (regla única en `consentOffers`). */
+let offers = $state<ConsentOffers>({ nano: false, webllm: false });
+const needsConsent = $derived(hasConsentOffer(offers) && !modelActive);
 let controller: AbortController | null = $state(null);
 
 const SUGGESTIONS: Record<VehicleFamily, string[]> = {
@@ -84,13 +88,11 @@ const indexedCount = $derived(manuals.filter((m) => m.textKey).length);
 
 onMount(() => {
   turns = loadTurns(vehicleId);
-  detectLocalAi().then((tier) => {
-    aiTier = tier;
-    modelActive = Boolean(webllmModelId());
-    // Con WebGPU pero sin motor cargado se ofrece activarlo; la tarjeta solo carga
-    // el modelo si el usuario pulsa el botón (nunca al montar).
-    showConsent = tier === 'webgpu' && !modelActive;
-  });
+  // Ofertas según la regla única (`consentOffers`): la Prompt API descargable se
+  // ofrece aunque no haya WebGPU; la tarjeta solo carga si el usuario pulsa el
+  // botón (nunca al montar).
+  refreshOffers(undefined);
+  void promptApiState().then((state) => refreshOffers(state));
   if (indexedCount > 0) {
     loadingManuals = true;
     void loadManualChunks(manuals).then((c) => {
@@ -100,6 +102,19 @@ onMount(() => {
   }
   void scrollDown();
 });
+
+/** Recalcula las ofertas con el estado crudo (Prompt API, WebGPU, consentimiento, motor). */
+function refreshOffers(promptState: string | undefined): void {
+  const gpu = localAiEnvironment().gpu;
+  offers = consentOffers({
+    promptApiAvailability: promptState,
+    webgpuUsable: Boolean(gpu && typeof gpu.requestAdapter === 'function'),
+    authorisedModelId: authorisedModelId(),
+    loadedWebllmModelId: webllmModelId(),
+  });
+  modelActive = Boolean(webllmModelId());
+  if (hasConsentOffer(offers) && !modelActive) showConsent = true;
+}
 
 async function scrollDown(): Promise<void> {
   await tick();
@@ -171,8 +186,10 @@ function onKey(e: KeyboardEvent): void {
 </script>
 
 <section class="chat" aria-label="Asistente de IA">
-  {#if showConsent && aiTier === 'webgpu'}
+  {#if showConsent && needsConsent}
     <LocalAiConsent
+      offerNano={offers.nano}
+      offerWebllm={offers.webllm}
       onAccept={() => {
         modelActive = true;
         showConsent = false;
@@ -181,7 +198,7 @@ function onKey(e: KeyboardEvent): void {
         showConsent = false;
       }}
     />
-  {:else if aiTier === 'webgpu' && !modelActive}
+  {:else if needsConsent}
     <button type="button" class="ghost consent-open" onclick={() => (showConsent = true)}>
       Activar IA local
     </button>

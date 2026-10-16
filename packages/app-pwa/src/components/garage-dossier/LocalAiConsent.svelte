@@ -33,9 +33,16 @@ import {
 interface Props {
   onAccept?: (modelId: string) => void;
   onCancel?: () => void;
+  /**
+   * Opciones ofrecidas por la regla única (`consentOffers`): la tarjeta solo pinta
+   * las ofrecidas. Por defecto se ofrecen las dos (compatibilidad con quien monte
+   * la tarjeta sin pasar la regla).
+   */
+  offerNano?: boolean;
+  offerWebllm?: boolean;
 }
 
-const { onAccept, onCancel }: Props = $props();
+const { onAccept, onCancel, offerNano = true, offerWebllm = true }: Props = $props();
 
 const alreadyAuthorised = authorisedModelId();
 
@@ -143,7 +150,7 @@ function cancel(): void {
     </p>
   {/if}
 
-  {#if promptDownloadPending}
+  {#if promptDownloadPending && offerNano}
     <div class="prompt-api" data-testid="local-ai-prompt-api-option">
       <p>
         Este navegador también puede usar Gemini Nano (Chrome Prompt API) tras una descarga
@@ -155,6 +162,7 @@ function cancel(): void {
     </div>
   {/if}
 
+  {#if offerWebllm}
   <fieldset class="models" disabled={downloading}>
     <legend>Tamaño del modelo</legend>
     {#each LOCAL_MODELS as model (model.id)}
@@ -196,11 +204,14 @@ function cancel(): void {
   {#if error}
     <p class="error" role="alert">{error}</p>
   {/if}
+  {/if}
 
   <div class="actions">
+    {#if offerWebllm}
     <button type="button" class="primary" disabled={downloading || !enough} onclick={download}>
       {actionLabel}
     </button>
+    {/if}
     <button type="button" class="ghost" onclick={cancel}>
       {downloading ? 'Cancelar' : 'Ahora no'}
     </button>
