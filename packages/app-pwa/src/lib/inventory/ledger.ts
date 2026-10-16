@@ -92,17 +92,6 @@ export async function appendMovement(
     throw new Error(`Cantidad de movimiento invalida: ${qty}`);
   }
 
-  if (opts.id) {
-    const existing = await adapter.get('stockMovement', opts.id, instanceId);
-    if (existing) {
-      if ((existing as Record<string, unknown>).itemId !== itemId || (existing as Record<string, unknown>).kind !== kind) {
-        throw new Error('Conflicto de movimiento: el id ya existe para otro insumo u operacion');
-      }
-      await syncQuantity(adapter, instanceId, itemId);
-      return existing;
-    }
-  }
-
   // ensure item exists
   const item = await adapter.get('inventoryItem', itemId, instanceId);
   if (!item) {
@@ -110,6 +99,23 @@ export async function appendMovement(
   }
 
   await ensureOpeningBalance(adapter, instanceId, itemId);
+
+  if (opts.id) {
+    const existing = await adapter.get('stockMovement', opts.id, instanceId) as Record<string, unknown> | null;
+    if (existing) {
+      if (
+        existing.itemId !== itemId ||
+        existing.kind !== kind ||
+        Number(existing.qty) !== Number(qty) ||
+        (existing.note ?? null) !== (note ?? null) ||
+        (existing.maintenanceId ?? undefined) !== opts.maintenanceId
+      ) {
+        throw new Error('Conflicto de movimiento: el id ya existe con datos diferentes');
+      }
+      await syncQuantity(adapter, instanceId, itemId);
+      return existing as DomainRecord;
+    }
+  }
 
   const now = new Date().toISOString();
   const tx = (await adapter.create('stockMovement', {
