@@ -10,6 +10,7 @@ export interface DeviceLockStore {
   targetMethod?: 'pin' | 'passkey' | 'off';
   failedAttempts?: number;
   lockedUntil?: number; // timestamp
+  startedAt?: number; // timestamp de creación del marcador de transición (lease N1)
 }
 
 /** Error reintentable: el sobre cambió entre la foto y la escritura. */
@@ -31,6 +32,10 @@ const LOCK_PING_KEY = 'gara-lock-ping';
 
 let activeDataKey: CryptoKey | null = null;
 let currentMethod: 'pin' | 'passkey' | null = null;
+// Generación del sobre del que salió activeDataKey (M3): ata la clave en
+// memoria al sobre persistido para que una rotación (disable+enable en otra
+// pestaña) no deje una clave obsoleta que cifra filas perdidas.
+let activeDataKeyGen: string | null = null;
 let vaultClientInstance: ReturnType<typeof createVaultClient> | null = null;
 let overridePasskeyProvider: PasskeyPrfProvider | undefined = undefined;
 
@@ -86,9 +91,10 @@ async function withLockDb<T>(fn: (db: IDBDatabase) => Promise<T>): Promise<T> {
 
 async function getEnvelope(): Promise<DeviceLockStore | null | 'unreadable'> {
   ensureLockListener();
+  let env: DeviceLockStore | null | 'unreadable';
   try {
     if (typeof indexedDB === 'undefined') return null;
-    return await withLockDb(
+    env = await withLockDb(
       (db) =>
         new Promise<DeviceLockStore | null | 'unreadable'>((resolve) => {
           try {
@@ -104,6 +110,23 @@ async function getEnvelope(): Promise<DeviceLockStore | null | 'unreadable'> {
   } catch {
     return 'unreadable';
   }
+  // N1: un marcador de transición sin sobres y caducado es una habilitación
+  // interrumpida (passkey cancelada, pestaña cerrada durante la derivación).
+  // La migración solo empieza DESPUÉS de persistir los sobres, así que
+  // borrarlo es seguro. El lease evita que una lectura concurrente borre el
+  // marcador legítimo de una habilitación en curso (el PBKDF2 es lento); el
+  // fallo inmediato ( prompt cancelado) lo limpia la vía de error de
+  // enableProtection sin esperar al lease.
+  if (env && env !== 'unreadable' && isAbandonedMarker(env)) {
+    try {
+      await clearEnvelope();
+      broadcastLockChange();
+    } catch {
+      /* best-effort */
+    }
+    return null;
+  }
+  return env;
 }
 
 async function saveEnvelope(data: DeviceLockStore): Promise<void> {
@@ -195,7 +218,22 @@ function handleLockInvalidation(): void {
     // siendo necesaria (la propia desactivación/activación la usa para migrar,
     // y resumeTransition la fija temporalmente). Limpiarla aquí rompía la
     // migración en curso y dejaba el marcador atascado.
+    if (env === 'unreadable') return;
     if (env === null) {
+      clearStaleMemoryKey();
+      return;
+    }
+    // Transición sin sobres: marcador huérfano o habilitación en curso; la
+    // clave en memoria de esta pestaña ya es de otra generación (el CAS solo
+    // inserta desde "sin sobre"). La pestaña que habilita aún no tiene
+    // clave en memoria, así que limpiarla no rompe la migración.
+    if (env.state === 'transition' && !env.pinEnvelope && !env.passkeyEnvelope) {
+      clearStaleMemoryKey();
+      return;
+    }
+    // M3: el sobre rotó bajo nuestros pies (otra pestaña deshabilitó y
+    // rehabilitó sin que nos llegara el aviso, o con la pestaña congelada).
+    if (env.state === 'active' && activeDataKey && !isMemoryKeyValidFor(env)) {
       clearStaleMemoryKey();
     }
   });
@@ -269,12 +307,37 @@ function broadcastLockChange(): void {
 
 function clearStaleMemoryKey(): void {
   activeDataKey = null;
+  activeDataKeyGen = null;
   currentMethod = null;
   try {
     vaultClientInstance?.lock();
   } catch {
     /* best-effort */
   }
+}
+
+/** Lease del marcador de transición sin sobres (N1): pasado esto se considera huérfano. */
+const TRANSITION_MARKER_LEASE_MS = 120_000;
+
+function isAbandonedMarker(env: DeviceLockStore): boolean {
+  if (env.state !== 'transition') return false;
+  if (env.pinEnvelope || env.passkeyEnvelope) return false;
+  // Sin startedAt es un marcador anterior a este lease: huérfano directo.
+  if (typeof env.startedAt !== 'number') return true;
+  return Date.now() - env.startedAt > TRANSITION_MARKER_LEASE_MS;
+}
+
+/** Generación del sobre activo: los sobres envueltos identifican el material de clave. */
+function envelopeGeneration(env: DeviceLockStore): string {
+  return `${env.pinEnvelope ?? ''}|${env.passkeyEnvelope ?? ''}`;
+}
+
+/** ¿Sigue siendo válida la clave en memoria para este sobre persistido? (M3) */
+function isMemoryKeyValidFor(env: DeviceLockStore | null | 'unreadable'): boolean {
+  if (!activeDataKey || !activeDataKeyGen) return false;
+  if (!env || env === 'unreadable') return false;
+  if (env.state !== 'active') return false;
+  return envelopeGeneration(env) === activeDataKeyGen;
 }
 
 export async function getLockState(): Promise<LockState> {
@@ -285,7 +348,12 @@ export async function getLockState(): Promise<LockState> {
 
   // El estado deriva del sobre persistido, no de la memoria: una pestaña cuya
   // protección se desactivó en otra parte deja de verse como 'unlocked'.
-  if (env && env.state === 'active') return activeDataKey ? 'unlocked' : 'locked';
+  // M3: además la clave en memoria debe ser de la generación del sobre.
+  if (env && env.state === 'active') {
+    if (activeDataKey && isMemoryKeyValidFor(env)) return 'unlocked';
+    if (activeDataKey) clearStaleMemoryKey();
+    return 'locked';
+  }
   if (activeDataKey) clearStaleMemoryKey();
   return 'off';
 }
@@ -323,6 +391,8 @@ export interface WriteTicket {
   envJson: string;
   active: boolean;
   key: CryptoKey | null;
+  /** Generación del sobre en el momento de la foto (M3). */
+  gen: string;
 }
 
 export async function snapshotTicket(): Promise<WriteTicket> {
@@ -335,17 +405,28 @@ export async function snapshotTicket(): Promise<WriteTicket> {
   }
   if (env && env.state === 'active') {
     const key = getActiveKey();
-    if (!key) {
+    // M3: la clave en memoria debe ser de la generación del sobre; si otra
+    // pestaña rotó la protección, esta clave cifraría filas perdidas.
+    if (!key || !isMemoryKeyValidFor(env)) {
+      if (activeDataKey) clearStaleMemoryKey();
       throw new LockedError('El dispositivo está bloqueado. Desbloquéalo para continuar.');
     }
-    return { envJson: JSON.stringify(env), active: true, key };
+    return { envJson: JSON.stringify(env), active: true, key, gen: activeDataKeyGen as string };
   }
   // Sin sobre no hay cifrado; si quedaba una clave en memoria, ya es obsoleta.
   if (activeDataKey) clearStaleMemoryKey();
-  return { envJson: JSON.stringify(env), active: false, key: null };
+  return { envJson: JSON.stringify(env), active: false, key: null, gen: '' };
 }
 
-/** Revalida la foto justo antes de escribir. Lanza StaleTicketError si cambió. */
+/** Revalida la foto justo antes de escribir. Lanza StaleTicketError si cambió.
+ *
+ * NOTA (M3): el sobre vive en 'gara-lock' y los datos en 'gara-local' /
+ * 'gara-mesh': no caben en una sola transacción IndexedDB, así que esto es
+ * verificar-y-escribir con la comprobación del nonce (gen) inmediatamente
+ * antes de confirmar. Queda una ventana residual (otro hilo podría rotar el
+ * sobre entre la verificación y el commit); en la práctica es de microtareas,
+ * la puerta opGate la cierra dentro del mismo hilo y el reintento con foto
+ * nueva + el descifrado que falla la delatan. */
 export async function verifyTicket(ticket: WriteTicket): Promise<void> {
   const env = await getEnvelope();
   if (env === 'unreadable') {
@@ -353,10 +434,30 @@ export async function verifyTicket(ticket: WriteTicket): Promise<void> {
   }
   if (JSON.stringify(env) !== ticket.envJson) {
     if (env && env.state === 'transition') throw new TransitionInProgressError();
+    // La foto cambió: la clave en memoria solo es obsoleta si ya no es de la
+    // generación del sobre nuevo (un changePin en esta pestaña actualiza
+    // ambas y el reintento debe seguir funcionando).
+    if (
+      activeDataKey &&
+      activeDataKeyGen &&
+      (!env || env.state !== 'active' || envelopeGeneration(env) !== activeDataKeyGen)
+    ) {
+      clearStaleMemoryKey();
+    }
     throw new StaleTicketError();
   }
-  if (ticket.active && getActiveKey() !== ticket.key) {
-    throw new StaleTicketError();
+  if (ticket.active) {
+    const cur = env as DeviceLockStore | null;
+    if (
+      !cur ||
+      cur.state !== 'active' ||
+      envelopeGeneration(cur) !== ticket.gen ||
+      getActiveKey() !== ticket.key ||
+      activeDataKeyGen !== ticket.gen
+    ) {
+      if (getActiveKey()) clearStaleMemoryKey();
+      throw new StaleTicketError();
+    }
   }
 }
 
@@ -403,11 +504,13 @@ async function resumeTransition(env: DeviceLockStore, key: CryptoKey): Promise<v
   if (env.targetMethod === 'off') {
     // Desactivación interrumpida: terminar de descifrar y quitar el sobre.
     activeDataKey = key; // necesaria para descifrar durante la migración a texto plano
+    activeDataKeyGen = envelopeGeneration(env);
     try {
       await migrateLocalStoresEncryption(null);
       await migrateIdentityStoreEncryption(null);
     } finally {
       activeDataKey = null;
+      activeDataKeyGen = null;
     }
     await clearEnvelope();
     broadcastLockChange();
@@ -425,6 +528,7 @@ async function resumeTransition(env: DeviceLockStore, key: CryptoKey): Promise<v
   await saveEnvelope(env);
   broadcastLockChange();
   activeDataKey = key;
+  activeDataKeyGen = envelopeGeneration(env);
   currentMethod = method;
 }
 
@@ -458,6 +562,7 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
       targetMethod: method,
       failedAttempts: 0,
       lockedUntil: 0,
+      startedAt: Date.now(),
     };
     const won = await casInsertTransitionMarker(envelopeStore);
     if (!won) {
@@ -514,6 +619,7 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
 
       // 4. Publish state in memory
       activeDataKey = newActiveDataKey;
+      activeDataKeyGen = envelopeGeneration(envelopeStore);
       currentMethod = method;
 
       // TODO: recovery flow must go through the vault recovery kit of PR #35
@@ -522,9 +628,29 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
     } catch (err) {
       // Sin clave a medio publicar: la transición queda pendiente y reanudable.
       activeDataKey = null;
+      activeDataKeyGen = null;
       currentMethod = null;
       try {
         getVaultClient().lock();
+      } catch {
+        /* best-effort */
+      }
+      // N1: si el fallo fue ANTES de persistir los sobres (passkey cancelada,
+      // KDF interrumpida), el marcador quedó huérfano: borrarlo si sigue
+      // siendo nuestro y sin sobres. La migración solo empieza después de
+      // persistirlos, así que borrarlo no pierde nada recuperable.
+      try {
+        const cur = await getEnvelopeRaw();
+        if (
+          cur &&
+          cur !== 'unreadable' &&
+          cur.state === 'transition' &&
+          !cur.pinEnvelope &&
+          !cur.passkeyEnvelope
+        ) {
+          await clearEnvelope();
+          broadcastLockChange();
+        }
       } catch {
         /* best-effort */
       }
@@ -559,6 +685,12 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
     if (!env || (env.state !== 'active' && env.state !== 'transition')) {
       throw new Error('No hay protección habilitada o estado corrupto');
     }
+    // N4: revalidar el lockout DENTRO del mutex con el sobre recién leído:
+    // los intentos encolados en paralelo veían todos el mismo contador y el
+    // correcto se colaba reseteando los fallos. Un fallo en lockout sigue
+    // contando (extiende el bloqueo, como exige T5); un éxito en lockout se
+    // rechaza sin resetear ni desbloquear.
+    const wasLocked = !!env.lockedUntil && Date.now() < env.lockedUntil;
 
     const vc = getVaultClient();
     let rawKey: Uint8Array;
@@ -585,7 +717,10 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
       throw err;
     }
 
-    // Success - reset attempts
+    // Success - reset attempts (salvo que el lockout nos haya alcanzado en la cola).
+    if (wasLocked) {
+      throw new VaultError('LOCKED', 'Demasiados intentos. Inténtalo más tarde.');
+    }
     if (env.failedAttempts && env.failedAttempts > 0) {
       env.failedAttempts = 0;
       env.lockedUntil = 0;
@@ -608,12 +743,14 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
     }
 
     activeDataKey = key;
+    activeDataKeyGen = envelopeGeneration(env);
     currentMethod = method === 'passkey' ? 'passkey' : 'pin';
   });
 }
 
 export function lock(): void {
   activeDataKey = null;
+  activeDataKeyGen = null;
   currentMethod = null;
   if (vaultClientInstance) vaultClientInstance.lock();
 }
@@ -645,6 +782,7 @@ export async function disableProtection(): Promise<void> {
 
     // 4. Clear memory
     activeDataKey = null;
+    activeDataKeyGen = null;
     currentMethod = null;
     if (vaultClientInstance) vaultClientInstance.lock();
   });
@@ -668,6 +806,8 @@ export async function changePin(oldPin: string, newPin: string): Promise<void> {
     const newEnvelope = await vc.wrapKey(rawKey);
 
     env.pinEnvelope = newEnvelope;
+    // Misma pestaña: la clave en memoria sigue siendo válida para el sobre nuevo.
+    activeDataKeyGen = envelopeGeneration(env);
     await saveEnvelope(env);
     broadcastLockChange();
   });
