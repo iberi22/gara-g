@@ -18,7 +18,7 @@
  */
 import { type DBSchema, type IDBPDatabase, openDB } from 'idb';
 import { LOCAL_CHANGED_EVENT, LOCAL_INSTANCE_ID } from '../appMode';
-import type { DomainRecord, StorageAdapter } from '../domain';
+import { type DomainRecord, type StorageAdapter, nextUpdatedAt } from '../domain';
 import type { LocalDump, LocalTombstone } from './types';
 
 export const LOCAL_DB_NAME = 'gara-local';
@@ -97,6 +97,31 @@ export class IndexedDbAdapter implements StorageAdapter {
     return record;
   }
 
+  /**
+   * Inserta sin sobrescribir. El `get` y el `add` van en la MISMA transaccion
+   * readwrite: IndexedDB serializa esas transacciones por store, asi que dos
+   * llamadas concurrentes con el mismo id no pueden pisarse (a diferencia de
+   * `create`, que usa `put`).
+   */
+  async createIfAbsent(entity: string, record: DomainRecord): Promise<boolean> {
+    const db = await openLocalDb();
+    const tx = db.transaction(['records', 'tombstones'], 'readwrite');
+    const records = tx.objectStore('records');
+    const existing = await records.get([entity, record.id]);
+    if (existing) {
+      await tx.done;
+      return false;
+    }
+    await Promise.all([
+      // `add` (no `put`): nunca sobrescribe; si el id ya existiera, IndexedDB lanza ConstraintError.
+      records.add({ entity, id: record.id, record }),
+      tx.objectStore('tombstones').delete([entity, record.id]),
+      tx.done,
+    ]);
+    notifyChanged();
+    return true;
+  }
+
   async list(entity: string, instanceId: string): Promise<DomainRecord[]> {
     const db = await openLocalDb();
     const rows = await db.getAllFromIndex('records', 'by-entity', entity);
@@ -124,6 +149,31 @@ export class IndexedDbAdapter implements StorageAdapter {
       return null;
     }
     const next = { ...row.record, ...patch, updated_at: new Date().toISOString() } as DomainRecord;
+    await Promise.all([tx.store.put({ entity, id, record: next }), tx.done]);
+    notifyChanged();
+    return next;
+  }
+
+  /**
+   * Escritura condicional en la MISMA transaccion readwrite: el `get` y el
+   * `put` no pueden intercalarse con otra pestana (IndexedDB serializa las
+   * transacciones readwrite por store). Sello monotono como en D1/memoria.
+   */
+  async updateIfCurrent(
+    entity: string,
+    id: string,
+    patch: Record<string, unknown>,
+    instanceId: string,
+    expectedUpdatedAt: string,
+  ): Promise<DomainRecord | null> {
+    const db = await openLocalDb();
+    const tx = db.transaction('records', 'readwrite');
+    const row = await tx.store.get([entity, id]);
+    if (!row || row.record.instance_id !== instanceId || row.record.updated_at !== expectedUpdatedAt) {
+      await tx.done;
+      return null;
+    }
+    const next = { ...row.record, ...patch, updated_at: nextUpdatedAt(row.record.updated_at) } as DomainRecord;
     await Promise.all([tx.store.put({ entity, id, record: next }), tx.done]);
     notifyChanged();
     return next;
