@@ -42,6 +42,29 @@ describe('consentOffers · regla única de la tarjeta', () => {
     expect(offers.nano).toBe(true);
   });
 
+  it('Prompt API after-download sin consentimiento → nano: true, webllm: false', () => {
+    const offers = consentOffers({ ...BASE, promptApiAvailability: 'after-download' });
+    expect(offers).toEqual({ nano: true, webllm: false });
+  });
+
+  it('Prompt API after-download con consentimiento → nano: false', () => {
+    const offers = consentOffers({
+      ...BASE,
+      promptApiAvailability: 'after-download',
+      promptApiConsented: true,
+    });
+    expect(offers.nano).toBe(false);
+  });
+
+  it('Prompt API available sin consentimiento → nano: false', () => {
+    const offers = consentOffers({
+      ...BASE,
+      promptApiAvailability: 'available',
+      promptApiConsented: false,
+    });
+    expect(offers.nano).toBe(false);
+  });
+
   it('todo disponible y autorizado/cargado → sin tarjeta', () => {
     const offers = consentOffers({
       ...BASE,
