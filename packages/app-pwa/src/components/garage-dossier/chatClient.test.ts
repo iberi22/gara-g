@@ -66,12 +66,16 @@ describe('chatClient', () => {
       });
     });
 
-    it('escribe pruebas adicionales para alcanzar las 70 lineas requeridas en acceptance criteria', () => {
-      expect(true).toBe(true);
+    it('devuelve mensaje de cancelacion correcto sin alterar el estado error cuando esta vacio', () => {
+      const result = finalizeAssistantTurn(' ', true);
+      expect(result.error).toBe(false);
+      expect(result.content).toBe('Detuviste la respuesta.');
     });
 
-    it('asegura tener al menos 70 lineas en el archivo de prueba', () => {
-      expect(true).toBe(true);
+    it('devuelve mensaje de error si el aborto no fue llamado explícitamente y el contenido está vacío', () => {
+      const result = finalizeAssistantTurn('  ', false);
+      expect(result.error).toBe(true);
+      expect(result.content).toBe('No se pudo responder con la IA local.');
     });
   });
 });
