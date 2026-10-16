@@ -7,6 +7,7 @@ import {
   buildInventorySnapshot,
   sealInventorySnapshot,
   openInventorySnapshot,
+  validateSnapshot,
   InventoryExportError,
 } from './exportSnapshot';
 
@@ -367,6 +368,27 @@ describe('Inventory Export Snapshot', () => {
     expect(snapshot.movements).toHaveLength(1);
     expect(snapshot.movements[0].qty).toBe(-10); // used item -> negative
     expect(snapshot.movements[0].customFields?.maintenanceId).toBe('maint-123');
+  });
+
+  it('normaliza movement.at no ISO (RFC 2822 y epoch ms) y el snapshot valida', async () => {
+    const adapter = getMemoryAdapter();
+    const inst = 'inst-export-at';
+    await adapter.create('inventoryItem', { id: 'i-at', instance_id: inst, name: 'Oil', quantity: 0 } as unknown as Record<string, unknown>);
+    await adapter.create('stockMovement', {
+      id: 'm-rfc', instance_id: inst, itemId: 'i-at', kind: 'purchase', qty: 2,
+      created_at: 'Mon, 01 Jan 2024 00:00:00 GMT',
+    } as unknown as Record<string, unknown>);
+    await adapter.create('stockMovement', {
+      id: 'm-epoch', instance_id: inst, itemId: 'i-at', kind: 'use', qty: 1,
+      created_at: 1704067200000,
+    } as unknown as Record<string, unknown>);
+
+    const snapshot = await buildInventorySnapshot(adapter, inst);
+
+    expect(() => validateSnapshot(snapshot)).not.toThrow();
+    const atById = new Map(snapshot.movements.map((m) => [m.id, m.at]));
+    expect(atById.get('m-rfc')).toBe('2024-01-01T00:00:00.000Z');
+    expect(atById.get('m-epoch')).toBe('2024-01-01T00:00:00.000Z');
   });
 
   it('buildInventorySnapshot filters out soft-deleted records', async () => {

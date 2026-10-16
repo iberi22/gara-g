@@ -14,7 +14,17 @@ export function txSign(kind: TxKind, qty: number): number {
 }
 
 function genId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  // Prefijo temporal (mantiene los ids ordenables por creacion, igual que antes)
+  // + sufijo aleatorio criptografico: randomUUID cuando existe y, si no,
+  // getRandomValues. Math.random queda solo como ultimo recurso sin Web Crypto.
+  const prefix = Date.now().toString(36);
+  const c = globalThis.crypto;
+  if (typeof c?.randomUUID === 'function') return `${prefix}-${c.randomUUID()}`;
+  if (typeof c?.getRandomValues === 'function') {
+    const bytes = c.getRandomValues(new Uint8Array(8));
+    return `${prefix}-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+  }
+  return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export interface AppendMovementOptions {
@@ -268,8 +278,8 @@ export async function quantityOf(adapter: StorageAdapter, instanceId: string, it
 }
 
 export async function movementHistory(adapter: StorageAdapter, instanceId: string, itemId: string): Promise<DomainRecord[]> {
-  const all = await adapter.list('stockMovement', instanceId);
-  return all
-    .filter((t) => (t as Record<string, unknown>).itemId === itemId)
-    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  // Mismo filtro que `quantityOf` (incluye borrado suave): el historial nunca
+  // muestra movimientos que el stock ya ignora.
+  const movements = await itemMovements(adapter, instanceId, itemId);
+  return movements.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 }

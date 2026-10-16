@@ -129,6 +129,43 @@ describe('Inventory Ledger', () => {
     expect(tx2.id).toEqual(tx1.id); // returns same tx id
   });
 
+  it('genera el id del movimiento con crypto.randomUUID cuando esta disponible', async () => {
+    const adapter = getMemoryAdapter();
+    await adapter.create('inventoryItem', { id: 'uuid-item', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
+
+    const real = globalThis.crypto;
+    const randomUUID = vi.fn(() => '11111111-2222-4333-8444-555555555555');
+    vi.stubGlobal('crypto', { randomUUID, getRandomValues: real.getRandomValues.bind(real) });
+    try {
+      const tx = await appendMovement(adapter, 'inst1', 'uuid-item', 'purchase', 3);
+      expect(randomUUID).toHaveBeenCalledTimes(1);
+      expect(tx.id).toMatch(/^[0-9a-z]+-11111111-2222-4333-8444-555555555555$/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('movementHistory oculta movimientos con borrado suave y no altera el stock', async () => {
+    const adapter = getMemoryAdapter();
+    await adapter.create('inventoryItem', { id: 'sd-item', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
+    await appendMovement(adapter, 'inst1', 'sd-item', 'purchase', 10);
+    const [live] = await movementHistory(adapter, 'inst1', 'sd-item');
+
+    const now = new Date().toISOString();
+    await adapter.create('stockMovement', {
+      id: 'sd-del-camel', instance_id: 'inst1', itemId: 'sd-item', kind: 'purchase', qty: 7,
+      deletedAt: now, created_at: now, updated_at: now,
+    } as unknown as DomainRecord);
+    await adapter.create('stockMovement', {
+      id: 'sd-del-snake', instance_id: 'inst1', itemId: 'sd-item', kind: 'use', qty: 4,
+      deleted_at: now, created_at: now, updated_at: now,
+    } as unknown as DomainRecord);
+
+    const history = await movementHistory(adapter, 'inst1', 'sd-item');
+    expect(history.map((h) => h.id)).toEqual([live.id]);
+    expect(await quantityOf(adapter, 'inst1', 'sd-item')).toBe(10); // 10, nunca 10+7-4
+  });
+
   it('creates opening balance if item has quantity but no movements', async () => {
     const adapter = getMemoryAdapter();
     await adapter.create('inventoryItem', { id: 'item4', instance_id: 'inst1', quantity: 15, created_at: '', updated_at: '' } as unknown as DomainRecord);

@@ -74,6 +74,23 @@ function isValidIsoDate(str: unknown): boolean {
   return !isNaN(d.getTime()) && d.toISOString() === str;
 }
 
+/**
+ * Normaliza `created_at` a ISO 8601 exacto (el que exige `validateSnapshot`).
+ * Acepta cadenas parseables (p. ej. `Mon, 01 Jan 2024 00:00:00 GMT`) y epoch
+ * en milisegundos; si no es una fecha valida cae al `now` de la exportacion.
+ */
+function normalizeMovementDate(value: unknown, fallback: string): string {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const fromEpoch = new Date(value);
+    return Number.isNaN(fromEpoch.getTime()) ? fallback : fromEpoch.toISOString();
+  }
+  if (typeof value === 'string' && value !== '') {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? fallback : parsed.toISOString();
+  }
+  return fallback;
+}
+
 export function validateSnapshot(input: unknown): InventorySnapshot {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new InventoryExportError('formato', 'El documento no es un objeto JSON');
   const parsed = input as Record<string, any>;
@@ -430,7 +447,7 @@ export async function buildInventorySnapshot(
       itemId: String(data.itemId || ''),
       kind: normalizeKind(data.kind),
       qty: signedQtyOf(data),
-      at: String(data.created_at || now),
+      at: normalizeMovementDate(data.created_at, now),
       ...(data.maintenanceId ? { customFields: { maintenanceId: String(data.maintenanceId) } } : {}),
     };
   });
