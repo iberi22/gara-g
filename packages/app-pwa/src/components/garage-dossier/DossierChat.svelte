@@ -16,6 +16,7 @@ import {
   loadTurns,
   pickExcerpts,
   saveTurns,
+  finalizeAssistantTurn,
   type ChatTurn,
   type IndexedManual,
 } from './chatClient';
@@ -59,6 +60,7 @@ const needsConsent = $derived(hasConsentOffer(offers));
 /** Último estado crudo de la Prompt API (para recalcular ofertas al aceptar). */
 let lastPromptState = $state<string | undefined>(undefined);
 let controller: AbortController | null = $state(null);
+let cancelled = $state(false);
 
 const SUGGESTIONS: Record<VehicleFamily, string[]> = {
   moto: [
@@ -131,6 +133,7 @@ async function send(text?: string): Promise<void> {
   if (!question || busy) return;
 
   draft = '';
+  cancelled = false;
   const chatHistory: ChatTurn[] = [...turns.filter((t) => !t.error), { role: 'user', content: question }];
   const excerpts = pickExcerpts(chunks, chatHistory);
   chatHistory[chatHistory.length - 1].sources = excerpts.map((e) => ({ manual: e.manual, page: e.page }));
@@ -167,8 +170,8 @@ async function send(text?: string): Promise<void> {
     );
     update({ model: result.model });
   } catch {
-    update({ content: turns[idx].content || 'No se pudo responder con la IA local.', error: !turns[idx].content });
   } finally {
+    update(finalizeAssistantTurn(turns[idx].content, cancelled));
     controller = null;
     busy = false;
     thinking = false;
@@ -276,7 +279,7 @@ function onKey(e: KeyboardEvent): void {
     ></textarea>
     <button type="submit" class="send" disabled={busy || !draft.trim()}>{busy ? '…' : 'Preguntar'}</button>
     {#if busy}
-      <button type="button" class="ghost" onclick={() => controller?.abort()}>Detener</button>
+      <button type="button" class="ghost" onclick={() => { cancelled = true; controller?.abort(); }}>Detener</button>
     {/if}
   </form>
   <p class="disclaimer">
