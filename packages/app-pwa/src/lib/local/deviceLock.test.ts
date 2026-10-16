@@ -246,7 +246,7 @@ describe('deviceLock', () => {
     await expect(disableProtection()).rejects.toThrow('Debe desbloquear antes de deshabilitar');
   });
 
-  it('11. unreadable lock store yields error and blocks data + identity operations', async () => {
+  it('11. unreadable lock store yields error and blocks data operations (identity falls back when never protected)', async () => {
     const realOpen = indexedDB.open.bind(indexedDB);
     const spy = vi.spyOn(indexedDB, 'open').mockImplementation(((name: string, ...args: unknown[]) => {
       if (name === 'gara-lock') throw new Error('gara-lock unavailable');
@@ -263,9 +263,15 @@ describe('deviceLock', () => {
     await expect(adapter.update('vehicle', 'e1', {}, LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
     await expect(adapter.del('vehicle', 'e1', LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
 
-    const { saveSerializedKeypair, loadSerializedKeypair } = await import('../../mesh/identityStore');
-    await expect(saveSerializedKeypair('x')).rejects.toThrow(LockedError);
-    await expect(loadSerializedKeypair()).rejects.toThrow(LockedError);
+    // Sin ciphertext de keypair previo (protección nunca habilitada), la
+    // identidad no bloquea la creación del nodo: fallback en memoria/plano.
+    const { saveSerializedKeypair, loadSerializedKeypair, resetIdentityMemory } = await import(
+      '../../mesh/identityStore'
+    );
+    await saveSerializedKeypair('x');
+    expect(await loadSerializedKeypair()).toBe('x');
+    resetIdentityMemory();
+    expect(await loadSerializedKeypair()).toBe('x');
 
     spy.mockRestore();
   });

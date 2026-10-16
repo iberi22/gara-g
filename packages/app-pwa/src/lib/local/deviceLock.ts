@@ -1,4 +1,5 @@
 import { createVaultClient, type PasskeyPrfProvider, VaultError } from '@swal/vault/web';
+import { LockedError, TransitionInProgressError } from './recordCrypto';
 
 export type LockState = 'off' | 'locked' | 'unlocked' | 'transition' | 'error';
 
@@ -11,57 +12,160 @@ export interface DeviceLockStore {
   lockedUntil?: number; // timestamp
 }
 
+/** Error reintentable: el sobre cambió entre la foto y la escritura. */
+export class StaleTicketError extends Error {
+  constructor(message = 'La protección cambió durante la operación.') {
+    super(message);
+    this.name = 'StaleTicketError';
+  }
+}
+
+export function isLockRetryable(err: unknown): boolean {
+  return err instanceof StaleTicketError || err instanceof TransitionInProgressError;
+}
+
 const STORE_NAME = 'gara-lock';
 const KEY_NAME = 'envelope';
+const LOCK_CHANNEL = 'gara-lock';
+const LOCK_PING_KEY = 'gara-lock-ping';
 
 let activeDataKey: CryptoKey | null = null;
 let currentMethod: 'pin' | 'passkey' | null = null;
 let vaultClientInstance: ReturnType<typeof createVaultClient> | null = null;
 let overridePasskeyProvider: PasskeyPrfProvider | undefined = undefined;
 
-// IndexedDB para guardar el sobre
+// Serializa enable/disable/unlock/changePin en este proceso: sin esto, dos
+// enableProtection() concurrentes corren el PBKDF2 lento a la vez y compiten
+// por el kekSalt del vault (un éxito aparente con sobre indescifrable).
+// Los intentos de unlock también pasan por aquí para que cada uno cuente en el
+// contador de lockout.
+let transitionMutex: Promise<void> = Promise.resolve();
+
+async function withTransitionMutex<T>(fn: () => Promise<T>): Promise<T> {
+  const previous = transitionMutex;
+  let release!: () => void;
+  transitionMutex = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+// La conexión al IndexedDB del candado se abre por operación y se cierra al
+// terminar: nunca se deja una conexión colgando por operación.
 function openLockDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(STORE_NAME, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE_NAME);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    try {
+      const req = indexedDB.open(STORE_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(STORE_NAME);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => reject(new Error('indexedDB bloqueada'));
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
+async function withLockDb<T>(fn: (db: IDBDatabase) => Promise<T>): Promise<T> {
+  const db = await openLockDb();
+  try {
+    return await fn(db);
+  } finally {
+    try {
+      db.close();
+    } catch {
+      /* cierre best-effort */
+    }
+  }
+}
+
 async function getEnvelope(): Promise<DeviceLockStore | null | 'unreadable'> {
+  ensureLockListener();
   try {
     if (typeof indexedDB === 'undefined') return null;
-    const db = await openLockDb();
-    return await new Promise<DeviceLockStore | null | 'unreadable'>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const req = tx.objectStore(STORE_NAME).get(KEY_NAME);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => resolve('unreadable');
-    });
+    return await withLockDb(
+      (db) =>
+        new Promise<DeviceLockStore | null | 'unreadable'>((resolve) => {
+          try {
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const req = tx.objectStore(STORE_NAME).get(KEY_NAME);
+            req.onsuccess = () => resolve((req.result as DeviceLockStore) || null);
+            req.onerror = () => resolve('unreadable');
+          } catch {
+            resolve('unreadable');
+          }
+        })
+    );
   } catch {
     return 'unreadable';
   }
 }
 
 async function saveEnvelope(data: DeviceLockStore): Promise<void> {
-  const db = await openLockDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).put(data, KEY_NAME);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  await withLockDb(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).put(data, KEY_NAME);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      })
+  );
+}
+
+/**
+ * Inserción condicional en UNA sola transacción (lectura+escritura atómicas):
+ * solo crea el marcador si no hay ningún sobre. Así dos pestañas que habilitan
+ * a la vez no compiten: una gana y la otra rechaza sin tocar el vault.
+ */
+async function casInsertTransitionMarker(marker: DeviceLockStore): Promise<boolean> {
+  return withLockDb(
+    (db) =>
+      new Promise<boolean>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const get = store.get(KEY_NAME);
+        get.onsuccess = () => {
+          if (get.result) {
+            // Alguien se adelantó: abortar sin escribir nada.
+            try {
+              tx.abort();
+            } catch {
+              /* ya terminó */
+            }
+            resolve(false);
+            return;
+          }
+          store.put(marker, KEY_NAME);
+        };
+        get.onerror = () => reject(get.error);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => {
+          // El abort() deliberado también cae aquí: resolver según lo leído.
+          resolve(false);
+        };
+        tx.onabort = () => resolve(false);
+      })
+  );
 }
 
 async function clearEnvelope(): Promise<void> {
-  const db = await openLockDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).delete(KEY_NAME);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  await withLockDb(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).delete(KEY_NAME);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      })
+  );
 }
 
 function getVaultClient() {
@@ -80,14 +184,109 @@ export function setPasskeyProvider(provider?: PasskeyPrfProvider) {
   vaultClientInstance = null; // Recreate next time
 }
 
+// Invalidación entre pestañas: cada confirmación del sobre avisa; las demás
+// pestañas sueltan la clave en memoria si ya no hay sobre activo. Best-effort:
+// la relectura del sobre antes de cada escritura es la garantía real.
+let lockListenerOn = false;
+
+function handleLockInvalidation(): void {
+  void getEnvelopeRaw().then((env) => {
+    // Solo un sobre AUSENTE invalida la clave: en 'transition' la clave sigue
+    // siendo necesaria (la propia desactivación/activación la usa para migrar,
+    // y resumeTransition la fija temporalmente). Limpiarla aquí rompía la
+    // migración en curso y dejaba el marcador atascado.
+    if (env === null) {
+      clearStaleMemoryKey();
+    }
+  });
+}
+
+// Lectura sin re-enganchar el listener (para usar desde el propio listener).
+async function getEnvelopeRaw(): Promise<DeviceLockStore | null | 'unreadable'> {
+  try {
+    if (typeof indexedDB === 'undefined') return null;
+    return await withLockDb(
+      (db) =>
+        new Promise<DeviceLockStore | null | 'unreadable'>((resolve) => {
+          try {
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const req = tx.objectStore(STORE_NAME).get(KEY_NAME);
+            req.onsuccess = () => resolve((req.result as DeviceLockStore) || null);
+            req.onerror = () => resolve('unreadable');
+          } catch {
+            resolve('unreadable');
+          }
+        })
+    );
+  } catch {
+    return 'unreadable';
+  }
+}
+
+export function ensureLockListener(): void {
+  if (lockListenerOn) return;
+  lockListenerOn = true;
+  try {
+    const BC = (globalThis as unknown as { BroadcastChannel?: typeof BroadcastChannel }).BroadcastChannel;
+    if (typeof BC !== 'undefined') {
+      const ch = new BC(LOCK_CHANNEL);
+      ch.onmessage = () => handleLockInvalidation();
+    }
+  } catch {
+    /* sin BroadcastChannel: la relectura sigue protegiendo */
+  }
+  try {
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('storage', (ev) => {
+        if (ev.key === LOCK_PING_KEY) handleLockInvalidation();
+      });
+    }
+  } catch {
+    /* sin eventos storage: la relectura sigue protegiendo */
+  }
+}
+
+let lockChannel: BroadcastChannel | null = null;
+
+function broadcastLockChange(): void {
+  try {
+    const BC = (globalThis as unknown as { BroadcastChannel?: typeof BroadcastChannel }).BroadcastChannel;
+    if (typeof BC !== 'undefined') {
+      lockChannel ??= new BC(LOCK_CHANNEL);
+      lockChannel.postMessage({ t: Date.now() });
+    }
+  } catch {
+    /* best-effort */
+  }
+  try {
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      window.localStorage.setItem(LOCK_PING_KEY, String(Date.now()));
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
+function clearStaleMemoryKey(): void {
+  activeDataKey = null;
+  currentMethod = null;
+  try {
+    vaultClientInstance?.lock();
+  } catch {
+    /* best-effort */
+  }
+}
+
 export async function getLockState(): Promise<LockState> {
   const env = await getEnvelope();
   if (env === 'unreadable') return 'error';
 
   if (env && env.state === 'transition') return 'transition';
 
-  if (activeDataKey) return 'unlocked';
-  if (env && env.state === 'active') return 'locked';
+  // El estado deriva del sobre persistido, no de la memoria: una pestaña cuya
+  // protección se desactivó en otra parte deja de verse como 'unlocked'.
+  if (env && env.state === 'active') return activeDataKey ? 'unlocked' : 'locked';
+  if (activeDataKey) clearStaleMemoryKey();
   return 'off';
 }
 
@@ -114,6 +313,84 @@ function calculateDelay(attempts: number): number {
 const PIN_PATTERN = /^\d{6}$/;
 
 /**
+ * Foto del sobre para una escritura: congela (estado, clave) ANTES del cifrado
+ * asíncrono. verifyTicket() la revalida justo antes de confirmar la escritura;
+ * si el sobre cambió (otra pestaña, enable/disable concurrente), la operación
+ * se reintenta con una foto nueva en vez de dejar ciphertext huérfano o
+ * plaintext con protección activa.
+ */
+export interface WriteTicket {
+  envJson: string;
+  active: boolean;
+  key: CryptoKey | null;
+}
+
+export async function snapshotTicket(): Promise<WriteTicket> {
+  const env = await getEnvelope();
+  if (env === 'unreadable') {
+    throw new LockedError('Estado de protección ilegible: operaciones bloqueadas.');
+  }
+  if (env && env.state === 'transition') {
+    throw new TransitionInProgressError();
+  }
+  if (env && env.state === 'active') {
+    const key = getActiveKey();
+    if (!key) {
+      throw new LockedError('El dispositivo está bloqueado. Desbloquéalo para continuar.');
+    }
+    return { envJson: JSON.stringify(env), active: true, key };
+  }
+  // Sin sobre no hay cifrado; si quedaba una clave en memoria, ya es obsoleta.
+  if (activeDataKey) clearStaleMemoryKey();
+  return { envJson: JSON.stringify(env), active: false, key: null };
+}
+
+/** Revalida la foto justo antes de escribir. Lanza StaleTicketError si cambió. */
+export async function verifyTicket(ticket: WriteTicket): Promise<void> {
+  const env = await getEnvelope();
+  if (env === 'unreadable') {
+    throw new LockedError('Estado de protección ilegible: operaciones bloqueadas.');
+  }
+  if (JSON.stringify(env) !== ticket.envJson) {
+    if (env && env.state === 'transition') throw new TransitionInProgressError();
+    throw new StaleTicketError();
+  }
+  if (ticket.active && getActiveKey() !== ticket.key) {
+    throw new StaleTicketError();
+  }
+}
+
+/**
+ * Foto del sobre con espera acotada a transiciones en curso. La espera NUNCA
+ * es infinita: si el marcador queda atascado (fallo sin reanudar), la
+ * operación falla en vez de colgar el hilo para siempre.
+ */
+export async function takeTicket(maxAttempts = 20): Promise<WriteTicket> {
+  let last: unknown = new TransitionInProgressError();
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await snapshotTicket();
+    } catch (err) {
+      if (!isLockRetryable(err)) throw err;
+      last = err;
+    }
+    await waitForSettledState(250);
+  }
+  throw last;
+}
+
+/** Espera acotada a que termine una transición (para reintentos). */
+export async function waitForSettledState(timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  for (;;) {
+    const env = await getEnvelope();
+    if (env === 'unreadable' || !env || env.state !== 'transition') return;
+    if (Date.now() - start > timeoutMs) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+/**
  * Reanuda una transición interrumpida (app cerrada o fallo) usando la clave ya
  * recuperada del sobre. "off" termina la desactivación; cualquier otro target
  * termina la activación. El sobre NO se borra hasta confirmar la migración, así
@@ -133,6 +410,7 @@ async function resumeTransition(env: DeviceLockStore, key: CryptoKey): Promise<v
       activeDataKey = null;
     }
     await clearEnvelope();
+    broadcastLockChange();
     currentMethod = null;
     if (vaultClientInstance) vaultClientInstance.lock();
     return;
@@ -145,119 +423,166 @@ async function resumeTransition(env: DeviceLockStore, key: CryptoKey): Promise<v
   env.state = 'active';
   env.targetMethod = undefined;
   await saveEnvelope(env);
+  broadcastLockChange();
   activeDataKey = key;
   currentMethod = method;
 }
 
 // Devuelve código de recuperación de alta entropía (16 bytes en hex) al habilitar
 export async function enableProtection(method: 'pin' | 'passkey', secret?: string): Promise<string> {
-  const currentState = await getLockState();
-  if (currentState === 'error') {
-    throw new Error('Estado de protección ilegible: no se puede habilitar.');
-  }
-  if (currentState === 'transition') {
-    throw new Error('Hay una transición pendiente. Desbloquea para reanudarla antes de volver a habilitar.');
-  }
-  if (currentState !== 'off') {
-    throw new Error('La protección ya está habilitada');
-  }
+  return withTransitionMutex(async () => {
+    const env0 = await getEnvelope();
+    if (env0 === 'unreadable') {
+      throw new Error('Estado de protección ilegible: no se puede habilitar.');
+    }
+    if (env0 && env0.state === 'transition') {
+      throw new Error('Hay una transición pendiente. Desbloquea para reanudarla antes de volver a habilitar.');
+    }
+    if (env0 && env0.state === 'active') {
+      throw new Error('La protección ya está habilitada');
+    }
 
-  // El PIN de respaldo (seis dígitos) es obligatorio también con passkey: si el PRF
-  // deja de estar disponible no debe quedar sin alternativa.
-  const pin = secret ?? '';
-  if (!PIN_PATTERN.test(pin)) {
-    if (method === 'passkey') throw new Error('Se requiere un PIN de 6 dígitos como respaldo de la passkey');
-    if (method === 'pin') throw new Error('PIN debe tener exactamente 6 dígitos');
-    throw new Error('Método desconocido');
-  }
+    // El PIN de respaldo (seis dígitos) es obligatorio también con passkey: si el PRF
+    // deja de estar disponible no debe quedar sin alternativa.
+    const pin = secret ?? '';
+    if (!PIN_PATTERN.test(pin)) {
+      if (method === 'passkey') throw new Error('Se requiere un PIN de 6 dígitos como respaldo de la passkey');
+      if (method === 'pin') throw new Error('PIN debe tener exactamente 6 dígitos');
+      throw new Error('Método desconocido');
+    }
 
-  const rawKey = crypto.getRandomValues(new Uint8Array(32));
-  const newActiveDataKey = await crypto.subtle.importKey(
-    'raw',
-    rawKey,
-    { name: 'AES-GCM' },
-    false,
-    ['encrypt', 'decrypt']
-  );
+    // Marcador condicional ANTES del PBKDF2 lento: la perdedora de una carrera
+    // (misma u otra pestaña) rechaza aquí sin tocar el vault ni el estado.
+    const envelopeStore: DeviceLockStore = {
+      state: 'transition',
+      targetMethod: method,
+      failedAttempts: 0,
+      lockedUntil: 0,
+    };
+    const won = await casInsertTransitionMarker(envelopeStore);
+    if (!won) {
+      throw new Error('La protección ya está habilitada');
+    }
+    broadcastLockChange();
 
-  const vc = getVaultClient();
-  let pinEnvelope: string | undefined;
-  let passkeyEnvelope: string | undefined;
+    try {
+      const rawKey = crypto.getRandomValues(new Uint8Array(32));
+      const newActiveDataKey = await crypto.subtle.importKey(
+        'raw',
+        rawKey,
+        { name: 'AES-GCM' },
+        false,
+        ['encrypt', 'decrypt']
+      );
 
-  if (method === 'passkey') {
-    await vc.unlock({ passkey: true });
-    passkeyEnvelope = await vc.wrapKey(rawKey);
-    // Respaldo obligatorio por PIN.
-    await vc.lock();
-    await vc.unlock({ passphrase: pin });
-    pinEnvelope = await vc.wrapKey(rawKey);
-  } else {
-    await vc.unlock({ passphrase: pin });
-    pinEnvelope = await vc.wrapKey(rawKey);
-  }
+      const vc = getVaultClient();
+      let pinEnvelope: string | undefined;
+      let passkeyEnvelope: string | undefined;
 
-  const envelopeStore: DeviceLockStore = {
-    state: 'transition',
-    targetMethod: method,
-    pinEnvelope,
-    passkeyEnvelope,
-    failedAttempts: 0,
-    lockedUntil: 0
-  };
+      if (method === 'passkey') {
+        await vc.unlock({ passkey: true });
+        passkeyEnvelope = await vc.wrapKey(rawKey);
+        // Respaldo obligatorio por PIN.
+        await vc.lock();
+        await vc.unlock({ passphrase: pin });
+        pinEnvelope = await vc.wrapKey(rawKey);
+      } else {
+        await vc.unlock({ passphrase: pin });
+        pinEnvelope = await vc.wrapKey(rawKey);
+      }
 
-  // 1. Write 'transition' marker (con la clave envuelta: nunca se pierde si algo falla)
-  await saveEnvelope(envelopeStore);
+      // Persistir la clave envuelta junto al marcador: si algo falla después,
+      // unlock() puede reanudar la transición con la credencial original.
+      envelopeStore.pinEnvelope = pinEnvelope;
+      envelopeStore.passkeyEnvelope = passkeyEnvelope;
+      await saveEnvelope(envelopeStore);
 
-  // 2. Migrar (coordinada con las escrituras en curso dentro del adaptador).
-  // Si algo falla, el sobre NO se borra: es la única forma de recuperar la clave. La
-  // transición queda pendiente y unlock() la reanuda o revierte con la credencial original.
-  const { migrateLocalStoresEncryption } = await import('./indexedDbAdapter');
-  await migrateLocalStoresEncryption(newActiveDataKey);
+      // 2. Migrar (coordinada con las escrituras en curso dentro del adaptador).
+      // Si algo falla, el sobre NO se borra: es la única forma de recuperar la clave. La
+      // transición queda pendiente y unlock() la reanuda o revierte con la credencial original.
+      const { migrateLocalStoresEncryption } = await import('./indexedDbAdapter');
+      await migrateLocalStoresEncryption(newActiveDataKey);
 
-  const { migrateIdentityStoreEncryption } = await import('../../mesh/identityStore');
-  await migrateIdentityStoreEncryption(newActiveDataKey);
+      const { migrateIdentityStoreEncryption } = await import('../../mesh/identityStore');
+      await migrateIdentityStoreEncryption(newActiveDataKey);
 
-  // 3. Mark as active
-  envelopeStore.state = 'active';
-  envelopeStore.targetMethod = undefined;
-  await saveEnvelope(envelopeStore);
+      // 3. Mark as active
+      envelopeStore.state = 'active';
+      envelopeStore.targetMethod = undefined;
+      await saveEnvelope(envelopeStore);
+      broadcastLockChange();
 
-  // 4. Publish state in memory
-  activeDataKey = newActiveDataKey;
-  currentMethod = method;
+      // 4. Publish state in memory
+      activeDataKey = newActiveDataKey;
+      currentMethod = method;
 
-  // TODO: recovery flow must go through the vault recovery kit of PR #35
-  // and the same phone's biometrics/pattern. For now return dummy
-  return "00000000000000000000000000000000";
+      // TODO: recovery flow must go through the vault recovery kit of PR #35
+      // and the same phone's biometrics/pattern. For now return dummy
+      return '00000000000000000000000000000000';
+    } catch (err) {
+      // Sin clave a medio publicar: la transición queda pendiente y reanudable.
+      activeDataKey = null;
+      currentMethod = null;
+      try {
+        getVaultClient().lock();
+      } catch {
+        /* best-effort */
+      }
+      throw err;
+    }
+  });
 }
 
 export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: string): Promise<void> {
-  const env = await getEnvelope();
-  if (env === 'unreadable') throw new Error('Estado de protección ilegible');
-  if (!env || (env.state !== 'active' && env.state !== 'transition')) {
+  // Pre-chequeo ANTES de encolar en el mutex: intentos genuinamente paralelos
+  // ven el mismo contador y cada uno cuenta; el lockout solo frena a los que
+  // llegan después de que ya haya espera programada.
+  const pre = await getEnvelope();
+  if (pre === 'unreadable') throw new Error('Estado de protección ilegible');
+  if (!pre || (pre.state !== 'active' && pre.state !== 'transition')) {
     throw new Error('No hay protección habilitada o estado corrupto');
   }
-
-  // Verify PIN limits
-  if (env.lockedUntil && Date.now() < env.lockedUntil) {
+  if (pre.lockedUntil && Date.now() < pre.lockedUntil) {
     throw new VaultError('LOCKED', 'Demasiados intentos. Inténtalo más tarde.');
   }
+  // Validación neutra: un método o formato inválido nunca cuenta como intento.
+  if (method !== 'pin' && method !== 'passkey') {
+    throw new Error('Método desconocido');
+  }
+  if (method === 'pin' && (!secret || !PIN_PATTERN.test(secret))) {
+    throw new Error('PIN debe tener exactamente 6 dígitos');
+  }
 
-  const vc = getVaultClient();
-  let rawKey: Uint8Array;
+  return withTransitionMutex(async () => {
+    const env = await getEnvelope();
+    if (env === 'unreadable') throw new Error('Estado de protección ilegible');
+    if (!env || (env.state !== 'active' && env.state !== 'transition')) {
+      throw new Error('No hay protección habilitada o estado corrupto');
+    }
 
-  try {
-    if (method === 'pin') {
-      if (!secret || !PIN_PATTERN.test(secret)) throw new Error('PIN debe tener exactamente 6 dígitos');
-      if (!env.pinEnvelope) throw new Error('No hay PIN configurado');
-      await vc.unlock({ passphrase: secret });
-      rawKey = await vc.unwrapKey(env.pinEnvelope);
-    } else if (method === 'passkey') {
-      if (!env.passkeyEnvelope) throw new Error('No hay Passkey configurado');
-      await vc.unlock({ passkey: true });
-      rawKey = await vc.unwrapKey(env.passkeyEnvelope);
-    } else {
-      throw new Error('Método desconocido');
+    const vc = getVaultClient();
+    let rawKey: Uint8Array;
+
+    try {
+      if (method === 'pin') {
+        if (!env.pinEnvelope) throw new Error('No hay PIN configurado');
+        await vc.unlock({ passphrase: secret as string });
+        rawKey = await vc.unwrapKey(env.pinEnvelope);
+      } else {
+        if (!env.passkeyEnvelope) throw new Error('No hay Passkey configurado');
+        await vc.unlock({ passkey: true });
+        rawKey = await vc.unwrapKey(env.passkeyEnvelope);
+      }
+    } catch (err) {
+      // Solo un fallo criptográfico real (BAD_KEY) cuenta como intento.
+      if (err instanceof VaultError && err.code === 'BAD_KEY') {
+        env.failedAttempts = (env.failedAttempts || 0) + 1;
+        env.lockedUntil = Date.now() + calculateDelay(env.failedAttempts);
+        await saveEnvelope(env);
+        broadcastLockChange();
+        throw new VaultError('BAD_KEY', 'PIN o código incorrecto');
+      }
+      throw err;
     }
 
     // Success - reset attempts
@@ -267,36 +592,24 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
       await saveEnvelope(env);
     }
 
-  } catch (err) {
-    // On failure, increment attempt and save delay (only for actual crypto failures, not validation)
-    if (err instanceof VaultError || (err instanceof Error && err.message.includes('Método'))) {
-       // Only increment on actual attempt failures (BAD_KEY)
-       if (err instanceof VaultError && err.code !== 'BAD_KEY') throw err;
+    const key = await crypto.subtle.importKey(
+      'raw',
+      rawKey as unknown as BufferSource,
+      { name: 'AES-GCM' },
+      false,
+      ['encrypt', 'decrypt']
+    );
 
-       env.failedAttempts = (env.failedAttempts || 0) + 1;
-       env.lockedUntil = Date.now() + calculateDelay(env.failedAttempts);
-       await saveEnvelope(env);
-       throw new VaultError('BAD_KEY', 'PIN o código incorrecto');
+    // Si la app se cerró a mitad de una transición, reanudarla con la clave recuperada.
+    if (env.state === 'transition') {
+      await resumeTransition(env, key);
+      broadcastLockChange();
+      return;
     }
-    throw err;
-  }
 
-  const key = await crypto.subtle.importKey(
-    'raw',
-    rawKey as unknown as BufferSource,
-    { name: 'AES-GCM' },
-    false,
-    ['encrypt', 'decrypt']
-  );
-
-  // Si la app se cerró a mitad de una transición, reanudarla con la clave recuperada.
-  if (env.state === 'transition') {
-    await resumeTransition(env, key);
-    return;
-  }
-
-  activeDataKey = key;
-  currentMethod = method === 'passkey' ? 'passkey' : 'pin';
+    activeDataKey = key;
+    currentMethod = method === 'passkey' ? 'passkey' : 'pin';
+  });
 }
 
 export function lock(): void {
@@ -306,49 +619,56 @@ export function lock(): void {
 }
 
 export async function disableProtection(): Promise<void> {
-  if (!activeDataKey) throw new Error('Debe desbloquear antes de deshabilitar');
+  return withTransitionMutex(async () => {
+    if (!activeDataKey) throw new Error('Debe desbloquear antes de deshabilitar');
 
-  const env = await getEnvelope();
-  if (env === 'unreadable' || !env) return; // Already disabled or corrupt
+    const env = await getEnvelope();
+    if (env === 'unreadable' || !env || env.state !== 'active') return; // Already disabled or mid-transition
 
-  // 1. Mark transition
-  env.state = 'transition';
-  env.targetMethod = 'off';
-  await saveEnvelope(env);
+    // 1. Mark transition
+    env.state = 'transition';
+    env.targetMethod = 'off';
+    await saveEnvelope(env);
+    broadcastLockChange();
 
-  // 2. Migrate back to plain text. Si falla, se conserva el estado 'transition' y el
-  // sobre, de modo que unlock() puede reanudar o revertir sin perder la clave.
-  const { migrateLocalStoresEncryption } = await import('./indexedDbAdapter');
-  await migrateLocalStoresEncryption(null);
+    // 2. Migrate back to plain text. Si falla, se conserva el estado 'transition' y el
+    // sobre, de modo que unlock() puede reanudar o revertir sin perder la clave.
+    const { migrateLocalStoresEncryption } = await import('./indexedDbAdapter');
+    await migrateLocalStoresEncryption(null);
 
-  const { migrateIdentityStoreEncryption } = await import('../../mesh/identityStore');
-  await migrateIdentityStoreEncryption(null);
+    const { migrateIdentityStoreEncryption } = await import('../../mesh/identityStore');
+    await migrateIdentityStoreEncryption(null);
 
-  // 3. Clear envelope
-  await clearEnvelope();
+    // 3. Clear envelope
+    await clearEnvelope();
+    broadcastLockChange();
 
-  // 4. Clear memory
-  activeDataKey = null;
-  currentMethod = null;
-  if (vaultClientInstance) vaultClientInstance.lock();
+    // 4. Clear memory
+    activeDataKey = null;
+    currentMethod = null;
+    if (vaultClientInstance) vaultClientInstance.lock();
+  });
 }
 
 export async function changePin(oldPin: string, newPin: string): Promise<void> {
-  if (!activeDataKey) throw new Error('Debe desbloquear antes de cambiar PIN');
-  if (!PIN_PATTERN.test(newPin)) throw new Error('El nuevo PIN debe tener exactamente 6 dígitos');
+  return withTransitionMutex(async () => {
+    if (!activeDataKey) throw new Error('Debe desbloquear antes de cambiar PIN');
+    if (!PIN_PATTERN.test(newPin)) throw new Error('El nuevo PIN debe tener exactamente 6 dígitos');
 
-  const vc = getVaultClient();
-  const env = await getEnvelope();
-  if (env === 'unreadable' || !env || !env.pinEnvelope) throw new Error('No hay PIN configurado');
+    const vc = getVaultClient();
+    const env = await getEnvelope();
+    if (env === 'unreadable' || !env || !env.pinEnvelope) throw new Error('No hay PIN configurado');
 
-  // Unwrap with old PIN just to verify they know the old PIN
-  await vc.unlock({ passphrase: oldPin });
-  const rawKey = await vc.unwrapKey(env.pinEnvelope);
+    // Unwrap with old PIN just to verify they know the old PIN
+    await vc.unlock({ passphrase: oldPin });
+    const rawKey = await vc.unwrapKey(env.pinEnvelope);
 
-  // Wrap with new PIN
-  await vc.unlock({ passphrase: newPin });
-  const newEnvelope = await vc.wrapKey(rawKey);
+    // Wrap with new PIN
+    await vc.unlock({ passphrase: newPin });
+    const newEnvelope = await vc.wrapKey(rawKey);
 
-  env.pinEnvelope = newEnvelope;
-  await saveEnvelope(env);
+    env.pinEnvelope = newEnvelope;
+    await saveEnvelope(env);
+    broadcastLockChange();
+  });
 }

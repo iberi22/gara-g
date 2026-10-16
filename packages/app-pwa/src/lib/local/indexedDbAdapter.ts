@@ -3,7 +3,16 @@ import { LOCAL_CHANGED_EVENT, LOCAL_INSTANCE_ID } from '../appMode';
 import type { DomainRecord, StorageAdapter } from '../domain';
 import type { LocalDump, LocalTombstone } from './types';
 import { encryptRecord, decryptRecord, LockedError } from './recordCrypto';
-import { getLockState, getActiveKey, type LockState } from './deviceLock';
+import {
+  takeTicket,
+  verifyTicket,
+  waitForSettledState,
+  isLockRetryable,
+  getActiveKey,
+  StaleTicketError,
+  type WriteTicket,
+} from './deviceLock';
+import { beginDataOp, beginTransition } from './opGate';
 
 export const LOCAL_DB_NAME = 'gara-local';
 export const LOCAL_DB_VERSION = 1;
@@ -12,7 +21,7 @@ interface RecordRow {
   entity: string;
   id: string;
   record?: DomainRecord; // plain
-  enc?: string;          // encrypted
+  enc?: string; // encrypted
 }
 
 interface TombstoneRow {
@@ -68,68 +77,59 @@ function notifyChanged(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(LOCAL_CHANGED_EVENT));
 }
 
-// Coordinación entre operaciones de datos y transiciones de cifrado.
-// Las transiciones (activar/desactivar protección) migran TODAS las filas, pero las
-// escrituras capturan estado y clave ANTES del cifrado asíncrono. Sin exclusión, una
-// escritura en curso puede confirmarse después de la migración y quedar en el modo
-// equivocado (fila cifrada con protección "off" y sin sobre). Este candado da acceso
-// compartido a las operaciones normales y exclusivo a las transiciones.
-let pendingDataOps = 0;
-let transitionActive = false;
-let transitionTail: Promise<void> = Promise.resolve();
-const opWaiters: Array<() => void> = [];
-const transitionWaiters: Array<() => void> = [];
+/** Intentos máximos del bucle foto-cifrar-verificar-escribir. */
+const MAX_TICKET_ATTEMPTS = 12;
 
-function flushWaiters(waiters: Array<() => void>): void {
-  for (const waiter of waiters.splice(0)) waiter();
+async function prepareWrite(
+  entity: string,
+  id: string,
+  record: DomainRecord,
+  ticket: WriteTicket
+): Promise<RecordRow> {
+  if (ticket.active && ticket.key) {
+    const enc = await encryptRecord(entity, id, record, ticket.key);
+    return { entity, id, enc };
+  }
+  return { entity, id, record };
 }
 
-async function beginDataOp(): Promise<() => void> {
-  while (transitionActive) {
-    await new Promise<void>((resolve) => opWaiters.push(resolve));
+async function prepareRead(row: RecordRow | undefined, ticket: WriteTicket): Promise<DomainRecord | null> {
+  if (!row) return null;
+  if (row.enc) {
+    // Fila cifrada pero la foto no tiene clave: las filas son más nuevas que la
+    // foto (o viceversa). Reintentar con una foto nueva en vez de fallar.
+    if (!ticket.active || !ticket.key) {
+      throw new StaleTicketError();
+    }
+    try {
+      return await decryptRecord(row.entity, row.id, row.enc, ticket.key);
+    } catch {
+      throw new StaleTicketError('No se pudo descifrar; la protección pudo cambiar.');
+    }
   }
-  pendingDataOps++;
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    pendingDataOps--;
-    if (pendingDataOps === 0) flushWaiters(transitionWaiters);
-  };
+  return row.record ?? null;
 }
 
-async function beginTransition(): Promise<() => void> {
-  // Solo una transición a la vez.
-  const previous = transitionTail;
-  let releaseTail!: () => void;
-  transitionTail = new Promise<void>((resolve) => {
-    releaseTail = resolve;
-  });
-  await previous;
-
-  transitionActive = true;
-  while (pendingDataOps > 0) {
-    await new Promise<void>((resolve) => transitionWaiters.push(resolve));
+/** Bucle genérico foto → puerta compartida → verificar → confirmar. */
+async function withVerifiedTicket<T>(fn: (ticket: WriteTicket) => Promise<T>): Promise<T> {
+  let last: unknown = new Error('No se pudo completar la operación');
+  for (let attempt = 0; attempt < MAX_TICKET_ATTEMPTS; attempt++) {
+    const ticket = await takeTicket();
+    const release = await beginDataOp();
+    try {
+      await verifyTicket(ticket);
+      // fn() debe revalidar el ticket después del cifrado asíncrono y antes
+      // de confirmar su transacción (ver create/replace/update/del).
+      return await fn(ticket);
+    } catch (err) {
+      if (!isLockRetryable(err)) throw err;
+      last = err;
+    } finally {
+      release();
+    }
+    await waitForSettledState();
   }
-
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    transitionActive = false;
-    releaseTail();
-    flushWaiters(opWaiters);
-  };
-}
-
-// Helpers for read/write interception - state pre-fetched to avoid breaking idb tx
-function checkLock(state: LockState) {
-  if (state === 'error') {
-    throw new LockedError('Estado de protección ilegible: operaciones bloqueadas.');
-  }
-  if (state === 'locked' || state === 'transition') {
-    throw new LockedError('El dispositivo está bloqueado. Desbloquéalo para continuar.');
-  }
+  throw last;
 }
 
 /** Igualdad de la fila cruda almacenada, para detectar cambios concurrentes (comparar y escribir). */
@@ -141,37 +141,11 @@ function rowsEqual(a: RecordRow | undefined, b: RecordRow | undefined): boolean 
   return JSON.stringify(a.record ?? null) === JSON.stringify(b.record ?? null);
 }
 
-async function prepareWrite(entity: string, id: string, record: DomainRecord, state: LockState, key: CryptoKey | null): Promise<RecordRow> {
-  checkLock(state);
-  if (key) {
-    const enc = await encryptRecord(entity, id, record, key);
-    return { entity, id, enc };
-  }
-  return { entity, id, record };
-}
-
-async function prepareRead(row: RecordRow | undefined, state: LockState, key: CryptoKey | null): Promise<DomainRecord | null> {
-  if (!row) return null;
-  if (row.enc) {
-    checkLock(state);
-    if (!key) throw new Error('Se requiere clave activa para leer registro cifrado');
-    return decryptRecord(row.entity, row.id, row.enc, key);
-  }
-  if (row.record) {
-    checkLock(state); // Even plaintext rows shouldn't be read while locked
-    return row.record;
-  }
-  return null;
-}
-
 export class IndexedDbAdapter implements StorageAdapter {
   async create(entity: string, record: DomainRecord): Promise<DomainRecord> {
-    const release = await beginDataOp();
-    try {
-      const state = await getLockState();
-      checkLock(state);
-      const key = getActiveKey();
-      const row = await prepareWrite(entity, record.id, record, state, key);
+    const out = await withVerifiedTicket(async (ticket) => {
+      const row = await prepareWrite(entity, record.id, record, ticket);
+      await verifyTicket(ticket);
 
       const db = await openLocalDb();
       const tx = db.transaction(['records', 'tombstones'], 'readwrite');
@@ -181,76 +155,86 @@ export class IndexedDbAdapter implements StorageAdapter {
         tx.objectStore('tombstones').delete([entity, record.id]),
         tx.done,
       ]);
-      notifyChanged();
       return record;
-    } finally {
-      release();
-    }
+    });
+    notifyChanged();
+    return out;
   }
 
   async list(entity: string, instanceId: string): Promise<DomainRecord[]> {
-    const release = await beginDataOp();
-    try {
-      const state = await getLockState();
-      checkLock(state);
-      const key = getActiveKey();
+    let last: unknown = new Error('No se pudo leer');
+    for (let attempt = 0; attempt < MAX_TICKET_ATTEMPTS; attempt++) {
+      const ticket = await takeTicket();
+      const release = await beginDataOp();
+      try {
+        const db = await openLocalDb();
+        const rows = await db.getAllFromIndex('records', 'by-entity', entity);
+        await verifyTicket(ticket);
 
-      const db = await openLocalDb();
-      const rows = await db.getAllFromIndex('records', 'by-entity', entity);
-
-      // Si hay un registro cifrado pero estamos bloqueados, prepareRead lanzara LockedError.
-      const records = await Promise.all(rows.map(r => prepareRead(r, state, key)));
-      return records.filter((r): r is DomainRecord => r !== null && r.instance_id === instanceId);
-    } finally {
-      release();
+        // Si hay un registro cifrado pero estamos bloqueados, prepareRead lanzara reintento o LockedError.
+        const records = await Promise.all(rows.map((r) => prepareRead(r, ticket)));
+        return records.filter((r): r is DomainRecord => r !== null && r.instance_id === instanceId);
+      } catch (err) {
+        if (!isLockRetryable(err)) throw err;
+        last = err;
+      } finally {
+        release();
+      }
+      await waitForSettledState();
     }
+    throw last;
   }
 
   async get(entity: string, id: string, instanceId: string): Promise<DomainRecord | null> {
-    const release = await beginDataOp();
-    try {
-      const state = await getLockState();
-      checkLock(state);
-      const key = getActiveKey();
-
-      const db = await openLocalDb();
-      const row = await db.get('records', [entity, id]);
-      const record = await prepareRead(row, state, key);
-      if (!record || record.instance_id !== instanceId) return null;
-      return record;
-    } finally {
-      release();
+    let last: unknown = new Error('No se pudo leer');
+    for (let attempt = 0; attempt < MAX_TICKET_ATTEMPTS; attempt++) {
+      const ticket = await takeTicket();
+      const release = await beginDataOp();
+      try {
+        const db = await openLocalDb();
+        const row = await db.get('records', [entity, id]);
+        await verifyTicket(ticket);
+        const record = await prepareRead(row, ticket);
+        if (!record || record.instance_id !== instanceId) return null;
+        return record;
+      } catch (err) {
+        if (!isLockRetryable(err)) throw err;
+        last = err;
+      } finally {
+        release();
+      }
+      await waitForSettledState();
     }
+    throw last;
   }
 
   async update(
     entity: string,
     id: string,
     patch: Record<string, unknown>,
-    instanceId: string,
+    instanceId: string
   ): Promise<DomainRecord | null> {
-    const release = await beginDataOp();
-    try {
-      const db = await openLocalDb();
-      const MAX_ATTEMPTS = 8;
-
-      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-        const state = await getLockState();
-        checkLock(state);
-        const key = getActiveKey();
+    let last: unknown = new Error('No se pudo actualizar el registro: demasiadas escrituras concurrentes');
+    for (let attempt = 0; attempt < MAX_TICKET_ATTEMPTS; attempt++) {
+      const ticket = await takeTicket();
+      const release = await beginDataOp();
+      try {
+        const db = await openLocalDb();
 
         // 1. Leer y descifrar la fila actual.
         const readTx = db.transaction('records', 'readonly');
         const rawRow = await readTx.store.get([entity, id]);
         await readTx.done;
+        await verifyTicket(ticket);
 
-        const record = await prepareRead(rawRow, state, key);
+        const record = await prepareRead(rawRow, ticket);
         if (!record || record.instance_id !== instanceId) {
           return null;
         }
 
         const next = { ...record, ...patch, updated_at: new Date().toISOString() } as DomainRecord;
-        const writeRow = await prepareWrite(entity, id, next, state, key);
+        const writeRow = await prepareWrite(entity, id, next, ticket);
+        await verifyTicket(ticket);
 
         // 2. Comparar y escribir en la MISMA transacción: si la fila cambió (o se borró)
         //    desde la lectura, no la pisamos ni la resucitamos; se reintenta con la versión actual.
@@ -268,88 +252,99 @@ export class IndexedDbAdapter implements StorageAdapter {
         await Promise.all([store.put(writeRow), tx.done]);
         notifyChanged();
         return next;
+      } catch (err) {
+        if (!isLockRetryable(err)) throw err;
+        last = err;
+      } finally {
+        release();
       }
-
-      throw new Error('No se pudo actualizar el registro: demasiadas escrituras concurrentes');
-    } finally {
-      release();
+      await waitForSettledState();
     }
+
+    throw last;
   }
 
   async del(entity: string, id: string, instanceId: string): Promise<boolean> {
-    const release = await beginDataOp();
-    try {
-      const state = await getLockState();
-      checkLock(state);
-      const key = getActiveKey();
+    let last: unknown = new Error('No se pudo borrar');
+    for (let attempt = 0; attempt < MAX_TICKET_ATTEMPTS; attempt++) {
+      const ticket = await takeTicket();
+      const release = await beginDataOp();
+      try {
+        const db = await openLocalDb();
+        const readTx = db.transaction('records', 'readonly');
+        const rawRow = await readTx.store.get([entity, id]);
+        await readTx.done;
+        await verifyTicket(ticket);
 
-      const db = await openLocalDb();
-      const readTx = db.transaction('records', 'readonly');
-      const rawRow = await readTx.store.get([entity, id]);
-      await readTx.done;
+        // Allow delete without decrypting? Yes, we just need to ensure it belongs to the instance if possible,
+        // but without decryption we can't check instance_id.
+        const record = await prepareRead(rawRow, ticket);
+        if (!record || record.instance_id !== instanceId) {
+          return false;
+        }
 
-      // Allow delete without decrypting? Yes, we just need to ensure it belongs to the instance if possible,
-      // but without decryption we can't check instance_id.
-      // However, prepareRead will throw if locked.
-      const record = await prepareRead(rawRow, state, key);
-      if (!record || record.instance_id !== instanceId) {
-        return false;
+        const tx = db.transaction(['records', 'tombstones'], 'readwrite');
+        await Promise.all([
+          tx.objectStore('records').delete([entity, id]),
+          tx.objectStore('tombstones').put({ entity, id, deletedAt: new Date().toISOString() }),
+          tx.done,
+        ]);
+        notifyChanged();
+        return true;
+      } catch (err) {
+        if (!isLockRetryable(err)) throw err;
+        last = err;
+      } finally {
+        release();
       }
-
-      const tx = db.transaction(['records', 'tombstones'], 'readwrite');
-      await Promise.all([
-        tx.objectStore('records').delete([entity, id]),
-        tx.objectStore('tombstones').put({ entity, id, deletedAt: new Date().toISOString() }),
-        tx.done,
-      ]);
-      notifyChanged();
-      return true;
-    } finally {
-      release();
+      await waitForSettledState();
     }
+    throw last;
   }
 }
 
 /** Registros y lapidas del tenant local, agrupados por entidad (insumo de `exportLocalData`). */
 export async function readLocalStores(): Promise<Pick<LocalDump, 'entities' | 'deleted'>> {
-  const release = await beginDataOp();
-  try {
-    const state = await getLockState();
-    checkLock(state);
-    const key = getActiveKey();
-
-    const db = await openLocalDb();
-    const [rows, tombstones] = await Promise.all([db.getAll('records'), db.getAll('tombstones')]);
-    const entities: Record<string, DomainRecord[]> = {};
-    for (const raw of rows) {
-      const record = await prepareRead(raw, state, key);
-      if (!record || record.instance_id !== LOCAL_INSTANCE_ID) continue;
-      (entities[raw.entity] ??= []).push(record);
+  let last: unknown = new Error('No se pudo leer');
+  for (let attempt = 0; attempt < MAX_TICKET_ATTEMPTS; attempt++) {
+    const ticket = await takeTicket();
+    const release = await beginDataOp();
+    try {
+      const db = await openLocalDb();
+      const [rows, tombstones] = await Promise.all([db.getAll('records'), db.getAll('tombstones')]);
+      await verifyTicket(ticket);
+      const entities: Record<string, DomainRecord[]> = {};
+      for (const raw of rows) {
+        const record = await prepareRead(raw, ticket);
+        if (!record || record.instance_id !== LOCAL_INSTANCE_ID) continue;
+        (entities[raw.entity] ??= []).push(record);
+      }
+      const deleted: Record<string, LocalTombstone[]> = {};
+      for (const t of tombstones) (deleted[t.entity] ??= []).push({ id: t.id, deletedAt: t.deletedAt });
+      return { entities, deleted };
+    } catch (err) {
+      if (!isLockRetryable(err)) throw err;
+      last = err;
+    } finally {
+      release();
     }
-    const deleted: Record<string, LocalTombstone[]> = {};
-    for (const t of tombstones) (deleted[t.entity] ??= []).push({ id: t.id, deletedAt: t.deletedAt });
-    return { entities, deleted };
-  } finally {
-    release();
+    await waitForSettledState();
   }
+  throw last;
 }
 
 /** Reemplaza TODO el contenido en una sola transaccion (si algo falla, no queda nada a medias). */
 export async function replaceLocalStores(data: Pick<LocalDump, 'entities' | 'deleted'>): Promise<void> {
-  const release = await beginDataOp();
-  try {
-    const state = await getLockState();
-    checkLock(state);
-    const key = getActiveKey();
-
+  await withVerifiedTicket(async (ticket) => {
     // Validate write possible before starting TX
     const rowWrites: RecordRow[] = [];
     for (const [entity, list] of Object.entries(data.entities)) {
       for (const record of list) {
-        const row = await prepareWrite(entity, record.id, { ...record, instance_id: LOCAL_INSTANCE_ID }, state, key);
+        const row = await prepareWrite(entity, record.id, { ...record, instance_id: LOCAL_INSTANCE_ID }, ticket);
         rowWrites.push(row);
       }
     }
+    await verifyTicket(ticket);
 
     const db = await openLocalDb();
     const tx = db.transaction(['records', 'tombstones'], 'readwrite');
@@ -364,10 +359,8 @@ export async function replaceLocalStores(data: Pick<LocalDump, 'entities' | 'del
       for (const t of list) writes.push(tombstones.put({ entity, id: t.id, deletedAt: t.deletedAt }));
     }
     await Promise.all([...writes, tx.done]);
-    notifyChanged();
-  } finally {
-    release();
-  }
+  });
+  notifyChanged();
 }
 
 /** Migrate all rows to encrypted (if key is provided) or plaintext (if key is null). */
@@ -384,9 +377,9 @@ export async function migrateLocalStoresEncryption(key: CryptoKey | null): Promi
     for (const row of rows) {
       let plain: DomainRecord | null = null;
       if (row.enc) {
-        if (!getActiveKey() && !key) throw new Error('Se requiere clave para descifrar durante migración');
         const k = key || getActiveKey();
-        plain = await decryptRecord(row.entity, row.id, row.enc, k!);
+        if (!k) throw new Error('Se requiere clave para descifrar durante migración');
+        plain = await decryptRecord(row.entity, row.id, row.enc, k);
       } else if (row.record) {
         plain = row.record;
       }
@@ -452,3 +445,10 @@ export function getLocalAdapter(): IndexedDbAdapter {
   shared ??= new IndexedDbAdapter();
   return shared;
 }
+
+// Re-exportado para compatibilidad: la puerta vive en opGate.ts para que el
+// almacén de identidad use exactamente la misma.
+export { beginDataOp, beginTransition } from './opGate';
+
+// Mantener el error de candado accesible desde este módulo.
+export { LockedError };
