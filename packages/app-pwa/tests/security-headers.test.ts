@@ -68,10 +68,14 @@ beforeEach(() => {
 
 describe('cabeceras de seguridad', () => {
   it('una pagina HTML sale con HSTS, nosniff, Referrer-Policy, X-Frame-Options y Permissions-Policy', async () => {
+    // Como en el build: en `astro dev` (y en vitest) DEV es true y el HTML de dev va sin
+    // X-Frame-Options ni CSP; ver el describe de modo dev.
+    vi.stubEnv('DEV', false);
     const res = await onRequest(ctx('/login'), async () => new Response('<html>hola</html>', {
       status: 200,
       headers: { 'Content-Type': 'text/html' },
     }));
+    vi.unstubAllEnvs();
     expect(res.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains; preload');
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(res.headers.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin');
@@ -216,13 +220,17 @@ describe('cabeceras de seguridad', () => {
 });
 
 describe('modo dev (astro dev no emite security.csp)', () => {
-  it('el HTML de dev no recibe la CSP de respaldo, que bloquearia sus scripts inline', () => {
+  it('el HTML de dev no recibe la CSP de respaldo ni X-Frame-Options (iframe del ClientRouter)', () => {
     const res = withSecurityHeaders(
       new Response('<!doctype html><script>1</script>', { headers: { 'Content-Type': 'text/html' } }),
       { dev: true },
     );
     expect(res.headers.get('Content-Security-Policy')).toBeNull();
+    // `astro dev` mete la pagina destino en un iframe del mismo origen para preparar los
+    // componentes `client:only` (ClientRouter): con DENY la navegacion SPA no termina.
+    expect(res.headers.get('X-Frame-Options')).toBeNull();
     expect(res.headers.get('Strict-Transport-Security')).toBe(SECURITY_HEADERS['Strict-Transport-Security']);
+    expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
   });
 
   it('en dev el JSON sigue cerrado y en produccion el HTML lleva el respaldo', () => {

@@ -39,7 +39,7 @@ const rel = (p: string) => relative(ROOT, p);
 /** Scripts inline (<script …>con cuerpo</script>) de un fichero de plantilla. */
 function scriptsInline(src: string): { attrs: string; body: string }[] {
   const out: { attrs: string; body: string }[] = [];
-  for (const m of src.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)) {
+  for (const m of src.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script[^>]*>/gi)) {
     const attrs = m[1];
     if (!/is:inline|define:vars/.test(attrs)) continue;
     if (/application\/ld\+json/.test(attrs)) continue;

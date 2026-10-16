@@ -47,10 +47,15 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
 export interface SecurityHeaderOptions {
   sameOriginFraming?: boolean;
   /**
-   * `astro dev` no emite `security.csp` (solo el build lo hace). Sin esta bandera el
-   * respaldo `script-src 'self'` caeria sobre cada pagina de dev y bloquearia todos sus
-   * scripts inline (el E2E de CI corre sobre `astro dev`). En dev el HTML va sin CSP, como
-   * sin este cambio; JSON y demas respuestas siguen con CSP_NONE.
+   * `astro dev` no emite `security.csp` (solo el build lo hace) y ademas el ClientRouter
+   * carga la pagina destino en un `<iframe>` oculto y DEL MISMO ORIGEN para preparar sus
+   * componentes `client:only` (astro/dist/transitions/router.js, `prepareForClientOnlyComponents`,
+   * que solo corre bajo `import.meta.env.DEV`). Por eso, en dev y solo para HTML:
+   * sin esta bandera el respaldo `script-src 'self'` caeria sobre cada pagina de dev y
+   * bloquearia todos sus scripts inline, y `X-Frame-Options: DENY` bloquearia ese iframe
+   * (la navegacion SPA del E2E, que corre sobre `astro dev`, se queda a medias). En dev el
+   * HTML va sin CSP y sin `X-Frame-Options`, como sin este cambio; JSON y demas respuestas
+   * siguen con CSP_NONE y con las cabeceras fijas completas.
    */
   dev?: boolean;
 }
@@ -162,10 +167,17 @@ export function withSecurityHeaders(
   options: SecurityHeaderOptions = {},
 ): Response {
   const headers = new Headers(response.headers);
-  for (const [name, value] of Object.entries(SECURITY_HEADERS)) headers.set(name, value);
-  if (options.sameOriginFraming) headers.set('X-Frame-Options', 'SAMEORIGIN');
   const isHtml = isHtmlResponse(response);
-  if (!headers.has('Content-Security-Policy') && !(options.dev && isHtml)) {
+  // En dev el HTML va tambien sin `X-Frame-Options`: el iframe oculto del ClientRouter (ver
+  // `dev` arriba) es del mismo origen y `DENY` lo bloquea. En produccion ese iframe no
+  // existe (`import.meta.env.DEV` en router.js), asi que la politica estricta no cambia.
+  const devHtml = Boolean(options.dev) && isHtml;
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+    if (devHtml && name === 'X-Frame-Options') continue;
+    headers.set(name, value);
+  }
+  if (options.sameOriginFraming) headers.set('X-Frame-Options', 'SAMEORIGIN');
+  if (!headers.has('Content-Security-Policy') && !devHtml) {
     headers.set('Content-Security-Policy', fallbackCsp(isHtml, options));
   }
   return new Response(response.body, {

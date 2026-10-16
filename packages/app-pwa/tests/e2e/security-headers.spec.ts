@@ -27,7 +27,7 @@ test.describe('cabeceras de seguridad', () => {
     // La CSP es inutil si el HTML trae scripts inline que no estan hasheados: cada
     // <script> sin src del documento tiene que aparecer en la politica.
     const html = await res.text();
-    for (const [, attrs, contenido] of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
+    for (const [, attrs, contenido] of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script[^>]*>/gi)) {
       if (/\bsrc\s*=/i.test(attrs) || contenido === '') continue;
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(contenido));
       const hash = `'sha256-${Buffer.from(new Uint8Array(digest)).toString('base64')}'`;

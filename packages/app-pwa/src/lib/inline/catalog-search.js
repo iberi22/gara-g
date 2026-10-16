@@ -58,7 +58,15 @@ function initCatalog(__cfg) {
     function updateModels() {
       const make = calcMake.value;
       const found = catalogData.find((m) => m.name === make);
-      calcModel.innerHTML = found ? found.models.map((md) => `<option value="${md.model}">${md.model}</option>`).join('') : '';
+      // Opciones creadas como nodos y rellenadas con textContent: el nombre del modelo
+      // se pinta como texto, nunca como marcado (CodeQL js/xss-through-dom).
+      const opciones = (found ? found.models : []).map((modelo) => {
+        const opcion = document.createElement('option');
+        opcion.value = modelo.model;
+        opcion.textContent = modelo.model;
+        return opcion;
+      });
+      calcModel.replaceChildren(...opciones);
       updateResult();
     }
 
@@ -86,16 +94,41 @@ function initCatalog(__cfg) {
       // Formato con el locale del mercado (es-CL) y los nombres de documento del mercado.
       const num = (n) => n.toLocaleString(marketLocale);
       const money = (n) => `$${n.toLocaleString(marketLocale)}`;
-      calcResult.innerHTML = `
-        <div class="calc-grid">
-          <div><strong>Próxima revisión:</strong> <span style="color: var(--swal-accent-text)">${num(nextRev)} km</span>
-            <br/><small style="color: var(--swal-text-faint)">${remainingRev < 0 ? `⚠️ VENCIDO hace ${num(Math.abs(remainingRev))} km` : `faltan ${num(remainingRev)} km`}</small></div>
-          <div><strong>Próx. cambio aceite:</strong> <span style="color: var(--swal-accent-text)">${num(nextOil)} km</span>
-            <br/><small style="color: var(--swal-text-faint)">${remainingOil < 0 ? `⚠️ VENCIDO hace ${num(Math.abs(remainingOil))} km` : `faltan ${num(remainingOil)} km`}</small></div>
-          <div><strong>${soapLabel} est.:</strong> <span style="color: var(--swal-accent-text)">${money(soat)}</span></div>
-          <div><strong>${rtLabel}:</strong> <span style="color: var(--swal-accent-text)">${money(tecno)}</span></div>
-        </div>
-      `;
+      // Mismo motivo que en updateModels: el resultado se monta con nodos y textContent,
+      // nunca con innerHTML (CodeQL js/xss-through-dom).
+      const celda = (etiqueta, valor, nota) => {
+        const div = document.createElement('div');
+        const strong = document.createElement('strong');
+        strong.textContent = etiqueta;
+        const span = document.createElement('span');
+        span.style.color = 'var(--swal-accent-text)';
+        span.textContent = valor;
+        div.append(strong, ' ', span);
+        if (nota) {
+          const small = document.createElement('small');
+          small.style.color = 'var(--swal-text-faint)';
+          small.textContent = nota;
+          div.append(document.createElement('br'), small);
+        }
+        return div;
+      };
+      const grid = document.createElement('div');
+      grid.className = 'calc-grid';
+      grid.append(
+        celda(
+          'Próxima revisión:',
+          `${num(nextRev)} km`,
+          remainingRev < 0 ? `⚠️ VENCIDO hace ${num(Math.abs(remainingRev))} km` : `faltan ${num(remainingRev)} km`
+        ),
+        celda(
+          'Próx. cambio aceite:',
+          `${num(nextOil)} km`,
+          remainingOil < 0 ? `⚠️ VENCIDO hace ${num(Math.abs(remainingOil))} km` : `faltan ${num(remainingOil)} km`
+        ),
+        celda(`${soapLabel} est.:`, money(soat)),
+        celda(`${rtLabel}:`, money(tecno))
+      );
+      calcResult.replaceChildren(grid);
     }
 
     calcMake.addEventListener('change', updateModels);
