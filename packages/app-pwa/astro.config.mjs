@@ -8,6 +8,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cloudOverlay } from './cloud-overlay.mjs';
 import { edgeMeshDist } from './edge-mesh-dist.mjs';
+import { cspConfig } from './src/lib/csp';
 
 // Modulo cloud opcional (facturacion, pagos, anclaje): solo con GARA_CLOUD=1 y private/ presente.
 // Sin el, la app es local-first completa y las rutas cloud responden 404 "cloud disabled".
@@ -37,6 +38,12 @@ function cloudflareWorkerStub() {
 // Trade-off: Pages.dev = UI estatica; Workers.dev = backend completo (REST APIs + DB)
 export default defineConfig({
   output: 'server',
+  // CSP (F12): Astro emite la cabecera `content-security-policy` en cada ruta SSR con los
+  // hashes SHA-256 de los scripts/estilos inline de la app (ver src/lib/csp.ts). Sin
+  // `'unsafe-inline'` en `script-src` y sin `'unsafe-eval'` en ninguna directiva: un XSS
+  // inyectado no ejecuta. La lista de hashes es GLOBAL a proposito, porque el ClientRouter
+  // re-ejecuta los scripts de la pagina nueva dentro del documento actual.
+  security: { csp: cspConfig() },
   site: 'https://gara-g.swal.network',
   adapter: cloudflare({
     imageService: 'passthrough',
@@ -81,6 +88,13 @@ export default defineConfig({
     ],
     build: {
       target: 'esnext',
+    },
+    // El worker de WebLLM se crea con `{ type: 'module' }` y usa `import()`
+    // dinámico dentro (src/lib/localAi/webllm.worker.ts): con el formato `iife`
+    // por defecto el build rompe (top-level await) y el `import()` no existiría
+    // en ejecución (classic worker). Es el único `new Worker` de la app.
+    worker: {
+      format: 'es',
     },
     ssr: {
       noExternal: ['astro'],

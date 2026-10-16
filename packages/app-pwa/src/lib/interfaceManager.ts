@@ -1,12 +1,12 @@
 /**
  * interfaceManager.ts — Gestión centralizada de las 3 interfaces de usuario de GARA-G:
  * 1. 'admin': Consola administrativa estándar de gestión de flotas (/fleet).
- * 2. 'aui': Interfaz agentica generativa propia de SWAL/UI con gating para cuentas Socio.
+ * 2. 'aui': Interfaz agentica generativa propia de SWAL/UI (IA local, sin planes).
  * 3. 'game': Vista estilo videojuego (Need for Speed garage HUD) con flag GAME_UI_ENABLED.
+ *
+ * G3: la app no tiene planes ni tiers, así que aquí ya no hay detección de "socio":
+ * conmutar de interfaz es solo una preferencia del usuario, sin gating.
  */
-
-import { domainConfig } from './domain.config';
-import { isSocioActivo, type SocioBillingInfo } from './socioGate';
 
 export type InterfaceMode = 'admin' | 'aui' | 'game';
 
@@ -14,7 +14,6 @@ export const INTERFACE_MODES: readonly InterfaceMode[] = ['admin', 'aui', 'game'
 export const DEFAULT_INTERFACE: InterfaceMode = 'admin';
 export const STORAGE_KEY = 'gara_interface_mode';
 export const COOKIE_NAME = 'gara_interface_mode';
-export const DEMO_SOCIO_STORAGE_KEY = 'gara_demo_socio';
 
 /**
  * Determina si la interfaz de videojuego está habilitada mediante:
@@ -195,67 +194,4 @@ export function resolveActiveInterface(options: {
     gameEnabled,
     source,
   };
-}
-
-/**
- * Verifica si la cuenta actual tiene privilegios de Socio para activar la AUI.
- * Toma en cuenta:
- * 1. Simulación demo en localStorage (gara_demo_socio)
- * 2. Billing de Stripe activo (isSocioActivo)
- * 3. Tier configurado en domainConfig.billing.tier ('payg', 'payg-managed', 'socio')
- */
-export function isSocioUser(
-  billing?: SocioBillingInfo | null,
-  tierOverride?: string | null
-): boolean {
-  if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
-    try {
-      const demoVal = localStorage.getItem(DEMO_SOCIO_STORAGE_KEY);
-      if (demoVal === 'true') return true;
-      if (demoVal === 'false') return false;
-    } catch {}
-  }
-
-  if (tierOverride) {
-    const clean = tierOverride.toLowerCase().trim();
-    if (
-      clean === 'payg' ||
-      clean === 'payg-managed' ||
-      clean === 'socio' ||
-      clean === 'socio-managed' ||
-      clean === 'socio_infra' ||
-      clean === 'pro'
-    ) {
-      return true;
-    }
-    if (clean === 'free' || clean === 'mesh-only') {
-      return false;
-    }
-  }
-
-  if (billing) {
-    if (isSocioActivo(billing)) return true;
-    if (billing.planTier === 'socio_infra' || billing.planTier === 'pro') return true;
-    if (billing.status === 'canceled' || billing.status === 'past_due' || billing.status === 'inactive') {
-      return false;
-    }
-  }
-
-  const defaultTier = (domainConfig as any)?.billing?.tier;
-  if (defaultTier === 'payg' || defaultTier === 'payg-managed' || defaultTier === 'socio') {
-    return true;
-  }
-
-  return false;
-}
-
-/**
- * Helper para alternar el estado demo de Socio en el navegador.
- */
-export function setDemoSocioStatus(active: boolean): void {
-  if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
-    try {
-      localStorage.setItem(DEMO_SOCIO_STORAGE_KEY, active ? 'true' : 'false');
-    } catch {}
-  }
 }

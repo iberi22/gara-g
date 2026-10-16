@@ -9,6 +9,7 @@ describe('prefsBootstrapScript', () => {
   beforeEach(() => {
     localStorage.clear();
     document.getElementById('swal-prefs-style')?.remove();
+    delete (window as { __swalPrefsSheet?: unknown }).__swalPrefsSheet;
   });
 
   it('oculta los modulos y paneles apagados guardados', () => {
@@ -32,5 +33,42 @@ describe('prefsBootstrapScript', () => {
     run(prefsBootstrapScript({ storageKey: 'k' }));
     document.dispatchEvent(new CustomEvent('swal:prefschange', { detail: { modules: { 'a"]{}x': false } } }));
     expect(styleText()).toBe('[data-pref-module="a\\"]{}x"]{display:none!important}');
+  });
+});
+
+describe('prefsBootstrapScript con hojas construidas (navegador con CSP)', () => {
+  // jsdom no trae CSSStyleSheet construible ni adoptedStyleSheets: se simulan los dos.
+  class FakeSheet {
+    text = '';
+    replaceSync(t: string) {
+      this.text = t;
+    }
+  }
+  const doc = document as unknown as { adoptedStyleSheets?: FakeSheet[] };
+  const g = globalThis as unknown as { CSSStyleSheet: unknown };
+  let original: unknown;
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.getElementById('swal-prefs-style')?.remove();
+    delete (window as { __swalPrefsSheet?: unknown }).__swalPrefsSheet;
+    original = g.CSSStyleSheet;
+    g.CSSStyleSheet = FakeSheet;
+    doc.adoptedStyleSheets = [];
+    return () => {
+      g.CSSStyleSheet = original;
+      delete doc.adoptedStyleSheets;
+    };
+  });
+
+  it('no crea <style> (la CSP lo bloquearia) y adopta una sola hoja', () => {
+    localStorage.setItem('k', JSON.stringify({ modules: { fuel: false } }));
+    run(prefsBootstrapScript({ storageKey: 'k' }));
+    // Una re-ejecucion (ClientRouter) reutiliza la misma hoja.
+    run(prefsBootstrapScript({ storageKey: 'k' }));
+    document.dispatchEvent(new CustomEvent('astro:after-swap'));
+    expect(document.getElementById('swal-prefs-style')).toBeNull();
+    expect(doc.adoptedStyleSheets).toHaveLength(1);
+    expect(doc.adoptedStyleSheets?.[0].text).toBe('[data-pref-module="fuel"]{display:none!important}');
   });
 });

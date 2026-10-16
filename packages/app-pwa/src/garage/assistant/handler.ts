@@ -1,34 +1,22 @@
 /**
- * handler.ts — Logica de POST /api/garage/assistant sin dependencias de Astro, para
- * poder probarla con dobles (binding de IA y datos del tenant).
+ * handler.ts — Composición del asistente del expediente SIN servidor.
  *
- * Cuerpo: { vehicleId, messages: [{role, content}], excerpts?: [{manual, page, text}] }
- * Respuesta: text/event-stream con eventos `{t}`, `{thinking}`, `{done, model}` o `{error}`.
+ * Antes esta carpeta tenía un `handleAssistant` que corría Workers AI detrás de una ruta de
+ * servidor con cuota. Ahora el asistente vive en el navegador: este módulo solo compone el
+ * prompt (con los helpers puros de `prompt.ts`) y llama a la IA local (`localChat`), que
+ * cae a las reglas deterministas si el navegador no tiene motor.
  *
- * `excerpts` los elige el navegador sobre el texto de los manuales del vehiculo (ver
- * store.ts: el plan gratuito no da CPU para buscar en el servidor). Vienen del cliente,
- * asi que se acotan en numero y tamano; lo peor que puede hacer un usuario es darle a SU
- * asistente un texto falso de SU manual.
+ * Sigue siendo la única puerta: la interfaz no arma mensajes de sistema a mano.
  */
-import { findModel } from '../../lib/vehicleCatalog';
-import type { VehicleDetail } from '../contracts';
-import { type AiBinding, runAssistant } from './ai';
+import type { AiTier, LocalChatMessage, LocalChatOptions, LocalChatResult } from '../../lib/localAi/index';
+import { localChat } from '../../lib/localAi/index';
+import type { VehicleModel } from '../../lib/vehicleCatalog';
+import type { GarageVehicle, HistoryEvent } from '../contracts';
 import type { ManualChunk } from './manualText';
 import { buildSystemPrompt, sanitizeMessages, type TechNote } from './prompt';
-import { takeAssistantSlot } from './store';
 
 export const MAX_EXCERPTS = 6;
 export const MAX_EXCERPT_CHARS = 1800;
-
-export interface AssistantDeps {
-  ai: AiBinding | undefined;
-  userId: string;
-  loadVehicle(vehicleId: string): Promise<{ detail: VehicleDetail; notes: TechNote[]; notesText: string; manuals: string[] } | null>;
-  now?: Date;
-}
-
-const jsonError = (status: number, error: string, extra: Record<string, string> = {}): Response =>
-  new Response(JSON.stringify({ ok: false, error }), { status, headers: { 'Content-Type': 'application/json', ...extra } });
 
 export function sanitizeExcerpts(raw: unknown): ManualChunk[] {
   if (!Array.isArray(raw)) return [];
@@ -47,56 +35,70 @@ export function sanitizeExcerpts(raw: unknown): ManualChunk[] {
   return out;
 }
 
-export async function handleAssistant(body: unknown, deps: AssistantDeps): Promise<Response> {
-  if (!body || typeof body !== 'object') return jsonError(400, 'Cuerpo invalido');
-  const b = body as { vehicleId?: unknown; messages?: unknown; excerpts?: unknown };
-  if (typeof b.vehicleId !== 'string' || !b.vehicleId) return jsonError(400, 'Falta vehicleId');
-  const messages = sanitizeMessages(b.messages);
-  if (!messages) return jsonError(400, 'Falta la pregunta');
+/** Contexto del vehículo que la interfaz ya tiene en la mano. */
+export interface LocalAssistantContext {
+  vehicle: GarageVehicle;
+  history: HistoryEvent[];
+  catalog?: VehicleModel;
+  notes?: TechNote[];
+  notesText?: string;
+  /** Títulos de todos los manuales cargados. */
+  manuals: string[];
+  /** Fragmentos elegidos en el navegador (ver chatClient.pickExcerpts). */
+  excerpts: ManualChunk[];
+  now?: Date;
+}
 
-  if (!deps.ai) return jsonError(503, 'El asistente no esta disponible en este entorno (falta el binding de Workers AI)');
+export interface LocalAssistantOptions {
+  onToken?: (chunk: string) => void;
+  /** Limpia el parcial cuando un motor falla a mitad y la cadena sigue con el siguiente. */
+  onReset?: () => void;
+  signal?: AbortSignal;
+  /** Fuerza un nivel de IA local (p. ej. reglas mientras no se acepta la descarga). */
+  tier?: AiTier;
+  /** Inyectable en tests: por defecto, `localChat` del módulo localAi. */
+  chat?: (messages: readonly LocalChatMessage[], options?: LocalChatOptions) => Promise<LocalChatResult>;
+}
 
-  const slot = takeAssistantSlot(deps.userId, (deps.now ?? new Date()).getTime());
-  if (!slot.ok) {
-    return jsonError(429, `Hiciste muchas consultas seguidas. Intenta de nuevo en ${slot.retryAfterS} s.`, {
-      'Retry-After': String(slot.retryAfterS),
-    });
-  }
+export interface LocalAssistantResult extends LocalChatResult {
+  /** false si los mensajes no terminaban en una pregunta y no se llamó a la IA. */
+  asked: boolean;
+}
 
-  const loaded = await deps.loadVehicle(b.vehicleId);
-  if (!loaded) return jsonError(404, 'Vehiculo no encontrado');
+/**
+ * Sanea la conversación, arma el prompt de sistema en el dispositivo y responde con la IA
+ * local. No lanza: sin pregunta devuelve `asked: false`; si el motor falla, `localChat`
+ * cae a las reglas.
+ */
+export async function runLocalAssistant(
+  rawMessages: unknown,
+  context: LocalAssistantContext,
+  options: LocalAssistantOptions = {},
+): Promise<LocalAssistantResult> {
+  const messages = sanitizeMessages(rawMessages);
+  if (!messages) return { via: 'rules', model: 'reglas-locales', text: '', asked: false };
 
-  const { detail } = loaded;
   const system = buildSystemPrompt({
-    vehicle: detail.vehicle,
-    history: detail.history,
-    catalog: findModel(detail.vehicle.make ?? '', detail.vehicle.model ?? ''),
-    notes: loaded.notes,
-    notesText: loaded.notesText,
-    excerpts: sanitizeExcerpts(b.excerpts),
-    manuals: loaded.manuals,
-    now: deps.now ?? new Date(),
+    vehicle: context.vehicle,
+    history: context.history,
+    catalog: context.catalog,
+    notes: context.notes,
+    notesText: context.notesText,
+    excerpts: context.excerpts,
+    manuals: context.manuals,
+    now: context.now ?? new Date(),
   });
 
-  try {
-    const run = await runAssistant(deps.ai, [{ role: 'system', content: system }, ...messages]);
-    return new Response(run.stream, {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-store',
-        'X-Assistant-Model': run.model,
-      },
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[assistant] Workers AI fallo:', msg);
-    const quota = /4006|neuron|quota|limit/i.test(msg);
-    return jsonError(
-      503,
-      quota
-        ? 'Se agoto la cuota diaria gratuita de IA. Vuelve a intentar manana o activa el plan pago de Workers.'
-        : 'El asistente no pudo responder ahora. Intenta de nuevo en un momento.',
-    );
-  }
+  const chat = options.chat ?? localChat;
+  const result = await chat(
+    [{ role: 'system', content: system }, ...messages],
+    {
+      excerpts: context.excerpts,
+      onToken: options.onToken,
+      onReset: options.onReset,
+      signal: options.signal,
+      tier: options.tier,
+    },
+  );
+  return { ...result, asked: true };
 }

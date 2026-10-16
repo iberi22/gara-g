@@ -3,21 +3,28 @@
  * DossierChat — Asistente de IA del vehiculo (pestana "Asistente" del expediente).
  *
  * Busca en el navegador los fragmentos de los manuales indexados que responden la
- * pregunta, los manda con la conversacion a /api/garage/assistant y pinta la respuesta
- * mientras llega (SSE). Las respuestas se renderizan con markdown.ts, que escapa todo.
+ * pregunta y la responde con la IA local del navegador (lib/localAi): Prompt API, WebGPU
+ * o reglas deterministas. No hay servidor de IA ni límites de uso. Las respuestas se renderizan
+ * con markdown.ts, que escapa todo.
  */
 import { onMount, tick } from 'svelte';
-import type { VehicleFamily } from '../../garage/contracts';
+import type { VehicleFamily, GarageVehicle, HistoryEvent } from '../../garage/contracts';
+import type { TechNote } from '../../garage/assistant/prompt';
 import {
   clearTurns,
   loadManualChunks,
   loadTurns,
   pickExcerpts,
-  readAssistantStream,
   saveTurns,
   type ChatTurn,
   type IndexedManual,
 } from './chatClient';
+import { localAiEnvironment, promptApiState } from '../../lib/localAi/capabilities';
+import { authorisedModelId, hasPromptApiConsent } from '../../lib/localAi/consent';
+import { consentOffers, hasConsentOffer, type ConsentOffers } from '../../lib/localAi/consentOffers';
+import { webllmModelId } from '../../lib/localAi/webllmEngine';
+import { runLocalAssistant } from '../../garage/assistant/handler';
+import LocalAiConsent from './LocalAiConsent.svelte';
 import { renderMarkdown } from './markdown';
 import type { ManualChunk } from '../../garage/assistant/manualText';
 
@@ -26,9 +33,13 @@ interface Props {
   vehicleName: string;
   family: VehicleFamily;
   manuals: IndexedManual[];
+  vehicle: GarageVehicle;
+  history: HistoryEvent[];
+  notes?: TechNote[];
+  notesText?: string;
 }
 
-const { vehicleId, vehicleName, family, manuals }: Props = $props();
+const { vehicleId, vehicleName, family, manuals, vehicle, history, notes, notesText }: Props = $props();
 
 let turns = $state<ChatTurn[]>([]);
 let draft = $state('');
@@ -37,6 +48,17 @@ let thinking = $state(false);
 let chunks = $state<ManualChunk[]>([]);
 let loadingManuals = $state(false);
 let scroller: HTMLDivElement | undefined = $state();
+/** Tarjeta de consentimiento visible (nunca carga nada por sí sola). */
+let showConsent = $state(false);
+/** Hay motor cargado en esta pestaña: las consultas lo reutilizan. */
+let modelActive = $state(false);
+/** Qué motores se pueden ofrecer ahora mismo (regla única en `consentOffers`). */
+let offers = $state<ConsentOffers>({ nano: false, webllm: false });
+/** La tarjeta se muestra cuando la regla única (`consentOffers`) ofrece algo. */
+const needsConsent = $derived(hasConsentOffer(offers));
+/** Último estado crudo de la Prompt API (para recalcular ofertas al aceptar). */
+let lastPromptState = $state<string | undefined>(undefined);
+let controller: AbortController | null = $state(null);
 
 const SUGGESTIONS: Record<VehicleFamily, string[]> = {
   moto: [
@@ -69,6 +91,11 @@ const indexedCount = $derived(manuals.filter((m) => m.textKey).length);
 
 onMount(() => {
   turns = loadTurns(vehicleId);
+  // Ofertas según la regla única (`consentOffers`): la Prompt API descargable se
+  // ofrece aunque no haya WebGPU; la tarjeta solo carga si el usuario pulsa el
+  // botón (nunca al montar).
+  refreshOffers(undefined);
+  void promptApiState().then((state) => refreshOffers(state));
   if (indexedCount > 0) {
     loadingManuals = true;
     void loadManualChunks(manuals).then((c) => {
@@ -79,6 +106,21 @@ onMount(() => {
   void scrollDown();
 });
 
+/** Recalcula las ofertas con el estado crudo (Prompt API, WebGPU, consentimiento, motor). */
+function refreshOffers(promptState: string | undefined): void {
+  lastPromptState = promptState;
+  const gpu = localAiEnvironment().gpu;
+  offers = consentOffers({
+    promptApiAvailability: promptState,
+    webgpuUsable: Boolean(gpu && typeof gpu.requestAdapter === 'function'),
+    authorisedModelId: authorisedModelId(),
+    promptApiConsented: hasPromptApiConsent(),
+    loadedWebllmModelId: webllmModelId(),
+  });
+  modelActive = Boolean(webllmModelId());
+  if (hasConsentOffer(offers)) showConsent = true;
+}
+
 async function scrollDown(): Promise<void> {
   await tick();
   scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
@@ -87,13 +129,14 @@ async function scrollDown(): Promise<void> {
 async function send(text?: string): Promise<void> {
   const question = (text ?? draft).trim();
   if (!question || busy) return;
+
   draft = '';
-  const history: ChatTurn[] = [...turns.filter((t) => !t.error), { role: 'user', content: question }];
-  const excerpts = pickExcerpts(chunks, history);
-  history[history.length - 1].sources = excerpts.map((e) => ({ manual: e.manual, page: e.page }));
-  turns = [...history, { role: 'assistant', content: '' }];
+  const chatHistory: ChatTurn[] = [...turns.filter((t) => !t.error), { role: 'user', content: question }];
+  const excerpts = pickExcerpts(chunks, chatHistory);
+  chatHistory[chatHistory.length - 1].sources = excerpts.map((e) => ({ manual: e.manual, page: e.page }));
+  turns = [...chatHistory, { role: 'assistant', content: '' }];
   busy = true;
-  thinking = false;
+  thinking = true;
   void scrollDown();
 
   const idx = turns.length - 1;
@@ -101,30 +144,32 @@ async function send(text?: string): Promise<void> {
     turns[idx] = { ...turns[idx], ...patch };
   };
 
+  controller = new AbortController();
+  // Sin `tier` forzado: `localChat` usa la Prompt API y, si falla, solo el motor WebGPU
+  // YA cargado y autorizado. Nunca descarga aquí; el peor caso son las reglas.
   try {
-    const res = await fetch('/api/garage/assistant', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        vehicleId,
-        messages: history.map((t) => ({ role: t.role, content: t.content })),
-        excerpts,
-      }),
-    });
-    await readAssistantStream(res, {
-      onThinking: () => (thinking = true),
-      onText: (t) => {
-        thinking = false;
-        update({ content: turns[idx].content + t });
-        void scrollDown();
+    const result = await runLocalAssistant(
+      chatHistory.map((t) => ({ role: t.role, content: t.content })),
+      { vehicle, history, notes, notesText, manuals: manuals.map((m) => m.name), excerpts },
+      {
+        signal: controller.signal,
+        onToken: (chunk) => {
+          thinking = false;
+          update({ content: turns[idx].content + chunk });
+          void scrollDown();
+        },
+        // Un motor que falla a mitad descarta su parcial y la cadena sigue con el
+        // siguiente: se limpia lo ya pintado para no mezclar respuestas.
+        onReset: () => {
+          update({ content: '' });
+        },
       },
-      onDone: (model) => update({ model }),
-      onError: (message) => update({ content: turns[idx].content || message, error: !turns[idx].content }),
-    });
+    );
+    update({ model: result.model });
   } catch {
-    update({ content: 'No hay conexión con el asistente. Revisa tu red e intenta de nuevo.', error: true });
+    update({ content: turns[idx].content || 'No se pudo responder con la IA local.', error: !turns[idx].content });
   } finally {
+    controller = null;
     busy = false;
     thinking = false;
     saveTurns(vehicleId, turns);
@@ -146,6 +191,23 @@ function onKey(e: KeyboardEvent): void {
 </script>
 
 <section class="chat" aria-label="Asistente de IA">
+  {#if showConsent && needsConsent}
+    <LocalAiConsent
+      offerNano={offers.nano}
+      offerWebllm={offers.webllm}
+      onAccept={() => {
+        refreshOffers(lastPromptState);
+        showConsent = false;
+      }}
+      onCancel={() => {
+        showConsent = false;
+      }}
+    />
+  {:else if needsConsent}
+    <button type="button" class="ghost consent-open" onclick={() => (showConsent = true)}>
+      Activar IA local
+    </button>
+  {/if}
   <header class="chat-head">
     <div>
       <h2>Asistente de {vehicleName}</h2>
@@ -213,6 +275,9 @@ function onKey(e: KeyboardEvent): void {
       disabled={busy}
     ></textarea>
     <button type="submit" class="send" disabled={busy || !draft.trim()}>{busy ? '…' : 'Preguntar'}</button>
+    {#if busy}
+      <button type="button" class="ghost" onclick={() => controller?.abort()}>Detener</button>
+    {/if}
   </form>
   <p class="disclaimer">
     El asistente puede equivocarse. Para frenos, dirección e hidráulica, confirma los valores en el manual oficial o con tu técnico.
@@ -390,6 +455,9 @@ function onKey(e: KeyboardEvent): void {
     font-size: 12px;
     cursor: pointer;
     white-space: nowrap;
+  }
+  .consent-open {
+    align-self: flex-start;
   }
   .disclaimer {
     margin: 0;

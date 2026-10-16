@@ -3,7 +3,8 @@
  *
  *  - Carga el texto de los manuales indexados (`/r2/<textKey>`), lo parte por pagina y lo
  *    guarda en memoria: la busqueda de fragmentos corre aqui (ver garage/assistant/store.ts).
- *  - Envia la conversacion con los fragmentos elegidos y lee el SSE de la respuesta.
+ *  - Elige los fragmentos de la pregunta (`pickExcerpts`) para que el asistente local los
+ *    cite; el envio a la IA vive en lib/localAi (ya no hay SSE de servidor).
  *  - Guarda la conversacion por vehiculo en localStorage (solo comodidad: si el navegador
  *    la borra, se empieza de cero).
  */
@@ -56,60 +57,6 @@ export function pickExcerpts(chunks: ManualChunk[], turns: ChatTurn[], k = 5): M
   if (main.length >= k || users.length < 2) return main;
   const extra = retrieve(chunks, users.join(' '), k).filter((c) => !main.includes(c));
   return [...main, ...extra].slice(0, k);
-}
-
-export interface StreamHandlers {
-  onThinking(): void;
-  onText(chunk: string): void;
-  onDone(model: string): void;
-  onError(message: string): void;
-}
-
-/** Lee el SSE de /api/garage/assistant y llama a los handlers. */
-export async function readAssistantStream(res: Response, h: StreamHandlers): Promise<void> {
-  if (!res.ok || !res.body) {
-    let msg = `El asistente respondio ${res.status}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* cuerpo no JSON */
-    }
-    h.onError(msg);
-    return;
-  }
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let finished = false;
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let sep = buffer.indexOf('\n\n');
-    while (sep !== -1) {
-      const block = buffer.slice(0, sep).trim();
-      buffer = buffer.slice(sep + 2);
-      sep = buffer.indexOf('\n\n');
-      if (!block.startsWith('data:')) continue;
-      let ev: { t?: string; thinking?: boolean; done?: boolean; model?: string; error?: string };
-      try {
-        ev = JSON.parse(block.slice(5).trim());
-      } catch {
-        continue;
-      }
-      if (ev.t) h.onText(ev.t);
-      else if (ev.thinking) h.onThinking();
-      else if (ev.error) {
-        finished = true;
-        h.onError(ev.error);
-      } else if (ev.done) {
-        finished = true;
-        h.onDone(ev.model ?? '');
-      }
-    }
-  }
-  if (!finished) h.onError('La respuesta se corto antes de terminar.');
 }
 
 const storeKey = (vehicleId: string) => `gara:dossier-chat:${vehicleId}`;

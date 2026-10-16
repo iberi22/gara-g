@@ -98,31 +98,32 @@ export const domainConfig = {
     { name: 'adStat', label: 'AdStat', fields: ['campaignId', 'day', 'impressions', 'clicks', 'spendCOP', 'freq'], xavierKind: 'adStat' },
     { name: 'adClick', label: 'AdClick', fields: ['campaignId', 'tokenId', 'chargedCOP'], xavierKind: 'adClick' },
     { name: 'shopPost', label: 'ShopPost', fields: ['kind', 'title', 'body', 'make', 'versionKey', 'imageUrl', 'url', 'advertiserId'], xavierKind: 'shopPost' },
+    {
+      name: 'inventoryItem',
+      label: 'InventoryItem',
+      fields: ['sku', 'name', 'quantity', 'unit', 'minStock', 'cost', 'price', 'warehouseId', 'vehicleTypes', 'notes'],
+      xavierKind: 'inventoryItem',
+    },
+    {
+      name: 'stockMovement',
+      label: 'StockMovement',
+      fields: ['itemId', 'kind', 'qty', 'maintenanceId', 'note'],
+      xavierKind: 'stockMovement',
+    },
+    {
+      name: 'warehouse',
+      label: 'Warehouse',
+      fields: ['name', 'type', 'address'],
+      xavierKind: 'warehouse',
+    },
   ] as const,
   aui: {
     enabled: true,
     allowAgentTheme: true,
   },
-  // pay-per-use 5% + mesh-only gratis: 1 camion = 100 camiones mismo precio (solo consumo R2/D1/AI)
-  // mesh-only: 0$ (datos P2P Yjs replicados en otros nodos gara-g sin Cloudflare)
-  // payg: infra 100% + AI*1.10 + 5% handling, sin fee por vehiculo/entidad
-  billing: {
-    tier: 'payg' as const, // 'free' | 'mesh-only' | 'payg' | 'payg-managed' (legacy 'socio' -> 'payg')
-    //
-    // Nombre VISIBLE del tier de facturacion. El identificador sigue siendo `payg` y "socio"
-    // solo sobrevive en nombres internos (socioGate.ts, isSocioUser, la bandera demo) que no se
-    // muestran: la interfaz no debe ofrecer ni nombrar un tier "Socio", que ya no existe.
-    // Lo importan la insignia del conmutador, el gate de la AUI y ProBadge.
-    tierLabel: 'PAYG',
-    mode: 'swal-managed' as const, // 'mesh-only' | 'self-managed' | 'swal-managed'
-  },
+  // Sin planes ni tiers: la pertenencia es global y las apps no se cobran. La IA corre en el
+  // navegador y no hay cuota. Ver la decision D-aui / D-modelo de la tarea G3.
 } as const;
-
-/**
- * Nombre visible del tier de facturacion ("PAYG"). Fuente unica para las insignias y los
- * textos del gate: el literal no se repite en ningun componente.
- */
-export const TIER_LABEL: string = domainConfig.billing.tierLabel;
 
 /**
  * Tenant canónico de la app. Todo el código lo importa de aquí en vez de repetir

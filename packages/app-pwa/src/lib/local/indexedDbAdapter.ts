@@ -1,6 +1,6 @@
 import { type IDBPDatabase, type DBSchema, openDB } from 'idb';
 import { LOCAL_CHANGED_EVENT, LOCAL_INSTANCE_ID } from '../appMode';
-import type { DomainRecord, StorageAdapter } from '../domain';
+import { type DomainRecord, type StorageAdapter, nextUpdatedAt } from '../domain';
 import type { LocalDump, LocalTombstone } from './types';
 import { encryptRecord, decryptRecord, LockedError } from './recordCrypto';
 import {
@@ -161,6 +161,54 @@ export class IndexedDbAdapter implements StorageAdapter {
     return out;
   }
 
+  /**
+   * Inserta sin sobrescribir. El `get` y el `add` van en la MISMA transaccion
+   * readwrite: IndexedDB serializa esas transacciones por store, asi que dos
+   * llamadas concurrentes con el mismo id no pueden pisarse (a diferencia de
+   * `create`, que usa `put`).
+   */
+  async createIfAbsent(entity: string, record: DomainRecord): Promise<boolean> {
+    // Igual que `create`, pero sin sobrescribir: pasa por la puerta del ticket
+    // y cifra en reposo cuando la protección está activa (un adapter cifrado
+    // nunca escribe filas de inventario en claro). La existencia se comprueba
+    // antes de cifrar y se RECOMPRUEBA en la misma transacción que el `add`,
+    // así dos pestañas no pueden pisarse (ver `update`).
+    const out = await withVerifiedTicket(async (ticket) => {
+      const db = await openLocalDb();
+      const readTx = db.transaction('records', 'readonly');
+      const existing = await readTx.store.get([entity, record.id]);
+      await readTx.done;
+      await verifyTicket(ticket);
+      if (existing) return false;
+
+      const row = await prepareWrite(entity, record.id, record, ticket);
+      await verifyTicket(ticket);
+
+      const tx = db.transaction(['records', 'tombstones'], 'readwrite');
+      const records = tx.objectStore('records');
+      const current = await records.get([entity, record.id]);
+      if (current) {
+        await tx.done;
+        return false;
+      }
+      try {
+        await Promise.all([
+          // `add` (no `put`): nunca sobrescribe; si el id ya existiera, IndexedDB lanza ConstraintError.
+          records.add(row),
+          tx.objectStore('tombstones').delete([entity, record.id]),
+          tx.done,
+        ]);
+      } catch (err) {
+        // Una carrera que se coló entre la recomprobación y el `add`.
+        if ((err as { name?: string } | null)?.name === 'ConstraintError') return false;
+        throw err;
+      }
+      return true;
+    });
+    if (out) notifyChanged();
+    return out;
+  }
+
   async list(entity: string, instanceId: string): Promise<DomainRecord[]> {
     let last: unknown = new Error('No se pudo leer');
     for (let attempt = 0; attempt < MAX_TICKET_ATTEMPTS; attempt++) {
@@ -262,6 +310,56 @@ export class IndexedDbAdapter implements StorageAdapter {
     }
 
     throw last;
+  }
+
+  /**
+   * Escritura condicional en la MISMA transaccion readwrite: el `get` y el
+   * `put` no pueden intercalarse con otra pestana (IndexedDB serializa las
+   * transacciones readwrite por store). Sello monotono como en D1/memoria.
+   */
+  async updateIfCurrent(
+    entity: string,
+    id: string,
+    patch: Record<string, unknown>,
+    instanceId: string,
+    expectedUpdatedAt: string,
+  ): Promise<DomainRecord | null> {
+    // Escritura condicional con el MISMO mecanismo que `update` (foto → puerta
+    // compartida → verificar → comparar y escribir): descifra la fila, compara
+    // la versión sobre el registro descifrado y re-cifra dentro de la puerta.
+    // Sello monótono como en D1/memoria (ver `nextUpdatedAt`).
+    const out = await withVerifiedTicket(async (ticket) => {
+      const db = await openLocalDb();
+
+      // 1. Leer y descifrar la fila actual.
+      const readTx = db.transaction('records', 'readonly');
+      const rawRow = await readTx.store.get([entity, id]);
+      await readTx.done;
+      await verifyTicket(ticket);
+
+      const record = await prepareRead(rawRow, ticket);
+      if (!record || record.instance_id !== instanceId || record.updated_at !== expectedUpdatedAt) {
+        return null;
+      }
+      const next = { ...record, ...patch, updated_at: nextUpdatedAt(record.updated_at) } as DomainRecord;
+      const writeRow = await prepareWrite(entity, id, next, ticket);
+      await verifyTicket(ticket);
+
+      // 2. Comparar y escribir en la MISMA transacción: si la fila cambió (o se
+      //    borró) desde la lectura, devolver null para que el llamador relea y
+      //    reintente (ver `syncQuantity` en ledger.ts).
+      const tx = db.transaction('records', 'readwrite');
+      const store = tx.objectStore('records');
+      const current = await store.get([entity, id]);
+      if (!current || !rowsEqual(current, rawRow)) {
+        await tx.done;
+        return null;
+      }
+      await Promise.all([store.put(writeRow), tx.done]);
+      return next;
+    });
+    if (out) notifyChanged();
+    return out;
   }
 
   async del(entity: string, id: string, instanceId: string): Promise<boolean> {

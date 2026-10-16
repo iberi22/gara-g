@@ -29,7 +29,8 @@
       "packages/app-pwa/src/lib/billing.core.ts",
       "packages/app-pwa/src/lib/fleetApi.ts",
       "packages/app-pwa/src/lib/cloudflareVaultAdapter.ts",
-      "packages/app-pwa/src/lib/domain.gara.test.ts"
+      "packages/app-pwa/src/lib/domain.gara.test.ts",
+      "packages/app-pwa/src/lib/inline/**"
     ]
   },
   "formatter": {

@@ -1,5 +1,6 @@
 import { DEFAULT_INSTANCE_ID } from './lib/domain.config';
 import { defineMiddleware } from 'astro:middleware';
+import type { APIContext, MiddlewareNext } from 'astro';
 /**
  * src/middleware.ts — Inicializa D1Adapter + auth + RBAC en /fleet/* y /api/fleet/*.
  *
@@ -8,11 +9,10 @@ import { defineMiddleware } from 'astro:middleware';
  * - PUBLIC_DEMO: flag (env, default false). Si es true, /fleet* es de acceso público demo.
  *   Si es false, /fleet* exige sesión con redirect 303 a /login.
  * - RBAC: para /api/fleet/* se valida can(role, entity, action) aquí mismo (defense in depth).
- * - /api/ai/*: NUNCA es público sin gate de tier (mantiene HTTP 402 para free/no autenticado),
- *   independiente del flag PUBLIC_DEMO.
  */
 import { env } from 'cloudflare:workers';
 import type { D1Database, KVNamespace } from '@cloudflare/workers-types';
+import { withSecurityHeaders } from './lib/securityHeaders.js';
 import { getMemoryAdapter, initD1Adapter, setStorageAdapter } from './lib/domain.js';
 import { can, rbacEntityFor } from './lib/rbac.js';
 import { ONBOARDED_COOKIE, ONBOARDING_PATH } from './lib/prefs.config';
@@ -174,6 +174,27 @@ function isProduction(): boolean {
 }
 
 export const onRequest = defineMiddleware(async (context, next) => {
+  // Cabeceras de seguridad (HSTS, nosniff, Referrer-Policy, X-Frame-Options,
+  // Permissions-Policy) sobre TODA respuesta: exito, redirect 303, 401/403/404/402 y
+  // errores. Por eso el envoltorio va por fuera del handler: los `return` tempranos de
+  // abajo (auth, demo, RBAC) no pasarian por aqui si no.
+  //
+  // La CSP la pone Astro (`security.csp` en astro.config.mjs) con los hashes de los
+  // scripts inline; esto solo respeta la que venga y cubre con una de respaldo lo que no
+  // pasa por ahi (404/500 del framework y respuestas no-HTML).
+  //
+  // Excepcion: los documentos del vault (GET /r2/...?inline=1) se embeben en un <iframe>
+  // del propio origen en el lector de manuales, asi que para esa ruta el framing se limita
+  // a `'self'`/SAMEORIGIN en vez de `'none'`/DENY. Ver src/lib/securityHeaders.ts.
+  const { pathname } = context.url;
+  const sameOriginFraming = pathname === '/r2' || pathname.startsWith('/r2/');
+  return withSecurityHeaders(await handleRequest(context, next), {
+    sameOriginFraming,
+    dev: import.meta.env.DEV,
+  });
+});
+
+async function handleRequest(context: APIContext, next: MiddlewareNext): Promise<Response> {
   const { pathname } = context.url;
 
   // --- D1 init ---
@@ -202,28 +223,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
       status: 404,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     });
-  }
-
-  // --- AI tier gate for /api/ai/* ---
-  if (pathname.startsWith('/api/ai/')) {
-    const token = context.cookies.get('session')?.value ?? '';
-    const user = token ? await getSessionUser(token) : null;
-    const tierHeader = context.request.headers.get('x-tier-id');
-
-    // Requests with free tier or no session/credits return 402 Payment Required
-    if (!user || user.role === 'free' || tierHeader === 'free') {
-      return new Response(
-        JSON.stringify({
-          ok: false,
-          error: 'Inferencia AI requiere suscripción Pro/PAYG (Free tier agotado o no permitido)',
-          code: 402,
-        }),
-        {
-          status: 402,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
-    }
   }
 
   // --- Auth guard: todo lo que no sea PUBLICO exige sesion ---
@@ -416,4 +415,4 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   return response;
-});
+}

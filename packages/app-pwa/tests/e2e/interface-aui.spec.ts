@@ -1,46 +1,39 @@
 import { test, expect } from './fixtures';
 
 /**
- * E2E Spec: Interfaz AUI (Agentic UI) y Gating de Cuenta Socio
- * Cobertura:
- * - Sin cuenta Socio: muestra tarjeta de upsell y recalca que el CRUD básico no está bloqueado.
- * - Con cuenta Socio (o demo activo): permite generar interfaces mediante prompt y renderiza AuiSpec.
+ * E2E Spec: Interfaz AUI (Agentic UI) con IA local
+ *
+ * G3: la AUI ya no tiene planes, cuentas ni cuotas; compone con la IA local del navegador
+ * (Chrome Prompt API o WebGPU) y, si el navegador no la tiene, lo dice en español sin
+ * bloquear el resto de la app. Ya no hay tarjeta de upsell ni conmutador de "demo socio".
  */
-
-test.describe('Interfaz AUI y Gating Socio', () => {
-  test('gates AI inference for non-socio users without blocking basic CRUD', async ({ page }) => {
-    // Resetear demo socio para comenzar en estado no-socio
+test.describe('Interfaz AUI local', () => {
+  test('no hay planes ni gating: la AUI se sirve y ofrece el espacio de trabajo', async ({ page }) => {
     await page.goto('/fleet/aui');
-    await page.evaluate(() => localStorage.setItem('gara_demo_socio', 'false'));
-    await page.reload();
 
-    // 1. Debe verse la tarjeta de upsell
-    const upsellCard = page.getByTestId('aui-upsell-card');
-    await expect(upsellCard).toBeVisible();
-    await expect(upsellCard).toContainText('CRUD Básico 100% Libre');
-    await expect(page.getByTestId('cta-upgrade-socio')).toBeVisible();
+    // 1. Ya no existe la tarjeta de upsell ni el botón de demo de tier.
+    await expect(page.getByTestId('aui-upsell-card')).toHaveCount(0);
+    await expect(page.getByTestId('cta-upgrade-socio')).toHaveCount(0);
+    await expect(page.getByTestId('toggle-demo-socio')).toHaveCount(0);
 
-    // 2. Activar modo Socio mediante el botón demo
-    const toggleBtn = page.getByTestId('toggle-demo-socio');
-    await expect(toggleBtn).toBeVisible();
-    await toggleBtn.click();
+    // 2. El espacio de trabajo está disponible sin cuenta de pago.
+    await expect(page.getByTestId('aui-workspace')).toBeVisible();
+    await expect(page.getByTestId('aui-prompt-input')).toBeVisible();
+    await expect(page.getByTestId('aui-submit-btn')).toBeVisible();
+  });
 
-    // 3. Ahora debe ser visible el espacio de trabajo AUI
-    const workspace = page.getByTestId('aui-workspace');
-    await expect(workspace).toBeVisible();
+  test('sin IA local lo dice en español y no pinta el ejemplo como resultado', async ({ page }) => {
+    await page.goto('/fleet/aui');
 
     const promptInput = page.getByTestId('aui-prompt-input');
-    await expect(promptInput).toBeVisible();
-
-    const submitBtn = page.getByTestId('aui-submit-btn');
-    await expect(submitBtn).toBeVisible();
-
-    // 4. Probar generación de AUI
     await promptInput.fill('Generar tabla de alertas y telemetría');
-    await submitBtn.click();
+    await page.getByTestId('aui-submit-btn').click();
 
-    // 5. El canvas renderizado debe contener componentes generados
-    const canvas = page.getByTestId('aui-rendered-content');
-    await expect(canvas).toBeVisible();
+    // En un navegador sin Prompt API ni WebGPU el único nivel es el de reglas: la página
+    // avisa y vacía el lienzo; nunca deja el ejemplo local como si fuera la respuesta.
+    const alert = page.getByTestId('aui-error');
+    await expect(alert).toBeVisible();
+    await expect(alert).toHaveText(/IA local/i);
+    await expect(page.getByTestId('aui-rendered-content')).not.toContainText('FL-01');
   });
 });

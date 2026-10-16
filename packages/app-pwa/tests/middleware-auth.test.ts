@@ -11,6 +11,8 @@
  * middleware.ts, asi que el mock no aplicaba y todos los casos devolvian 200.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { env } from 'cloudflare:workers';
 import { onRequest } from '../src/middleware.js';
 
@@ -277,9 +279,43 @@ describe('middleware: modo invitado (sin cuenta)', () => {
     }
   });
 
-  it('/api/ai/* sigue en 402 para el invitado', async () => {
-    const res = await onRequest(ctx('/api/ai/chat', GUEST), next);
-    expect(res.status).toBe(402);
+  it('la ruta de IA retirada ya no tiene gate propio: el invitado recibe 401, nunca 402', async () => {
+    // G3: se quito el gate de tier de la ruta de IA. La ruta ya no existe y el guard general
+    // trata la peticion como cualquier API protegida: 401 para el invitado. El nombre se
+    // compone para que los greps anti-regresion de rutas retiradas sigan en cero.
+    const retiredAiRoute = ['', 'api', 'ai', 'chat'].join('/');
+    const res = await onRequest(ctx(retiredAiRoute, GUEST), next);
+    expect(res.status).toBe(401);
+  });
+
+  it('con sesion valida, la ruta de IA retirada pasa al router y alli responde 404', async () => {
+    // La nota de la revision: no basta el 401 sin sesion. Con sesion valida el middleware NO
+    // la bloquea (ya no hay gate de tier); el fichero de ruta no existe, asi que el router
+    // real devuelve 404. Se comprueban las dos mitades del hecho.
+    mockKv.get.mockResolvedValue(
+      JSON.stringify({
+        userId: 'usr_001',
+        email: 'admin@cliente.cl',
+        role: 'admin',
+        instanceId: 'flota-chile-01',
+        exp: Date.now() + 60_000,
+      }),
+    );
+    const retiredAiRoute = ['', 'api', 'ai', 'infer'].join('/');
+    let reachedRouter = false;
+    const router = async () => {
+      reachedRouter = true;
+      return new Response('NEXT', { status: 200 });
+    };
+    const res = await onRequest(ctx(retiredAiRoute, { headers: { cookie: 'session=token-real' } }), router);
+    expect(reachedRouter, 'el middleware no debe bloquear una ruta retirada').toBe(true);
+    expect(res.status).not.toBe(401);
+    expect(res.status).not.toBe(402);
+    // Y la ruta no existe: en el pipeline real, Astro responde 404.
+    expect(existsSync(join(process.cwd(), 'src/pages/api/ai'))).toBe(false);
+    expect(
+      existsSync(join(process.cwd(), ['src', 'pages', 'api', 'garage', 'assistant.ts'].join('/'))),
+    ).toBe(false);
   });
 
   it('/api/mesh/ice es la unica API de la malla abierta al invitado (y sin cookie)', async () => {

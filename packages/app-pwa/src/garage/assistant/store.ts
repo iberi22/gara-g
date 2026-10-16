@@ -184,27 +184,3 @@ export function parseNotes(body: unknown): { ok: true; notes: VehicleNotes } | {
   if (techNotesText.length > MAX_NOTES_TEXT) return { ok: false, error: `Las notas admiten ${MAX_NOTES_TEXT} caracteres` };
   return { ok: true, notes: { techNotes, techNotesText } };
 }
-
-// ---------------------------------------------------------------------------
-// Limite de uso del asistente (por usuario, en memoria del isolate)
-// ---------------------------------------------------------------------------
-
-export const ASSISTANT_PER_MINUTE = 8;
-export const ASSISTANT_PER_DAY = 150;
-const hits = new Map<string, number[]>();
-
-/** true si el usuario puede hacer otra consulta ahora (y la registra). */
-export function takeAssistantSlot(userId: string, now = Date.now()): { ok: true } | { ok: false; retryAfterS: number } {
-  const day = 24 * 3600 * 1000;
-  const list = (hits.get(userId) ?? []).filter((t) => now - t < day);
-  const lastMinute = list.filter((t) => now - t < 60_000);
-  if (lastMinute.length >= ASSISTANT_PER_MINUTE) return { ok: false, retryAfterS: Math.ceil((60_000 - (now - lastMinute[0])) / 1000) };
-  if (list.length >= ASSISTANT_PER_DAY) return { ok: false, retryAfterS: Math.ceil((day - (now - list[0])) / 1000) };
-  list.push(now);
-  hits.set(userId, list);
-  return { ok: true };
-}
-
-export function resetAssistantSlots(): void {
-  hits.clear();
-}

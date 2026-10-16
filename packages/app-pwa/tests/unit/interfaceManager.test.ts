@@ -7,8 +7,7 @@ import {
   getStoredInterface,
   setStoredInterface,
   resolveActiveInterface,
-  isSocioUser,
-  setDemoSocioStatus,
+  INTERFACE_MODES,
   COOKIE_NAME,
   STORAGE_KEY,
 } from '../../src/lib/interfaceManager.js';
@@ -111,16 +110,19 @@ describe('Interface Manager Unit Tests', () => {
     });
   });
 
-  describe('isSocioUser', () => {
-    it('recognizes active Stripe socio billing', () => {
-      expect(isSocioUser({ customerId: 'c1', status: 'active', planTier: 'socio_infra' })).toBe(true);
-      expect(isSocioUser({ customerId: 'c2', status: 'canceled' })).toBe(false);
+  describe('sin planes ni tiers', () => {
+    it('el modulo ya no expone deteccion de socio', async () => {
+      const mod = await import('../../src/lib/interfaceManager.js');
+      expect('isSocioUser' in mod).toBe(false);
+      expect('setDemoSocioStatus' in mod).toBe(false);
+      expect('DEMO_SOCIO_STORAGE_KEY' in mod).toBe(false);
     });
 
-    it('respects tier overrides', () => {
-      expect(isSocioUser(null, 'payg')).toBe(true);
-      expect(isSocioUser(null, 'free')).toBe(false);
-      expect(isSocioUser(null, 'mesh-only')).toBe(false);
+    it('conmutar de interfaz sigue siendo una preferencia del usuario, sin gating', () => {
+      expect(INTERFACE_MODES).toEqual(['admin', 'aui', 'game']);
+      expect(STORAGE_KEY).toBe('gara_interface_mode');
+      expect(COOKIE_NAME).toBe('gara_interface_mode');
+      expect(resolveActiveInterface({ url: '/fleet?ui=aui' }).mode).toBe('aui');
     });
   });
 });

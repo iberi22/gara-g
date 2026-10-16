@@ -3,8 +3,7 @@
 // Inspirado en MALOCA_UI_JSON_CANVAS.md (fase 2+): JSON parametrizable + canvas ligero.
 
 import { domainConfig } from './domain.config.js';
-import { llmComplete } from './llm.js';
-import { xavierSearch } from './xavier.js';
+import { localInfer, type AiTier } from './localAi/index.js';
 
 // Whitelist de componentes permitidos — nunca se renderiza codigo arbitrario.
 export const AUI_COMPONENTS = [
@@ -71,26 +70,27 @@ Reglas:
 - Si necesitas datos, usa "data": {"kind":"${domainConfig.entities[0]?.xavierKind ?? 'item'}","query":"..."}
 - Devuelve {version:1, components:[{id,type,props}]}`;
 
-export async function generateAui(prompt: string, useMemory = true): Promise<AuiSpec> {
-  // RAG opcional: busca memoria relevante para contexto (ej: ordenes recientes, vehiculos)
-  let rag = '';
-  if (useMemory) {
-    const mem = await xavierSearch(prompt, 3);
-    rag = (mem.memories ?? [])
-      .map((m: any) => m.content)
-      .join('\n')
-      .slice(0, 800);
-  }
-  const fullPrompt = rag ? `Contexto:\n${rag}\n\nPedido UI: ${prompt}` : prompt;
+export interface AuiGeneration {
+  /** Spec ya validada, o null si no se pudo generar (p. ej. solo hay reglas). */
+  spec: AuiSpec | null;
+  via: AiTier;
+  model?: string;
+  /** Mensaje en español listo para mostrar cuando no hay spec. */
+  error?: string;
+}
 
-  const res = await llmComplete({ prompt: fullPrompt, system: AUI_SYSTEM, useMemory: false });
+/**
+ * Genera una AUI con la IA local del navegador (Prompt API -> WebGPU -> reglas). El nivel
+ * de reglas no puede componer una interfaz: devuelve el mensaje para que la página lo
+ * muestre. La spec del modelo pasa SIEMPRE por validateAui (whitelist de componentes).
+ */
+export async function generateAui(prompt: string): Promise<AuiGeneration> {
+  const res = await localInfer(prompt, { system: AUI_SYSTEM });
+  if (!res.spec) return { spec: null, via: res.via, error: res.error };
   try {
-    const parsed = JSON.parse(res.text);
-    return validateAui(parsed);
+    return { spec: validateAui(res.spec), via: res.via, model: res.model };
   } catch {
-    // fallback: si el LLM no devolvio JSON, retorna spec vacia segura
-    const fallback: AuiSpec = { version: 1, components: [] };
-    return fallback;
+    return { spec: null, via: res.via, model: res.model, error: 'La interfaz propuesta por el modelo no es válida.' };
   }
 }
 
