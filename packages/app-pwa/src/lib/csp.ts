@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 
 import { GENERATED_INLINE_SCRIPTS } from './inline/prefs-bootstrap';
 import {
+  CLOUDFLARE_INSIGHTS_BEACON_ORIGIN,
   CLOUDFLARE_INSIGHTS_SCRIPT_ORIGIN,
   cspDirectives,
   signalOriginsFrom,
