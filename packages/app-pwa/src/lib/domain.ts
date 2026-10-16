@@ -21,10 +21,45 @@ export type DomainRecord<T = Record<string, unknown>> = T & {
 
 export interface StorageAdapter {
   create(entity: string, record: DomainRecord): Promise<DomainRecord>;
+  /**
+   * Inserta solo si el id no existe: `true` si creo el registro, `false` si ya estaba.
+   * A diferencia de `create` (que es un upsert), nunca sobrescribe. Los adapters
+   * que pueden tener escrituras concurrentes (IndexedDB `put`, D1) lo implementan
+   * de forma atomica; el resto queda serializado por el llamador.
+   */
+  createIfAbsent?(entity: string, record: DomainRecord): Promise<boolean>;
+  /**
+   * Escritura condicional: aplica el patch solo si `updated_at` sigue siendo
+   * `expectedUpdatedAt`. Devuelve el registro o `null` si otro escritor se
+   * adelanto (el llamador relee y reintenta). Atomico en los tres adapters
+   * (misma transaccion / unico UPDATE condicional). El sello es estrictamente
+   * monotono (ver `nextUpdatedAt`) para que el compare-and-set no tenga falsos
+   * positivos dentro del mismo milisegundo.
+   */
+  updateIfCurrent?(
+    entity: string,
+    id: string,
+    patch: Record<string, unknown>,
+    instanceId: string,
+    expectedUpdatedAt: string,
+  ): Promise<DomainRecord | null>;
   list(entity: string, instanceId: string): Promise<DomainRecord[]>;
   get(entity: string, id: string, instanceId: string): Promise<DomainRecord | null>;
   update(entity: string, id: string, patch: Record<string, unknown>, instanceId: string): Promise<DomainRecord | null>;
   del(entity: string, id: string, instanceId: string): Promise<boolean>;
+}
+
+// Sello `updated_at` estrictamente monotono: si `previous` no es anterior a
+// "ahora", avanza 1ms para que dos escrituras nunca compartan sello y el
+// compare-and-set (`updateIfCurrent`) no confunda una escritura ajena con la
+// version esperada. Las cadenas ISO-8601 del mismo formato ordenan
+// lexicograficamente igual que cronologicamente.
+export function nextUpdatedAt(previous?: string): string {
+  const now = new Date().toISOString();
+  if (typeof previous === 'string' && previous !== '' && previous >= now) {
+    return new Date(Date.parse(previous) + 1).toISOString();
+  }
+  return now;
 }
 
 // Memory adapter — usado en tests y como fallback si no hay D1
@@ -40,6 +75,12 @@ class MemoryAdapter implements StorageAdapter {
     this.key(entity).set(record.id, record);
     return record;
   }
+  async createIfAbsent(entity: string, record: DomainRecord): Promise<boolean> {
+    const bucket = this.key(entity);
+    if (bucket.has(record.id)) return false;
+    bucket.set(record.id, record);
+    return true;
+  }
   async list(entity: string, instanceId: string): Promise<DomainRecord[]> {
     return [...this.key(entity).values()].filter((r) => r.instance_id === instanceId);
   }
@@ -52,6 +93,20 @@ class MemoryAdapter implements StorageAdapter {
     const cur = await this.get(entity, id, instanceId);
     if (!cur) return null;
     const next = { ...cur, ...patch, updated_at: new Date().toISOString() } as DomainRecord;
+    this.key(entity).set(id, next);
+    return next;
+  }
+  async updateIfCurrent(
+    entity: string,
+    id: string,
+    patch: Record<string, unknown>,
+    instanceId: string,
+    expectedUpdatedAt: string,
+  ): Promise<DomainRecord | null> {
+    // Sin `await` entre la lectura y la escritura: atomico en este contexto.
+    const cur = this.key(entity).get(id) ?? null;
+    if (!cur || cur.instance_id !== instanceId || cur.updated_at !== expectedUpdatedAt) return null;
+    const next = { ...cur, ...patch, updated_at: nextUpdatedAt(cur.updated_at) } as DomainRecord;
     this.key(entity).set(id, next);
     return next;
   }
@@ -217,6 +272,17 @@ export class D1Adapter implements StorageAdapter {
     return record;
   }
 
+  async createIfAbsent(entity: string, record: DomainRecord): Promise<boolean> {
+    const { id, instance_id, created_at, updated_at } = record;
+    const data = this.serialize(record);
+    // INSERT OR IGNORE: si la clave (instance_id, entity, id) ya existe no toca la fila.
+    const result = await this.d1
+      .prepare('INSERT OR IGNORE INTO entity (instance_id, entity, id, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(instance_id, entity, id, data, created_at, updated_at)
+      .run();
+    return (result.meta?.changes ?? 0) > 0;
+  }
+
   async list(entity: string, instanceId: string): Promise<DomainRecord[]> {
     const result = await this.d1
       .prepare('SELECT instance_id, entity, id, data, created_at, updated_at FROM entity WHERE instance_id = ? AND entity = ? ORDER BY updated_at DESC')
@@ -244,6 +310,26 @@ export class D1Adapter implements StorageAdapter {
       .prepare('UPDATE entity SET data = ?, updated_at = ? WHERE instance_id = ? AND entity = ? AND id = ?')
       .bind(dataJson, next.updated_at, instanceId, entity, id)
       .run();
+    return next;
+  }
+
+  async updateIfCurrent(
+    entity: string,
+    id: string,
+    patch: Record<string, unknown>,
+    instanceId: string,
+    expectedUpdatedAt: string,
+  ): Promise<DomainRecord | null> {
+    const cur = await this.get(entity, id, instanceId);
+    if (!cur || cur.updated_at !== expectedUpdatedAt) return null;
+    const next: DomainRecord = { ...cur, ...patch, updated_at: nextUpdatedAt(cur.updated_at) };
+    const dataJson = this.serialize(next);
+    // Unico UPDATE condicional: atomico aunque dos workers escriban a la vez.
+    const result = await this.d1
+      .prepare('UPDATE entity SET data = ?, updated_at = ? WHERE instance_id = ? AND entity = ? AND id = ? AND updated_at = ?')
+      .bind(dataJson, next.updated_at, instanceId, entity, id, expectedUpdatedAt)
+      .run();
+    if ((result.meta?.changes ?? 0) === 0) return null;
     return next;
   }
 

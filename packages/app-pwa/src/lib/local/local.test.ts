@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LOCAL_CHANGED_EVENT, LOCAL_INSTANCE_ID } from '../appMode';
 import { createEntity, deleteEntity, getEntity, listEntities, setStorageAdapter, updateEntity, getMemoryAdapter } from '../domain';
 import type { DomainRecord } from '../domain';
+import { appendMovement, movementHistory, quantityOf } from '../inventory/ledger';
 import { exportLocalData, importLocalData, mergeLocalDumps } from './dump';
 import { closeLocalDb, getLocalAdapter } from './indexedDbAdapter';
 import type { LocalDump } from './types';
@@ -198,5 +199,34 @@ describe('mergeLocalDumps', () => {
     const snap = JSON.stringify(a);
     mergeLocalDumps(a, dump({ deleted: { vehicle: [{ id: 'v1', deletedAt: T3 }] } }));
     expect(JSON.stringify(a)).toBe(snap);
+  });
+});
+
+describe('IndexedDbAdapter.createIfAbsent + ledger', () => {
+  const T1 = '2026-03-01T00:00:00.000Z';
+  const T2 = '2026-03-02T00:00:00.000Z';
+
+  it('no sobrescribe un id existente (a diferencia de create)', async () => {
+    const adapter = getLocalAdapter();
+    expect(await adapter.createIfAbsent('vehicle', rec('race-1', T1, { plate: 'A' }))).toBe(true);
+    expect(await adapter.createIfAbsent('vehicle', rec('race-1', T2, { plate: 'B' }))).toBe(false);
+    expect((await adapter.get('vehicle', 'race-1', LOCAL_INSTANCE_ID))?.plate).toBe('A');
+  });
+
+  it('dos movimientos concurrentes con el mismo id: uno gana y el stock lo refleja', async () => {
+    const adapter = getLocalAdapter();
+    await adapter.create('inventoryItem', rec('item-race', T1, { quantity: 0 }));
+
+    const results = await Promise.allSettled([
+      appendMovement(adapter, LOCAL_INSTANCE_ID, 'item-race', 'purchase', 10, undefined, { id: 'race-id' }),
+      appendMovement(adapter, LOCAL_INSTANCE_ID, 'item-race', 'purchase', 99, undefined, { id: 'race-id' }),
+    ]);
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+
+    const history = await movementHistory(adapter, LOCAL_INSTANCE_ID, 'item-race');
+    expect(history).toHaveLength(1);
+    expect(await quantityOf(adapter, LOCAL_INSTANCE_ID, 'item-race')).toBe(Number((history[0] as unknown as DomainRecord).qty));
   });
 });
