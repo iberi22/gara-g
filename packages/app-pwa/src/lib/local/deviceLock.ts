@@ -140,17 +140,179 @@ async function getEnvelope(): Promise<DeviceLockStore | null | 'unreadable'> {
   return env;
 }
 
-async function saveEnvelope(data: DeviceLockStore): Promise<void> {
-  await withLockDb(
+/**
+ * U1/U2 (r5): TODA escritura del sobre que sigue a una derivación lenta (KDF,
+ * unwrap, prompt) pasa por casMutateEnvelope / casDeleteEnvelopeIf /
+ * recordFailedAttempt en vez de restaurar la copia leída antes de derivar.
+ * Otra pestaña puede haber rotado el sobre mientras tanto (disable+enable con
+ * PIN nuevo, changePin); reescribir la copia vieja resucita K1 tras un
+ * disable+enable (datos perdidos), revierte un changePin y pierde incrementos
+ * del contador entre pestañas. La comparación es generación+estado+marcador
+ * (los contadores NO forman parte: un intento paralelo no invalida el CAS).
+ * No queda ninguna escritura ciega del sobre tras un await en este módulo;
+ * las escrituras incondicionales en UNA transacción (casInsertTransitionMarker
+ * y los put/delete internos de los helpers CAS) nunca restauran una copia.
+ */
+interface EnvelopeIdentity {
+  gen: string;
+  state: string | null;
+  marker: string | null;
+}
+
+/** Mensaje canónico cuando el sobre rotó bajo nuestros pies (U1/U2, L2). */
+const PROTECTION_CHANGED_MSG =
+  'La protección cambió en otra pestaña durante la operación; operación cancelada sin modificar tus datos.';
+
+function envelopeIdentity(env: DeviceLockStore): EnvelopeIdentity {
+  return {
+    gen: envelopeGeneration(env),
+    state: env.state ?? null,
+    marker: env.markerId ?? null,
+  };
+}
+
+function sameEnvelopeIdentity(a: EnvelopeIdentity, b: EnvelopeIdentity): boolean {
+  return a.gen === b.gen && a.state === b.state && a.marker === b.marker;
+}
+
+/**
+ * Mutación condicional en UNA sola transacción (U1/U2): relee el sobre y le
+ * aplica `mutate` + put SOLO si generación, estado y marcador siguen siendo
+ * los de la foto `expected`. Devuelve true si escribió; false si el sobre
+ * cambió o desapareció (abortar sin escribir y sin tocar la clave en memoria).
+ */
+async function casMutateEnvelope(
+  expected: DeviceLockStore,
+  mutate: (cur: DeviceLockStore) => void
+): Promise<boolean> {
+  const want = envelopeIdentity(expected);
+  return withLockDb(
     (db) =>
-      new Promise<void>((resolve, reject) => {
+      new Promise<boolean>((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite');
-        tx.objectStore(STORE_NAME).put(data, KEY_NAME);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
+        const store = tx.objectStore(STORE_NAME);
+        const get = store.get(KEY_NAME);
+        get.onsuccess = () => {
+          const cur = get.result as DeviceLockStore | undefined;
+          if (!cur || !sameEnvelopeIdentity(envelopeIdentity(cur), want)) {
+            try {
+              tx.abort();
+            } catch {
+              /* ya terminó */
+            }
+            resolve(false);
+            return;
+          }
+          mutate(cur);
+          store.put(cur, KEY_NAME);
+        };
+        get.onerror = () => reject(get.error);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
       })
   );
+}
+
+/**
+ * Borrado condicional por identidad (U1/U2): solo borra si el sobre almacenado
+ * sigue siendo la misma generación/estado/marcador que la foto `expected`.
+ * Si ya no hay sobre (otra pestaña terminó la MISMA transición), devuelve true:
+ * no es un error. Si cambió a otra cosa, devuelve false (abortar con error).
+ */
+async function casDeleteEnvelopeIf(expected: DeviceLockStore): Promise<boolean> {
+  const want = envelopeIdentity(expected);
+  return withLockDb(
+    (db) =>
+      new Promise<boolean>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const get = store.get(KEY_NAME);
+        get.onsuccess = () => {
+          const cur = get.result as DeviceLockStore | undefined;
+          // Sin escritura pendiente la transacción confirma sin cambios.
+          if (!cur) {
+            resolve(true);
+            return;
+          }
+          if (!sameEnvelopeIdentity(envelopeIdentity(cur), want)) {
+            try {
+              tx.abort();
+            } catch {
+              /* ya terminó */
+            }
+            resolve(false);
+            return;
+          }
+          store.delete(KEY_NAME);
+        };
+        get.onerror = () => reject(get.error);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      })
+  );
+}
+
+/**
+ * Incremento atómico del contador sobre el sobre ACTUAL (U1/U2): UNA sola
+ * transacción relee el sobre almacenado ahora e incrementa SU contador, sin
+ * restaurar ninguna copia vieja. Así dos pestañas que fallan a la vez no
+ * pierden incrementos y un fallo contra un sobre ya rotado no resucita K1.
+ * Si ya no hay sobre (la protección se desactivó mientras tanto), lanza el
+ * error de protección cambiada en vez de inventar un contador.
+ */
+async function recordFailedAttempt(): Promise<void> {
+  const incremented = await withLockDb(
+    (db) =>
+      new Promise<boolean>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const get = store.get(KEY_NAME);
+        let wrote = false;
+        get.onsuccess = () => {
+          const cur = get.result as DeviceLockStore | undefined;
+          if (!cur) {
+            try {
+              tx.abort();
+            } catch {
+              /* ya terminó */
+            }
+            resolve(false);
+            return;
+          }
+          cur.failedAttempts = (cur.failedAttempts || 0) + 1;
+          cur.lockedUntil = Date.now() + calculateDelay(cur.failedAttempts);
+          store.put(cur, KEY_NAME);
+          wrote = true;
+        };
+        get.onerror = () => reject(get.error);
+        tx.oncomplete = () => resolve(wrote);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      })
+  );
+  if (!incremented) {
+    throw new StaleTicketError(PROTECTION_CHANGED_MSG);
+  }
+  broadcastLockChange();
+}
+
+/**
+ * Relee el sobre y falla si ya no es la foto `expected` (U1/U2): la clave
+ * recién derivada es de otra generación y publicarla corrompería datos.
+ * No escribe nada y no toca la clave en memoria.
+ */
+async function assertEnvelopeUnchanged(expected: DeviceLockStore): Promise<void> {
+  const cur = await getEnvelopeRaw();
+  if (
+    cur &&
+    cur !== 'unreadable' &&
+    sameEnvelopeIdentity(envelopeIdentity(cur), envelopeIdentity(expected))
+  ) {
+    return;
+  }
+  throw new StaleTicketError(PROTECTION_CHANGED_MSG);
 }
 
 /**
@@ -296,18 +458,7 @@ async function touchTransitionMarker(marker: DeviceLockStore): Promise<boolean> 
   return casWriteEnvelopeIfMarker(marker.markerId, marker);
 }
 
-async function clearEnvelope(): Promise<void> {
-  await withLockDb(
-    (db) =>
-      new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        tx.objectStore(STORE_NAME).delete(KEY_NAME);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
-      })
-  );
-}
+
 
 function getVaultClient() {
   if (!vaultClientInstance) {
@@ -619,6 +770,11 @@ async function resumeTransition(env: DeviceLockStore, key: CryptoKey): Promise<v
   const { migrateLocalStoresEncryption } = await import('./indexedDbAdapter');
   const { migrateIdentityStoreEncryption } = await import('../../mesh/identityStore');
 
+  // U1/U2: la clave se derivó del sobre `env` ANTES de la KDF lenta; si el
+  // sobre almacenado ya no es el mismo (otra pestaña rotó la protección),
+  // abortar SIN migrar, SIN escribir y SIN tocar la clave en memoria.
+  await assertEnvelopeUnchanged(env);
+
   if (env.targetMethod === 'off') {
     // Desactivación interrumpida: terminar de descifrar y quitar el sobre.
     activeDataKey = key; // necesaria para descifrar durante la migración a texto plano
@@ -630,7 +786,10 @@ async function resumeTransition(env: DeviceLockStore, key: CryptoKey): Promise<v
       activeDataKey = null;
       activeDataKeyGen = null;
     }
-    await clearEnvelope();
+    const cleared = await casDeleteEnvelopeIf(env);
+    if (!cleared) {
+      throw new StaleTicketError(PROTECTION_CHANGED_MSG);
+    }
     broadcastLockChange();
     currentMethod = null;
     if (vaultClientInstance) vaultClientInstance.lock();
@@ -641,9 +800,13 @@ async function resumeTransition(env: DeviceLockStore, key: CryptoKey): Promise<v
   const method: 'pin' | 'passkey' = env.targetMethod === 'passkey' ? 'passkey' : 'pin';
   await migrateLocalStoresEncryption(key);
   await migrateIdentityStoreEncryption(key);
-  env.state = 'active';
-  env.targetMethod = undefined;
-  await saveEnvelope(env);
+  const won = await casMutateEnvelope(env, (cur) => {
+    cur.state = 'active';
+    cur.targetMethod = undefined;
+  });
+  if (!won) {
+    throw new StaleTicketError(PROTECTION_CHANGED_MSG);
+  }
   broadcastLockChange();
   activeDataKey = key;
   activeDataKeyGen = envelopeGeneration(env);
@@ -827,10 +990,8 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
     // desbloqueo. En lockout la respuesta es idéntica sea cual sea el PIN:
     // el intento cuenta (extiende el bloqueo, como exige T5) y se rechaza.
     if (env.lockedUntil && Date.now() < env.lockedUntil) {
-      env.failedAttempts = (env.failedAttempts || 0) + 1;
-      env.lockedUntil = Date.now() + calculateDelay(env.failedAttempts);
-      await saveEnvelope(env);
-      broadcastLockChange();
+      // U1/U2: incremento atómico sobre el sobre ACTUAL, nunca la copia leída.
+      await recordFailedAttempt();
       throw new VaultError('LOCKED', 'Demasiados intentos. Inténtalo más tarde.');
     }
 
@@ -848,22 +1009,27 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
         rawKey = await vc.unwrapKey(env.passkeyEnvelope);
       }
     } catch (err) {
-      // Solo un fallo criptográfico real (BAD_KEY) cuenta como intento.
+      // Solo un fallo criptográfico real (BAD_KEY) cuenta como intento, y lo
+      // cuenta sobre el sobre ACTUAL (U1/U2): restaurar la copia `env` tras la
+      // KDF lenta resucitaría K1 tras un disable+enable o revertiría un changePin.
       if (err instanceof VaultError && err.code === 'BAD_KEY') {
-        env.failedAttempts = (env.failedAttempts || 0) + 1;
-        env.lockedUntil = Date.now() + calculateDelay(env.failedAttempts);
-        await saveEnvelope(env);
-        broadcastLockChange();
+        await recordFailedAttempt();
         throw new VaultError('BAD_KEY', 'PIN o código incorrecto');
       }
       throw err;
     }
 
-    // Success - reset attempts.
+    // Success - reset attempts, pero SOLO si el sobre sigue siendo el mismo
+    // que se derivó (U1/U2): si rotó en otra pestaña, abortar sin escribir y
+    // sin publicar la clave obsoleta en memoria.
     if (env.failedAttempts && env.failedAttempts > 0) {
-      env.failedAttempts = 0;
-      env.lockedUntil = 0;
-      await saveEnvelope(env);
+      const reset = await casMutateEnvelope(env, (cur) => {
+        cur.failedAttempts = 0;
+        cur.lockedUntil = 0;
+      });
+      if (!reset) {
+        throw new StaleTicketError(PROTECTION_CHANGED_MSG);
+      }
     }
 
     const key = await crypto.subtle.importKey(
@@ -873,6 +1039,11 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
       false,
       ['encrypt', 'decrypt']
     );
+
+    // U1: la importación es asíncrona; revalidar antes de publicar la clave en
+    // memoria para no fijar K1 cuando ya rige K2 (resumeTransition revalida
+    // además por su cuenta antes de migrar).
+    await assertEnvelopeUnchanged(env);
 
     // Si la app se cerró a mitad de una transición, reanudarla con la clave recuperada.
     if (env.state === 'transition') {
@@ -901,10 +1072,24 @@ export async function disableProtection(): Promise<void> {
     const env = await getEnvelope();
     if (env === 'unreadable' || !env || env.state !== 'active') return; // Already disabled or mid-transition
 
-    // 1. Mark transition
-    env.state = 'transition';
-    env.targetMethod = 'off';
-    await saveEnvelope(env);
+    // U1/U2: la clave en memoria debe ser de la generación del sobre; si otra
+    // pestaña rotó la protección, esta clave descifraría filas perdidas.
+    if (!isMemoryKeyValidFor(env)) {
+      clearStaleMemoryKey();
+      throw new StaleTicketError(PROTECTION_CHANGED_MSG);
+    }
+
+    // 1. Mark transition (CAS: si el sobre cambió bajo nuestros pies, abortar).
+    const marked = await casMutateEnvelope(env, (cur) => {
+      cur.state = 'transition';
+      cur.targetMethod = 'off';
+    });
+    if (!marked) {
+      throw new StaleTicketError(PROTECTION_CHANGED_MSG);
+    }
+    // Foto del marcador para el borrado final: el estado esperado ya es
+    // transition/off, no el active original.
+    const markedEnv: DeviceLockStore = { ...env, state: 'transition', targetMethod: 'off' };
     broadcastLockChange();
 
     // 2. Migrate back to plain text. Si falla, se conserva el estado 'transition' y el
@@ -915,8 +1100,13 @@ export async function disableProtection(): Promise<void> {
     const { migrateIdentityStoreEncryption } = await import('../../mesh/identityStore');
     await migrateIdentityStoreEncryption(null);
 
-    // 3. Clear envelope
-    await clearEnvelope();
+    // 3. Clear envelope (condicional: si otra pestaña terminó la MISMA
+    // transición ya no hay sobre y no es un error; si cambió a otra cosa,
+    // abortar con error claro).
+    const cleared = await casDeleteEnvelopeIf(markedEnv);
+    if (!cleared) {
+      throw new StaleTicketError(PROTECTION_CHANGED_MSG);
+    }
     broadcastLockChange();
 
     // 4. Clear memory
@@ -944,10 +1134,19 @@ export async function changePin(oldPin: string, newPin: string): Promise<void> {
     await vc.unlock({ passphrase: newPin });
     const newEnvelope = await vc.wrapKey(rawKey);
 
-    env.pinEnvelope = newEnvelope;
-    // Misma pestaña: la clave en memoria sigue siendo válida para el sobre nuevo.
-    activeDataKeyGen = envelopeGeneration(env);
-    await saveEnvelope(env);
+    // U1/U2: la derivación es lenta; solo persistir si el sobre sigue siendo el
+    // mismo que se verificó (si otra pestaña rotó o contó intentos mientras
+    // tanto, abortar sin escribir y sin tocar la clave en memoria). Los
+    // contadores ajenos se conservan: se muta la copia almacenada, no `env`.
+    const won = await casMutateEnvelope(env, (cur) => {
+      cur.pinEnvelope = newEnvelope;
+    });
+    if (!won) {
+      throw new StaleTicketError(PROTECTION_CHANGED_MSG);
+    }
+    // Misma pestaña y escritura ganadora: la clave en memoria sigue siendo
+    // válida para el sobre nuevo.
+    activeDataKeyGen = envelopeGeneration({ ...env, pinEnvelope: newEnvelope });
     broadcastLockChange();
   });
 }
