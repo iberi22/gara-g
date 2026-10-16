@@ -1,14 +1,16 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { exportLocalData, importLocalData, mergeLocalDumps } from './dump';
 import { LOCAL_CHANGED_EVENT, LOCAL_INSTANCE_ID } from '../appMode';
 import { createEntity, deleteEntity, getEntity, listEntities, setStorageAdapter, updateEntity, getMemoryAdapter } from '../domain';
 import type { DomainRecord } from '../domain';
 import { appendMovement, movementHistory, quantityOf } from '../inventory/ledger';
-import { exportLocalData, importLocalData, mergeLocalDumps } from './dump';
-import { closeLocalDb, getLocalAdapter } from './indexedDbAdapter';
+import { closeLocalDb, getLocalAdapter, openLocalDb, replaceLocalStores } from './indexedDbAdapter';
 import type { LocalDump } from './types';
+import { enableProtection, lock, unlock } from './deviceLock';
+import { LockedError } from './recordCrypto';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const rec = (id: string, updated_at: string, extra: Record<string, unknown> = {}): DomainRecord => ({
   id,
@@ -35,6 +37,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  lock();
   setStorageAdapter(getMemoryAdapter());
 });
 
@@ -50,6 +53,46 @@ describe('IndexedDbAdapter vía domain.ts', () => {
     expect(up?.plate).toBe('XYZ999');
     expect(up!.updated_at > v.updated_at).toBe(true);
     expect((await getEntity('vehicle', v.id, LOCAL_INSTANCE_ID))?.plate).toBe('XYZ999');
+  });
+
+  it('actualizaciones concurrentes sobre campos distintos no se pisan', async () => {
+    const v = await createEntity('vehicle', { plate: 'A', color: 'rojo' }, LOCAL_INSTANCE_ID);
+
+    await Promise.all([
+      updateEntity('vehicle', v.id, { plate: 'B' }, LOCAL_INSTANCE_ID),
+      updateEntity('vehicle', v.id, { color: 'azul' }, LOCAL_INSTANCE_ID),
+    ]);
+
+    const got = await getEntity('vehicle', v.id, LOCAL_INSTANCE_ID);
+    expect(got?.plate).toBe('B');
+    expect(got?.color).toBe('azul');
+  });
+
+  it('una actualización pendiente no resucita una fila borrada', async () => {
+    const v = await createEntity('vehicle', { plate: 'A' }, LOCAL_INSTANCE_ID);
+    await enableProtection('pin', '123456');
+
+    // Pausa el cifrado de la escritura para intercalar el borrado.
+    const encryptProto = Object.getPrototypeOf(crypto.subtle) as SubtleCrypto;
+    const realEncrypt = encryptProto.encrypt;
+    let releaseEncrypt!: () => void;
+    const encryptGate = new Promise<void>((resolve) => { releaseEncrypt = resolve; });
+    let encryptPaused = false;
+    const spy = vi.spyOn(encryptProto, 'encrypt').mockImplementation(function (this: SubtleCrypto, ...args: unknown[]) {
+      encryptPaused = true;
+      return encryptGate.then(() => (realEncrypt as (...a: unknown[]) => Promise<ArrayBuffer>).apply(this, args));
+    });
+
+    const pendingUpdate = updateEntity('vehicle', v.id, { plate: 'B' }, LOCAL_INSTANCE_ID);
+    await vi.waitFor(() => expect(encryptPaused).toBe(true));
+    await deleteEntity('vehicle', v.id, LOCAL_INSTANCE_ID);
+    releaseEncrypt();
+
+    await expect(pendingUpdate).resolves.toBeNull();
+    spy.mockRestore();
+
+    expect(await getEntity('vehicle', v.id, LOCAL_INSTANCE_ID)).toBeNull();
+    expect(await listEntities('vehicle', LOCAL_INSTANCE_ID)).toHaveLength(0);
   });
 
   it('no mezcla tenants', async () => {
@@ -202,6 +245,60 @@ describe('mergeLocalDumps', () => {
   });
 });
 
+describe('LockedError checks', () => {
+  it('bloquea todas las operaciones de IDB cuando está protegido', async () => {
+    await createEntity('vehicle', { plate: 'ABC' }, LOCAL_INSTANCE_ID);
+    await enableProtection('pin', '123456');
+    lock();
+
+    await expect(listEntities('vehicle', LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
+    await expect(createEntity('vehicle', { plate: 'XYZ' }, LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
+    await expect(updateEntity('vehicle', '1', { plate: 'XYZ' }, LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
+    await expect(exportLocalData()).rejects.toThrow(LockedError);
+    await expect(replaceLocalStores(dump())).rejects.toThrow(LockedError);
+  });
+});
+
+describe('migrateLocalStoresEncryption', () => {
+  it('aborts entirely if a later write fails (no partial commit)', async () => {
+    // 1. Setup three unencrypted rows (fail on the SECOND write, not the first).
+    for (let i = 0; i < 3; i++) {
+      await createEntity('vehicle', { plate: `P${i}` }, LOCAL_INSTANCE_ID);
+    }
+    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+    const db = await (await import('./indexedDbAdapter')).openLocalDb();
+
+    const txProto = Object.getPrototypeOf(db.transaction('records', 'readwrite'));
+    const originalStore = txProto.objectStore;
+    let puts = 0;
+
+    vi.spyOn(txProto, 'objectStore').mockImplementation(function (this: unknown, name: string) {
+      const store = originalStore.call(this, name);
+      if (name === 'records') {
+        const origPut = store.put;
+        store.put = function (this: unknown, ...args: unknown[]) {
+          puts++;
+          if (puts === 2) throw new Error('Simulated atomic write failure');
+          return origPut.apply(this, args);
+        };
+      }
+      return store;
+    });
+
+    // 2. Attempt migration which should throw and abort the whole transaction.
+    await expect((await import('./indexedDbAdapter')).migrateLocalStoresEncryption(key)).rejects.toThrow('Simulated atomic write failure');
+    vi.restoreAllMocks();
+
+    // 3. No row may be left encrypted: either all or nothing.
+    const rows = await db.getAll('records');
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.record !== undefined && r.enc === undefined)).toBe(true);
+
+    const list = await listEntities('vehicle', LOCAL_INSTANCE_ID);
+    expect(list).toHaveLength(3);
+  });
+});
+
 describe('IndexedDbAdapter.createIfAbsent + ledger', () => {
   const T1 = '2026-03-01T00:00:00.000Z';
   const T2 = '2026-03-02T00:00:00.000Z';
@@ -228,5 +325,53 @@ describe('IndexedDbAdapter.createIfAbsent + ledger', () => {
     const history = await movementHistory(adapter, LOCAL_INSTANCE_ID, 'item-race');
     expect(history).toHaveLength(1);
     expect(await quantityOf(adapter, LOCAL_INSTANCE_ID, 'item-race')).toBe(Number((history[0] as unknown as DomainRecord).qty));
+  });
+});
+
+describe('inventario cifrado con protección activa', () => {
+  it('los movimientos se guardan cifrados y updateIfCurrent funciona sobre filas cifradas', async () => {
+    const adapter = getLocalAdapter();
+    await adapter.create('inventoryItem', rec('item-enc', '2026-03-01T00:00:00.000Z', { quantity: 0, name: 'Tornillo' }));
+    await enableProtection('pin', '123456');
+
+    const mov = await appendMovement(adapter, LOCAL_INSTANCE_ID, 'item-enc', 'purchase', 10, 'compra');
+
+    // La fila cruda está cifrada: sin `record` en claro.
+    const db = await openLocalDb();
+    const raw = await db.get('records', ['stockMovement', mov.id]);
+    expect(raw?.enc).toBeTypeOf('string');
+    expect(raw?.record).toBeUndefined();
+    expect(JSON.stringify(raw)).not.toContain('compra');
+
+    // updateIfCurrent sobre fila cifrada: descifra, compara versión y re-cifra.
+    const before = await adapter.get('inventoryItem', 'item-enc', LOCAL_INSTANCE_ID);
+    expect(before?.quantity).toBe(10);
+    const updated = await adapter.updateIfCurrent(
+      'inventoryItem',
+      'item-enc',
+      { quantity: 10 },
+      LOCAL_INSTANCE_ID,
+      String(before!.updated_at),
+    );
+    expect(updated?.quantity).toBe(10);
+    const rawItem = await db.get('records', ['inventoryItem', 'item-enc']);
+    expect(rawItem?.enc).toBeTypeOf('string');
+    expect(rawItem?.record).toBeUndefined();
+    // Versión obsoleta: null sin tocar nada.
+    await expect(
+      adapter.updateIfCurrent('inventoryItem', 'item-enc', { quantity: 1 }, LOCAL_INSTANCE_ID, '2026-03-01T00:00:00.000Z'),
+    ).resolves.toBeNull();
+
+    // Bloqueado: ni el libro ni el CAS pasan.
+    lock();
+    await expect(movementHistory(adapter, LOCAL_INSTANCE_ID, 'item-enc')).rejects.toThrow(LockedError);
+    await expect(
+      adapter.updateIfCurrent('inventoryItem', 'item-enc', { quantity: 1 }, LOCAL_INSTANCE_ID, String(updated!.updated_at)),
+    ).rejects.toThrow(LockedError);
+
+    // Tras desbloquear, todo legible y el stock cuadra.
+    await unlock('pin', '123456');
+    expect(await quantityOf(adapter, LOCAL_INSTANCE_ID, 'item-enc')).toBe(10);
+    expect((await movementHistory(adapter, LOCAL_INSTANCE_ID, 'item-enc')).map((m) => m.id)).toEqual([mov.id]);
   });
 });
