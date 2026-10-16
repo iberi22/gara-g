@@ -10,7 +10,10 @@ import { untrack } from 'svelte';
 import { toast } from '../lib/toast';
 import { generateAui, type AuiSpec } from '../lib/aui';
 import { MARKET } from '../lib/market';
-import { detectLocalAi, type AiTier } from '../lib/localAi/capabilities';
+import { detectLocalAi, isPromptApiDownloadState, promptApiState, type AiTier } from '../lib/localAi/capabilities';
+import { hasPromptApiConsent } from '../lib/localAi/consent';
+import { webllmModelId } from '../lib/localAi/webllmEngine';
+import LocalAiConsent from './garage-dossier/LocalAiConsent.svelte';
 import AuiRenderer from './AuiRenderer.svelte';
 
 interface Props {
@@ -28,6 +31,19 @@ let errorMsg = $state<string>('');
 let isSample = $state<boolean>(false);
 let tier = $state<AiTier>('rules');
 let modelMeta = $state<{ model: string; via: string } | null>(null);
+/** Tarjeta de consentimiento visible (nunca carga nada por sí sola). */
+let showConsent = $state(false);
+/** Hay motor autorizado en esta pestaña: las consultas lo reutilizan. */
+let modelActive = $state(false);
+/** La Prompt API aún tiene que descargar Gemini Nano. */
+let promptDownloadPending = $state(false);
+/**
+ * Sin motor autorizado la AUI usa el motor de reglas: se ofrece activar la IA local con
+ * la misma tarjeta que el asistente (WebGPU descargable o Gemini Nano pendiente).
+ */
+const needsConsent = $derived(
+  (tier === 'webgpu' || promptDownloadPending) && !modelActive && !hasPromptApiConsent(),
+);
 
 const PRESET_PROMPTS = [
   'Generar panel de Mantenimiento Preventivo y Alertas de Taller',
@@ -39,7 +55,17 @@ const PRESET_PROMPTS = [
 $effect(() => {
   if (typeof window !== 'undefined') {
     untrack(() => {
-      detectLocalAi().then((detected) => (tier = detected));
+      detectLocalAi().then((detected) => {
+        tier = detected;
+        modelActive = Boolean(webllmModelId());
+        // Con WebGPU (o Gemini Nano pendiente de descarga) pero sin motor autorizado se
+        // ofrece activarlo; la tarjeta solo descarga si el usuario pulsa el botón.
+        showConsent = (detected === 'webgpu' || promptDownloadPending) && !modelActive;
+      });
+      void promptApiState().then((state) => {
+        promptDownloadPending = isPromptApiDownloadState(state);
+        if ((tier === 'webgpu' || promptDownloadPending) && !modelActive) showConsent = true;
+      });
       if (!currentSpec && !errorMsg) loadDefaultSpec();
     });
   }
@@ -144,11 +170,33 @@ async function handleGenerate(customPrompt?: string) {
     </div>
   </header>
 
-  {#if tier === 'rules'}
+  {#if tier === 'rules' && !promptDownloadPending}
     <div class="aui-local-ai" role="status" data-testid="aui-local-ai-note">
       Este navegador no tiene IA local disponible. La AUI puede componer tableros con Chrome
       Prompt API (Gemini Nano) o con WebGPU; mientras tanto se muestra un ejemplo local.
     </div>
+  {/if}
+
+  {#if needsConsent}
+    <div class="aui-local-ai" role="status" data-testid="aui-consent-note">
+      La AUI usa el motor de reglas hasta que autorices la IA local: no se descarga nada
+      sin tu permiso.
+    </div>
+    {#if showConsent}
+      <LocalAiConsent
+        onAccept={() => {
+          modelActive = true;
+          showConsent = false;
+        }}
+        onCancel={() => {
+          showConsent = false;
+        }}
+      />
+    {:else}
+      <button type="button" class="g-btn prompt-submit" onclick={() => (showConsent = true)}>
+        Activar IA local
+      </button>
+    {/if}
   {/if}
 
   {#if errorMsg}

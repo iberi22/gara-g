@@ -22,13 +22,18 @@ afterEach(() => {
 });
 
 describe('detectLocalAi', () => {
-  it('availability "available" da prompt-api', async () => {
-    await expect(detectLocalAi({ languageModel: languageModel('available') })).resolves.toBe('prompt-api');
+  it('solo "available" y "readily" usan la Prompt API sin pedir nada', async () => {
+    for (const state of ['available', 'readily']) {
+      await expect(detectLocalAi({ languageModel: languageModel(state) })).resolves.toBe('prompt-api');
+    }
   });
 
-  it('los estados legacy y de descarga del navegador también cuentan como prompt-api', async () => {
-    for (const state of ['readily', 'downloadable', 'downloading', 'after-download']) {
-      await expect(detectLocalAi({ languageModel: languageModel(state) })).resolves.toBe('prompt-api');
+  it('con descarga pendiente no hay Prompt API automática: cae al siguiente nivel', async () => {
+    for (const state of ['downloadable', 'downloading', 'after-download']) {
+      await expect(
+        detectLocalAi({ languageModel: languageModel(state), gpu }),
+      ).resolves.toBe('webgpu');
+      await expect(detectLocalAi({ languageModel: languageModel(state) })).resolves.toBe('rules');
     }
   });
 

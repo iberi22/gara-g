@@ -51,6 +51,8 @@ export interface LocalAssistantContext {
 
 export interface LocalAssistantOptions {
   onToken?: (chunk: string) => void;
+  /** Limpia el parcial cuando un motor falla a mitad y la cadena sigue con el siguiente. */
+  onReset?: () => void;
   signal?: AbortSignal;
   /** Fuerza un nivel de IA local (p. ej. reglas mientras no se acepta la descarga). */
   tier?: AiTier;
@@ -90,7 +92,13 @@ export async function runLocalAssistant(
   const chat = options.chat ?? localChat;
   const result = await chat(
     [{ role: 'system', content: system }, ...messages],
-    { excerpts: context.excerpts, onToken: options.onToken, signal: options.signal, tier: options.tier },
+    {
+      excerpts: context.excerpts,
+      onToken: options.onToken,
+      onReset: options.onReset,
+      signal: options.signal,
+      tier: options.tier,
+    },
   );
   return { ...result, asked: true };
 }

@@ -138,6 +138,11 @@ async function send(text?: string): Promise<void> {
           update({ content: turns[idx].content + chunk });
           void scrollDown();
         },
+        // Un motor que falla a mitad descarta su parcial y la cadena sigue con el
+        // siguiente: se limpia lo ya pintado para no mezclar respuestas.
+        onReset: () => {
+          update({ content: '' });
+        },
       },
     );
     update({ model: result.model });

@@ -6,14 +6,19 @@
  * - `localInfer(prompt, { system })`: generación de la AUI (devuelve una spec AuiSpec).
  *
  * Cadena de respaldo: Prompt API → WebGPU/WebLLM → reglas deterministas. Reglas de oro:
- *  - La inferencia NUNCA descarga un modelo. Cuando el Prompt API falla se sigue con el
- *    motor WebGPU que YA esté cargado Y autorizado; si no hay, responden las reglas.
+ *  - La inferencia NUNCA descarga un modelo sin permiso. La Prompt API se usa sola solo si
+ *    ya está en `available`; con descarga pendiente (`downloadable`/`downloading`) exige el
+ *    consentimiento explícito de Gemini Nano (`prompt-api:gemini-nano` en `consent.ts`).
+ *    El motor WebGPU que se usa es el YA cargado Y autorizado; si no hay, responden las reglas.
  *  - Una respuesta vacía es un fallo, no un éxito: se sigue con el siguiente motor.
+ *  - Un stream que falla a mitad es un FALLO: se descarta el parcial, se avisa con
+ *    `onReset` para que la UI limpie los tokens, y se sigue con el siguiente motor. Solo la
+ *    cancelación del usuario conserva el parcial y detiene la cadena (marcada `cancelled`).
  *  - Ninguna función lanza hacia la interfaz: el peor caso siempre es una respuesta útil
  *    de las reglas.
  */
-import { detectLocalAi, type AiTier } from './capabilities';
-import { authorisedModelId } from './consent';
+import { detectLocalAi, promptApiState, type AiTier } from './capabilities';
+import { authorisedModelId, hasPromptApiConsent } from './consent';
 import { createPromptSession, promptApiStream, type PromptInitialMessage } from './promptApi';
 import { RULES_MODEL, RULES_NEEDS_LOCAL_AI, rulesAnswer } from './rules';
 import {
@@ -28,8 +33,10 @@ export type { AiTier } from './capabilities';
 export { detectLocalAi, isLocalAiUsable, localAiEnvironment } from './capabilities';
 export {
   LOCAL_AI_CONSENT_KEY,
+  PROMPT_API_CONSENT_MODEL_ID,
   authorisedModelId,
   clearConsent,
+  hasPromptApiConsent,
   readConsent,
   saveConsent,
 } from './consent';
@@ -44,6 +51,12 @@ export interface LocalChatOptions {
   /** Fragmentos de manual ya elegidos por el navegador: base de la respuesta por reglas. */
   excerpts?: readonly ManualChunk[];
   onToken?: (chunk: string) => void;
+  /**
+   * La UI limpia los tokens parciales cuando un motor falla a mitad del stream y la
+   * cadena sigue con el siguiente motor. En una cancelación del usuario NO se llama:
+   * el parcial se conserva.
+   */
+  onReset?: () => void;
   signal?: AbortSignal;
   /** Fuerza un nivel (p. ej. reglas explícitas). Por defecto, el detectado. */
   tier?: AiTier;
@@ -58,6 +71,8 @@ export interface LocalChatResult {
   model: string;
   text: string;
   error?: string;
+  /** La cadena se detuvo por una cancelación del usuario; el parcial se conserva. */
+  cancelled?: boolean;
 }
 
 export interface LocalInferOptions {
@@ -132,6 +147,18 @@ function webllmLabel(options: LocalChatOptions | LocalInferOptions): string {
 }
 
 /**
+ * ¿Se puede llamar a `create()` sin iniciar una descarga sorpresa? Solo cuando la Prompt
+ * API ya está lista (`available`), o cuando el usuario autorizó la descarga de Gemini
+ * Nano. En cualquier otro caso la rama de la Prompt API se salta entera: `create()` no
+ * se llama y la cadena sigue con WebGPU y las reglas.
+ */
+async function promptApiAllowed(): Promise<boolean> {
+  const state = await promptApiState();
+  if (state === 'available' || state === 'readily') return true;
+  return hasPromptApiConsent();
+}
+
+/**
  * Asistente del expediente con IA local y streaming. Nunca lanza: los fallos de motor caen
  * a las reglas, que responden con los fragmentos de manual ya elegidos.
  */
@@ -147,33 +174,53 @@ export async function localChat(
     emitted += chunk;
     options.onToken?.(chunk);
   };
+  /**
+   * Un motor que falla a mitad descarta su parcial y avisa a la UI para que limpie los
+   * tokens ya pintados. Sin parcial no hay nada que limpiar y no se avisa.
+   */
+  const failEngine = (base: number): void => {
+    if (emitted.length > base) {
+      emitted = emitted.slice(0, base);
+      options.onReset?.();
+    }
+  };
 
-  // 1. Prompt API (Gemini Nano), solo si el navegador la ofrece.
-  if (tier === 'prompt-api') {
+  // 1. Prompt API (Gemini Nano), solo si ya está lista o el usuario autorizó su descarga.
+  if (tier === 'prompt-api' && (await promptApiAllowed())) {
+    const base = emitted.length;
+    let failed = false;
     let session: Awaited<ReturnType<typeof createPromptSession>> | undefined;
     try {
       const { initial, prompt } = splitForPromptApi(messages);
       session = await createPromptSession(initial, { signal: options.signal });
       for await (const chunk of promptApiStream(session, prompt, options.signal)) emit(chunk);
     } catch {
-      /* vacío o fallo: se sigue con el siguiente motor */
+      failed = true;
     } finally {
       session?.destroy?.();
     }
-    if (emitted.trim()) return { via: 'prompt-api', model: PROMPT_API_MODEL, text: emitted };
-    if (options.signal?.aborted) return { via: 'prompt-api', model: PROMPT_API_MODEL, text: emitted };
+    if (options.signal?.aborted)
+      return { via: 'prompt-api', model: PROMPT_API_MODEL, text: emitted, cancelled: true };
+    if (failed) failEngine(base);
+    else if (emitted.slice(base).trim())
+      return { via: 'prompt-api', model: PROMPT_API_MODEL, text: emitted };
   }
 
   // 2. WebGPU + WebLLM: SOLO un motor ya cargado y autorizado. Aquí no se descarga nada.
   const engine = availableEngine(options);
   if (engine) {
+    const base = emitted.length;
+    let failed = false;
     try {
       for await (const chunk of webllmStream(engine, [...messages], options.signal)) emit(chunk);
     } catch {
-      /* vacío o fallo: se sigue con las reglas */
+      failed = true;
     }
-    if (emitted.trim()) return { via: 'webgpu', model: webllmLabel(options), text: emitted };
-    if (options.signal?.aborted) return { via: 'webgpu', model: webllmLabel(options), text: emitted };
+    if (options.signal?.aborted)
+      return { via: 'webgpu', model: webllmLabel(options), text: emitted, cancelled: true };
+    if (failed) failEngine(base);
+    else if (emitted.slice(base).trim())
+      return { via: 'webgpu', model: webllmLabel(options), text: emitted };
   }
 
   // 3. Reglas deterministas: la red de seguridad, siempre disponible.
@@ -190,8 +237,9 @@ export async function localInfer(prompt: string, options: LocalInferOptions = {}
   const tier = options.tier ?? (await detectLocalAi());
   const system = options.system ?? DEFAULT_AUI_SYSTEM;
 
-  // 1. Prompt API (Gemini Nano).
-  if (tier === 'prompt-api') {
+  // 1. Prompt API (Gemini Nano): solo lista o con descarga consentida. Nunca `create()`
+  // para iniciar una descarga sin permiso.
+  if (tier === 'prompt-api' && (await promptApiAllowed())) {
     let session: Awaited<ReturnType<typeof createPromptSession>> | undefined;
     let text = '';
     try {
@@ -200,7 +248,7 @@ export async function localInfer(prompt: string, options: LocalInferOptions = {}
       });
       for await (const chunk of promptApiStream(session, prompt, options.signal)) text += chunk;
     } catch {
-      /* vacío o fallo: se sigue */
+      text = '';
     } finally {
       session?.destroy?.();
     }
@@ -219,7 +267,7 @@ export async function localInfer(prompt: string, options: LocalInferOptions = {}
       ];
       for await (const chunk of webllmStream(engine, messages, options.signal)) text += chunk;
     } catch {
-      /* se cae al mensaje de reglas */
+      text = '';
     }
     const spec = parseSpec(text);
     if (spec) return { via: 'webgpu', model: webllmLabel(options), text, spec };

@@ -8,8 +8,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   LOCAL_AI_CONSENT_KEY,
+  PROMPT_API_CONSENT_MODEL_ID,
   authorisedModelId,
   clearConsent,
+  hasPromptApiConsent,
   isKnownModelId,
   readConsent,
   saveConsent,
@@ -52,5 +54,20 @@ describe('consentimiento de IA local', () => {
     saveConsent(DEFAULT_LOCAL_MODEL);
     clearConsent();
     expect(readConsent()).toBeUndefined();
+  });
+
+  it('el id de la Prompt API consentida se persiste y autoriza la descarga de Nano', () => {
+    saveConsent(PROMPT_API_CONSENT_MODEL_ID, 5678);
+    expect(localStorage.getItem(LOCAL_AI_CONSENT_KEY)).toContain(PROMPT_API_CONSENT_MODEL_ID);
+    expect(readConsent()).toEqual({ modelId: PROMPT_API_CONSENT_MODEL_ID, acceptedAt: 5678 });
+    expect(isKnownModelId(PROMPT_API_CONSENT_MODEL_ID)).toBe(true);
+    expect(hasPromptApiConsent()).toBe(true);
+  });
+
+  it('el modelo WebLLM no autoriza la Prompt API ni al revés', () => {
+    expect(hasPromptApiConsent()).toBe(false);
+    saveConsent(DEFAULT_LOCAL_MODEL);
+    expect(hasPromptApiConsent()).toBe(false);
+    expect(authorisedModelId()).toBe(DEFAULT_LOCAL_MODEL);
   });
 });

@@ -1,6 +1,8 @@
 /**
- * consent.ts — Consentimiento persistente para el tier 2 (WebGPU + WebLLM).
+ * consent.ts — Consentimiento persistente para la IA local con descarga.
  *
+ * Cubre el tier 2 (WebGPU + WebLLM) y la descarga de Gemini Nano de la Chrome Prompt API
+ * (id `prompt-api:gemini-nano`):
  * El usuario acepta una sola vez qué modelo quiere descargar; ese `modelId` queda guardado
  * en `localStorage` (bajo el espacio de nombres `gara_`) y es la ÚNICA autorización con la
  * que una consulta puede usar un motor ya cargado. Si la autorización no existe, la
@@ -13,6 +15,14 @@ import { LOCAL_MODELS } from './config';
 
 /** Clave de `localStorage` (espacio de nombres de la app). */
 export const LOCAL_AI_CONSENT_KEY = 'gara_local_ai_consent';
+
+/**
+ * Autorización para la descarga de Gemini Nano que gestiona el propio navegador (Chrome
+ * Prompt API). Vive en el MISMO almacén que el tier 2: `create()` puede iniciar esa
+ * descarga, así que la inferencia solo la llama con este consentimiento (o cuando la API
+ * ya está en `available` y no hay nada que descargar).
+ */
+export const PROMPT_API_CONSENT_MODEL_ID = 'prompt-api:gemini-nano';
 
 export interface LocalAiConsentState {
   modelId: string;
@@ -28,8 +38,9 @@ function storage(): Storage | undefined {
   }
 }
 
-/** Solo los modelos del catálogo son autorizables. */
+/** Solo los modelos del catálogo y la Prompt API consentida son autorizables. */
 export function isKnownModelId(id: unknown): id is string {
+  if (id === PROMPT_API_CONSENT_MODEL_ID) return true;
   return typeof id === 'string' && LOCAL_MODELS.some((model) => model.id === id);
 }
 
@@ -54,6 +65,11 @@ export function readConsent(): LocalAiConsentState | undefined {
 /** Modelo autorizado por el usuario, o `undefined`. */
 export function authorisedModelId(): string | undefined {
   return readConsent()?.modelId;
+}
+
+/** El usuario ya autorizó la descarga de Gemini Nano (Chrome Prompt API). */
+export function hasPromptApiConsent(): boolean {
+  return readConsent()?.modelId === PROMPT_API_CONSENT_MODEL_ID;
 }
 
 /** Guarda la autorización del usuario para un modelo del catálogo. */

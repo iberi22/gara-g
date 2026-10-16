@@ -19,7 +19,8 @@ import {
   LOCAL_MODELS,
   MIN_FREE_STORAGE_MB,
 } from '../../lib/localAi/config';
-import { authorisedModelId, saveConsent } from '../../lib/localAi/consent';
+import { authorisedModelId, PROMPT_API_CONSENT_MODEL_ID, saveConsent } from '../../lib/localAi/consent';
+import { isPromptApiDownloadState, promptApiState } from '../../lib/localAi/capabilities';
 import {
   disposeWebllmEngine,
   hasEnoughStorage,
@@ -42,6 +43,8 @@ let modelId = $state<string>(alreadyAuthorised ?? DEFAULT_LOCAL_MODEL);
 let availableMb = $state<number | null>(null);
 let persisted = $state(false);
 let checking = $state(true);
+/** La Prompt API aún tiene que descargar Gemini Nano: se ofrece autorizarla aquí. */
+let promptDownloadPending = $state(false);
 let downloading = $state(false);
 let progress = $state(0);
 let status = $state('');
@@ -51,6 +54,7 @@ let controller: AbortController | null = null;
 $effect(() => {
   untrack(() => {
     void checkStorage();
+    void checkPromptApi();
   });
 });
 
@@ -66,6 +70,17 @@ const enough = $derived(hasEnoughStorage(availableMb));
 const actionLabel = $derived(
   downloading ? 'Descargando…' : alreadyAuthorised ? 'Activar modelo autorizado' : 'Descargar modelo',
 );
+
+/** ¿La Prompt API aún tiene que descargar Gemini Nano? Solo entonces se ofrece aquí. */
+async function checkPromptApi(): Promise<void> {
+  promptDownloadPending = isPromptApiDownloadState(await promptApiState());
+}
+
+/** Autoriza la descarga de Gemini Nano que gestiona el navegador (sin descargar nada aquí). */
+function acceptPromptApi(): void {
+  saveConsent(PROMPT_API_CONSENT_MODEL_ID);
+  onAccept?.(PROMPT_API_CONSENT_MODEL_ID);
+}
 
 async function download(): Promise<void> {
   if (downloading || !enough) return;
@@ -126,6 +141,18 @@ function cancel(): void {
       Ya autorizaste un modelo en este dispositivo; puedes volver a activarlo sin autorizar
       otra descarga.
     </p>
+  {/if}
+
+  {#if promptDownloadPending}
+    <div class="prompt-api" data-testid="local-ai-prompt-api-option">
+      <p>
+        Este navegador también puede usar Gemini Nano (Chrome Prompt API) tras una descarga
+        que gestiona el propio navegador. No se descarga nada hasta que lo autorices aquí.
+      </p>
+      <button type="button" class="primary" onclick={acceptPromptApi}>
+        Autorizar Gemini Nano
+      </button>
+    </div>
   {/if}
 
   <fieldset class="models" disabled={downloading}>
@@ -207,6 +234,18 @@ function cancel(): void {
   .authorised {
     color: var(--d-muted);
     font-size: 12px;
+  }
+  .prompt-api {
+    border: 1px dashed var(--d-line);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .prompt-api p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
   }
   .models {
     border: 0;

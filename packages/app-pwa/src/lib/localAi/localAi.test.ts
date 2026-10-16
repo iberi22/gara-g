@@ -14,7 +14,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import LocalAiConsent from '../../components/garage-dossier/LocalAiConsent.svelte';
 import { detectLocalAi } from './capabilities';
 import { DEFAULT_LOCAL_MODEL, LOW_MEMORY_LOCAL_MODEL } from './config';
-import { clearConsent, saveConsent } from './consent';
+import { clearConsent, hasPromptApiConsent, PROMPT_API_CONSENT_MODEL_ID, saveConsent } from './consent';
 import { localChat, localInfer } from './index';
 import { RULES_LABEL, RULES_NEEDS_LOCAL_AI, RULES_NO_MATCH } from './rules';
 import type { PromptApiSession } from './promptApi';
@@ -53,8 +53,11 @@ function fakeEngine(chunks: WebllmChunk[] = [{ choices: [{ delta: { content: 're
   return { engine, create, interruptGenerate, unload, dispose };
 }
 
-function stubLanguageModel(create: (options: unknown) => Promise<PromptApiSession>): void {
-  (globalThis as { LanguageModel?: unknown }).LanguageModel = { availability: async () => 'available', create };
+function stubLanguageModel(
+  create: (options: unknown) => Promise<PromptApiSession>,
+  state: string = 'available',
+): void {
+  (globalThis as { LanguageModel?: unknown }).LanguageModel = { availability: async () => state, create };
 }
 
 beforeEach(() => {
@@ -316,5 +319,180 @@ describe('sin descargas silenciosas', () => {
     const res = await localChat(ask, { excerpts });
     expect(res.via).toBe('rules');
     expect(mlc.CreateWebWorkerMLCEngine).not.toHaveBeenCalled();
+  });
+});
+
+describe('localChat · consentimiento de la descarga de Gemini Nano', () => {
+  it('downloadable sin consentimiento: reglas y create() nunca se llama', async () => {
+    const create = vi.fn(async () => ({ promptStreaming: () => fromArray(['x']) }));
+    stubLanguageModel(create, 'downloadable');
+    const resets: number[] = [];
+    const res = await localChat(ask, {
+      tier: 'prompt-api',
+      excerpts,
+      onReset: () => resets.push(1),
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(res.via).toBe('rules');
+    expect(res.text).toContain(RULES_LABEL);
+    expect(resets).toHaveLength(0);
+  });
+
+  it('downloadable sin consentimiento tampoco se usa con el nivel detectado', async () => {
+    const create = vi.fn(async () => ({ promptStreaming: () => fromArray(['x']) }));
+    stubLanguageModel(create, 'downloading');
+    expect(await detectLocalAi()).toBe('rules');
+    const res = await localChat(ask, { excerpts });
+    expect(create).not.toHaveBeenCalled();
+    expect(res.via).toBe('rules');
+  });
+
+  it('downloadable CON consentimiento: la Prompt API responde', async () => {
+    saveConsent(PROMPT_API_CONSENT_MODEL_ID);
+    const create = vi.fn(async () => ({ promptStreaming: () => fromArray(['Usa ', '10W-40']) }));
+    stubLanguageModel(create, 'downloadable');
+    expect(await detectLocalAi()).toBe('prompt-api');
+    const res = await localChat(ask, { excerpts });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(res).toMatchObject({ via: 'prompt-api', model: 'gemini-nano', text: 'Usa 10W-40' });
+  });
+
+  it('localInfer downloadable sin consentimiento: reglas y create() nunca se llama', async () => {
+    const create = vi.fn(async () => ({ promptStreaming: () => fromArray(['{"version":1}']) }));
+    stubLanguageModel(create, 'downloadable');
+    const res = await localInfer('panel', { tier: 'prompt-api' });
+    expect(create).not.toHaveBeenCalled();
+    expect(res.via).toBe('rules');
+    expect(res.error).toBe(RULES_NEEDS_LOCAL_AI);
+  });
+});
+
+describe('LocalAiConsent · opción de Gemini Nano', () => {
+  async function mountConsent(props: Record<string, unknown> = {}) {
+    const app = mount(LocalAiConsent, { target: document.body, props });
+    flushSync();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    return app;
+  }
+
+  const nanoOption = () => document.body.querySelector('[data-testid="local-ai-prompt-api-option"]');
+
+  it('sin Prompt API descargable no ofrece Nano', async () => {
+    const app = await mountConsent();
+    expect(nanoOption()).toBeNull();
+    unmount(app);
+  });
+
+  it('con Prompt API downloadable ofrece autorizar Nano y lo persiste', async () => {
+    (globalThis as { LanguageModel?: unknown }).LanguageModel = {
+      availability: async () => 'downloadable',
+      create: vi.fn(),
+    };
+    const accepted: string[] = [];
+    const app = await mountConsent({ onAccept: (id: string) => accepted.push(id) });
+    const option = nanoOption();
+    expect(option).not.toBeNull();
+    const button = option?.querySelector('button');
+    expect(button?.textContent).toContain('Gemini Nano');
+    button?.click();
+    flushSync();
+    expect(accepted).toEqual([PROMPT_API_CONSENT_MODEL_ID]);
+    expect(hasPromptApiConsent()).toBe(true);
+    unmount(app);
+  });
+});
+
+describe('localChat · fallo a mitad del stream', () => {
+  it('la Prompt API que falla tras el parcial: onReset, parcial descartado y reglas', async () => {
+    const parts: string[] = [];
+    const resets: number[] = [];
+    stubLanguageModel(async () => ({
+      async *promptStreaming() {
+        yield 'parcial de nano';
+        throw new Error('corte a mitad');
+      },
+    }));
+    const res = await localChat(ask, {
+      tier: 'prompt-api',
+      excerpts,
+      onToken: (t) => parts.push(t),
+      onReset: () => resets.push(1),
+    });
+    expect(resets).toHaveLength(1);
+    expect(res.via).toBe('rules');
+    expect(res.text).not.toContain('parcial de nano');
+    expect(res.text).toContain(RULES_LABEL);
+    expect(res.cancelled).not.toBe(true);
+  });
+
+  it('tras el fallo de la Prompt API se sigue con el WebGPU ya cargado', async () => {
+    stubLanguageModel(async () => ({
+      async *promptStreaming() {
+        yield 'parcial de nano';
+        throw new Error('corte a mitad');
+      },
+    }));
+    const { engine } = fakeEngine([{ choices: [{ delta: { content: 'respuesta webgpu' } }] }]);
+    const resets: number[] = [];
+    const res = await localChat(ask, {
+      tier: 'prompt-api',
+      engine,
+      modelId: DEFAULT_LOCAL_MODEL,
+      excerpts,
+      onReset: () => resets.push(1),
+    });
+    expect(resets).toHaveLength(1);
+    expect(res.via).toBe('webgpu');
+    expect(res.text).toBe('respuesta webgpu');
+  });
+
+  it('WebLLM que falla a mitad: onReset y reglas sin el parcial', async () => {
+    const create = vi.fn(async () =>
+      (async function* () {
+        yield { choices: [{ delta: { content: 'parcial web' } }] };
+        throw new Error('corte del motor');
+      })(),
+    );
+    const engine: WebllmEngine = { chat: { completions: { create } } };
+    const resets: number[] = [];
+    const res = await localChat(ask, {
+      tier: 'webgpu',
+      engine,
+      modelId: DEFAULT_LOCAL_MODEL,
+      excerpts,
+      onReset: () => resets.push(1),
+    });
+    expect(resets).toHaveLength(1);
+    expect(res.via).toBe('rules');
+    expect(res.text).not.toContain('parcial web');
+    expect(res.text).toContain(RULES_LABEL);
+  });
+
+  it('la cancelación del usuario conserva el parcial, marca cancelled y detiene la cadena', async () => {
+    const controller = new AbortController();
+    stubLanguageModel(async () => ({
+      async *promptStreaming() {
+        yield 'parcial';
+        controller.abort();
+        throw new Error('abortado');
+      },
+    }));
+    const { engine, create } = fakeEngine([{ choices: [{ delta: { content: 'webgpu' } }] }]);
+    const resets: number[] = [];
+    const res = await localChat(ask, {
+      tier: 'prompt-api',
+      engine,
+      modelId: DEFAULT_LOCAL_MODEL,
+      signal: controller.signal,
+      excerpts,
+      onReset: () => resets.push(1),
+    });
+    expect(res.text).toBe('parcial');
+    expect(res.cancelled).toBe(true);
+    expect(res.text).not.toContain(RULES_LABEL);
+    // La cadena se detiene: el motor siguiente ni se intenta y no hay reset.
+    expect(create).not.toHaveBeenCalled();
+    expect(resets).toHaveLength(0);
   });
 });
