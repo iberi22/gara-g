@@ -8,7 +8,6 @@
  */
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_LOCAL_MODEL } from './config';
-import { PROMPT_API_CONSENT_MODEL_ID } from './consent';
 import { consentOffers, hasConsentOffer, type ConsentOfferState } from './consentOffers';
 
 const BASE: ConsentOfferState = {
@@ -24,7 +23,8 @@ describe('consentOffers · regla única de la tarjeta', () => {
       ...BASE,
       promptApiAvailability: 'unavailable',
       webgpuUsable: true,
-      authorisedModelId: PROMPT_API_CONSENT_MODEL_ID,
+      authorisedModelId: undefined,
+      promptApiConsented: true,
       loadedWebllmModelId: undefined,
     });
     expect(offers).toEqual({ nano: false, webllm: true });
@@ -68,6 +68,19 @@ describe('consentOffers · regla única de la tarjeta', () => {
       loadedWebllmModelId: undefined,
     });
     expect(offers.webllm).toBe(true);
+  });
+
+  it('WebLLM cargado + Nano descargable sin consentir → solo oferta de Nano', () => {
+    const offers = consentOffers({
+      ...BASE,
+      promptApiAvailability: 'downloadable',
+      webgpuUsable: true,
+      authorisedModelId: DEFAULT_LOCAL_MODEL,
+      promptApiConsented: false,
+      loadedWebllmModelId: DEFAULT_LOCAL_MODEL,
+    });
+    expect(offers).toEqual({ nano: true, webllm: false });
+    expect(hasConsentOffer(offers)).toBe(true);
   });
 
   it('sin nada disponible → sin tarjeta', () => {

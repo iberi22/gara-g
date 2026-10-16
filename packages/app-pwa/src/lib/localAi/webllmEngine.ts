@@ -133,9 +133,15 @@ async function defaultFactory(
  * Carga el motor. SOLO debe llamarse desde el clic de LocalAiConsent (nunca durante una
  * consulta ni al montar un componente). Si ya hay otro modelo cargado se libera primero:
  * nunca conviven dos modelos ni se cambia el modelo a mitad de una consulta.
+ *
+ * Solo acepta ids del catálogo WebLLM (`config.ts`): cualquier otro id (incluido el de
+ * la Prompt API, que vive en otro motor) se rechaza sin tocar la fábrica.
  */
 export async function loadWebllmEngine(options: LoadWebllmEngineOptions = {}): Promise<WebllmEngine> {
   const modelId = options.modelId ?? DEFAULT_LOCAL_MODEL;
+  if (!LOCAL_MODELS.some((model) => model.id === modelId)) {
+    throw new Error(`Modelo WebLLM desconocido: ${modelId}.`);
+  }
   const signal = options.signal;
   if (signal?.aborted) throw abortError();
   if (loadedEngine && loadedModelId === modelId) return loadedEngine;

@@ -19,7 +19,7 @@ import {
   LOCAL_MODELS,
   MIN_FREE_STORAGE_MB,
 } from '../../lib/localAi/config';
-import { authorisedModelId, PROMPT_API_CONSENT_MODEL_ID, saveConsent } from '../../lib/localAi/consent';
+import { PROMPT_API_CONSENT_MODEL_ID, savePromptApiConsent, saveWebllmConsent, webllmConsent } from '../../lib/localAi/consent';
 import { isPromptApiDownloadState, promptApiState } from '../../lib/localAi/capabilities';
 import {
   disposeWebllmEngine,
@@ -44,7 +44,7 @@ interface Props {
 
 const { onAccept, onCancel, offerNano = true, offerWebllm = true }: Props = $props();
 
-const alreadyAuthorised = authorisedModelId();
+const alreadyAuthorised = webllmConsent()?.modelId;
 
 let modelId = $state<string>(alreadyAuthorised ?? DEFAULT_LOCAL_MODEL);
 let availableMb = $state<number | null>(null);
@@ -85,12 +85,15 @@ async function checkPromptApi(): Promise<void> {
 
 /** Autoriza la descarga de Gemini Nano que gestiona el navegador (sin descargar nada aquí). */
 function acceptPromptApi(): void {
-  saveConsent(PROMPT_API_CONSENT_MODEL_ID);
+  savePromptApiConsent();
   onAccept?.(PROMPT_API_CONSENT_MODEL_ID);
 }
 
 async function download(): Promise<void> {
   if (downloading || !enough) return;
+  // WebLLM solo recibe un id de su catálogo: nunca el de otro motor.
+  const selected = LOCAL_MODELS.some((model) => model.id === modelId) ? modelId : DEFAULT_LOCAL_MODEL;
+  modelId = selected;
   error = '';
   downloading = true;
   progress = 0;
@@ -99,7 +102,7 @@ async function download(): Promise<void> {
   try {
     await requestPersistentStorage();
     await loadWebllmEngine({
-      modelId,
+      modelId: selected,
       signal: controller.signal,
       onProgress: (p: WebllmProgress) => {
         progress = Math.round((p.progress ?? 0) * 100);
@@ -108,9 +111,9 @@ async function download(): Promise<void> {
     });
     // La autorización se persiste SOLO cuando el motor quedó cargado: una consulta
     // posterior puede reutilizarlo sin volver a descargar nada.
-    saveConsent(modelId);
+    saveWebllmConsent(selected);
     downloading = false;
-    onAccept?.(modelId);
+    onAccept?.(selected);
   } catch (err) {
     downloading = false;
     if (controller?.signal.aborted) {

@@ -37,8 +37,12 @@ export {
   authorisedModelId,
   clearConsent,
   hasPromptApiConsent,
+  promptApiConsent,
   readConsent,
   saveConsent,
+  savePromptApiConsent,
+  saveWebllmConsent,
+  webllmConsent,
 } from './consent';
 export { RULES_LABEL, RULES_MODEL, RULES_NEEDS_LOCAL_AI, RULES_NO_MATCH } from './rules';
 export {

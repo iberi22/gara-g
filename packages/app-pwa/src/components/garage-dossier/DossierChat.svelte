@@ -20,7 +20,7 @@ import {
   type IndexedManual,
 } from './chatClient';
 import { localAiEnvironment, promptApiState } from '../../lib/localAi/capabilities';
-import { authorisedModelId } from '../../lib/localAi/consent';
+import { authorisedModelId, hasPromptApiConsent } from '../../lib/localAi/consent';
 import { consentOffers, hasConsentOffer, type ConsentOffers } from '../../lib/localAi/consentOffers';
 import { webllmModelId } from '../../lib/localAi/webllmEngine';
 import { runLocalAssistant } from '../../garage/assistant/handler';
@@ -54,7 +54,10 @@ let showConsent = $state(false);
 let modelActive = $state(false);
 /** Qué motores se pueden ofrecer ahora mismo (regla única en `consentOffers`). */
 let offers = $state<ConsentOffers>({ nano: false, webllm: false });
-const needsConsent = $derived(hasConsentOffer(offers) && !modelActive);
+/** La tarjeta se muestra cuando la regla única (`consentOffers`) ofrece algo. */
+const needsConsent = $derived(hasConsentOffer(offers));
+/** Último estado crudo de la Prompt API (para recalcular ofertas al aceptar). */
+let lastPromptState = $state<string | undefined>(undefined);
 let controller: AbortController | null = $state(null);
 
 const SUGGESTIONS: Record<VehicleFamily, string[]> = {
@@ -105,15 +108,17 @@ onMount(() => {
 
 /** Recalcula las ofertas con el estado crudo (Prompt API, WebGPU, consentimiento, motor). */
 function refreshOffers(promptState: string | undefined): void {
+  lastPromptState = promptState;
   const gpu = localAiEnvironment().gpu;
   offers = consentOffers({
     promptApiAvailability: promptState,
     webgpuUsable: Boolean(gpu && typeof gpu.requestAdapter === 'function'),
     authorisedModelId: authorisedModelId(),
+    promptApiConsented: hasPromptApiConsent(),
     loadedWebllmModelId: webllmModelId(),
   });
   modelActive = Boolean(webllmModelId());
-  if (hasConsentOffer(offers) && !modelActive) showConsent = true;
+  if (hasConsentOffer(offers)) showConsent = true;
 }
 
 async function scrollDown(): Promise<void> {
@@ -191,7 +196,7 @@ function onKey(e: KeyboardEvent): void {
       offerNano={offers.nano}
       offerWebllm={offers.webllm}
       onAccept={() => {
-        modelActive = true;
+        refreshOffers(lastPromptState);
         showConsent = false;
       }}
       onCancel={() => {

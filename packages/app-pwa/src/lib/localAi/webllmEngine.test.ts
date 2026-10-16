@@ -150,6 +150,20 @@ describe('registro del motor', () => {
     expect(webllmModelId()).toBeUndefined();
   });
 
+  it('rechaza un id fuera del catálogo sin tocar la fábrica (nunca Nano)', async () => {
+    const { PROMPT_API_CONSENT_MODEL_ID } = await import('./consent');
+    const createEngine = vi.fn(async () => fakeEngine([]));
+    await expect(
+      loadWebllmEngine({ modelId: PROMPT_API_CONSENT_MODEL_ID, createEngine }),
+    ).rejects.toThrow(/desconocido/i);
+    expect(createEngine).not.toHaveBeenCalled();
+    expect(webllmModelId()).toBeUndefined();
+    await expect(loadWebllmEngine({ modelId: 'modelo-inventado', createEngine })).rejects.toThrow(
+      /desconocido/i,
+    );
+    expect(createEngine).not.toHaveBeenCalled();
+  });
+
   it('dispose descarga y libera el motor cargado', async () => {
     const engine = fakeEngine([]);
     await loadWebllmEngine({ modelId: DEFAULT_LOCAL_MODEL, createEngine: async () => engine });

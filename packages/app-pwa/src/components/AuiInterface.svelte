@@ -11,7 +11,7 @@ import { toast } from '../lib/toast';
 import { generateAui, type AuiSpec } from '../lib/aui';
 import { MARKET } from '../lib/market';
 import { detectLocalAi, isPromptApiDownloadState, localAiEnvironment, promptApiState, type AiTier } from '../lib/localAi/capabilities';
-import { authorisedModelId } from '../lib/localAi/consent';
+import { authorisedModelId, hasPromptApiConsent } from '../lib/localAi/consent';
 import { consentOffers, hasConsentOffer, type ConsentOffers } from '../lib/localAi/consentOffers';
 import { webllmModelId } from '../lib/localAi/webllmEngine';
 import LocalAiConsent from './garage-dossier/LocalAiConsent.svelte';
@@ -43,7 +43,10 @@ let promptDownloadPending = $state(false);
  * tarjeta se muestra cuando hay al menos una oferta y solo pinta las ofrecidas.
  */
 let offers = $state<ConsentOffers>({ nano: false, webllm: false });
-const needsConsent = $derived(hasConsentOffer(offers) && !modelActive);
+/** La tarjeta se muestra cuando la regla única (`consentOffers`) ofrece algo. */
+const needsConsent = $derived(hasConsentOffer(offers));
+/** Último estado crudo de la Prompt API (para recalcular ofertas al aceptar). */
+let lastPromptState = $state<string | undefined>(undefined);
 
 const PRESET_PROMPTS = [
   'Generar panel de Mantenimiento Preventivo y Alertas de Taller',
@@ -54,17 +57,18 @@ const PRESET_PROMPTS = [
 
 /** Recalcula las ofertas con el estado crudo (Prompt API, WebGPU, consentimiento, motor). */
 function refreshOffers(promptState: string | undefined): void {
+  lastPromptState = promptState;
   const gpu = localAiEnvironment().gpu;
   offers = consentOffers({
     promptApiAvailability: promptState,
     webgpuUsable: Boolean(gpu && typeof gpu.requestAdapter === 'function'),
     authorisedModelId: authorisedModelId(),
+    promptApiConsented: hasPromptApiConsent(),
     loadedWebllmModelId: webllmModelId(),
   });
   modelActive = Boolean(webllmModelId());
-  // Con oferta pero sin motor autorizado se ofrece activarlo; la tarjeta solo
-  // descarga si el usuario pulsa el botón.
-  if (hasConsentOffer(offers) && !modelActive) showConsent = true;
+  // Con oferta se ofrece activarla; la tarjeta solo descarga si el usuario pulsa el botón.
+  if (hasConsentOffer(offers)) showConsent = true;
 }
 
 $effect(() => {
@@ -199,7 +203,7 @@ async function handleGenerate(customPrompt?: string) {
         offerNano={offers.nano}
         offerWebllm={offers.webllm}
         onAccept={() => {
-          modelActive = true;
+          refreshOffers(lastPromptState);
           showConsent = false;
         }}
         onCancel={() => {

@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import AuiInterface from '../AuiInterface.svelte';
-import { clearConsent, PROMPT_API_CONSENT_MODEL_ID, saveConsent } from '../../lib/localAi/consent';
+import { clearConsent, PROMPT_API_CONSENT_MODEL_ID, saveConsent, saveWebllmConsent } from '../../lib/localAi/consent';
 import { DEFAULT_LOCAL_MODEL } from '../../lib/localAi/config';
 import {
   disposeWebllmEngine,
@@ -74,6 +74,24 @@ describe('AuiInterface · consentimiento de IA local', () => {
     // Nano ya está autorizada: no se vuelve a ofrecer; WebLLM sí.
     expect(document.body.querySelector('[data-testid="local-ai-prompt-api-option"]')).toBeNull();
     expect(document.body.querySelector('fieldset.models')).not.toBeNull();
+    unmount(app);
+  });
+
+  it('con WebLLM cargado y Nano descargable sin consentir → la tarjeta ofrece solo Nano', async () => {
+    stubGpu();
+    const engine: WebllmEngine = { chat: { completions: { create: async () => (async function* () {})() } } };
+    await loadWebllmEngine({ modelId: DEFAULT_LOCAL_MODEL, createEngine: async () => engine });
+    saveWebllmConsent(DEFAULT_LOCAL_MODEL);
+    (globalThis as { LanguageModel?: unknown }).LanguageModel = {
+      availability: async () => 'downloadable',
+    };
+    const app = await mountAui();
+    // La tarjeta SÍ se muestra (WebLLM ya está, pero Nano sigue sin autorizar).
+    expect(document.body.querySelector('[data-testid="local-ai-consent"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="aui-consent-note"]')).not.toBeNull();
+    // Solo la oferta de Nano: nada de WebLLM.
+    expect(document.body.querySelector('[data-testid="local-ai-prompt-api-option"]')).not.toBeNull();
+    expect(document.body.querySelector('fieldset.models')).toBeNull();
     unmount(app);
   });
 

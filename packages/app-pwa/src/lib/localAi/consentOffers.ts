@@ -23,8 +23,10 @@ export interface ConsentOfferState {
   promptApiAvailability: string | undefined;
   /** Hay WebGPU utilizable en este navegador (`navigator.gpu.requestAdapter`). */
   webgpuUsable: boolean;
-  /** Modelo autorizado en el almacén de consentimiento (`undefined` si no hay). */
+  /** Modelo WebLLM autorizado en el almacén de consentimiento (`undefined` si no hay). */
   authorisedModelId: string | undefined;
+  /** El usuario ya autorizó la descarga de Gemini Nano (entrada `promptApi`). */
+  promptApiConsented?: boolean;
   /** Modelo WebLLM ya cargado en esta pestaña (`undefined` si ninguno). */
   loadedWebllmModelId: string | undefined;
 }
@@ -44,9 +46,11 @@ function isAuthorisedWebllmModel(modelId: string | undefined): modelId is string
 }
 
 export function consentOffers(state: ConsentOfferState): ConsentOffers {
-  const nano =
-    NANO_DOWNLOAD_STATES.has(state.promptApiAvailability ?? '') &&
-    state.authorisedModelId !== PROMPT_API_CONSENT_MODEL_ID;
+  // Compatibilidad: sin el flag por motor, un `authorisedModelId` con el id de Nano
+  // (formato anterior de ranura única) cuenta como Nano consentida.
+  const nanoConsented =
+    state.promptApiConsented ?? state.authorisedModelId === PROMPT_API_CONSENT_MODEL_ID;
+  const nano = NANO_DOWNLOAD_STATES.has(state.promptApiAvailability ?? '') && !nanoConsented;
   const webllmLoaded =
     isAuthorisedWebllmModel(state.authorisedModelId) &&
     state.loadedWebllmModelId === state.authorisedModelId;
