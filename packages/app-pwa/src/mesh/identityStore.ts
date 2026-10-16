@@ -46,12 +46,13 @@ const dec = new TextDecoder();
 
 async function encryptString(value: string, key: CryptoKey): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
+  const aad = enc.encode('gara-mesh|kv|node-keypair');
   const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
+    { name: 'AES-GCM', iv, additionalData: aad },
     key,
     enc.encode(value)
   );
-  return `v1.${bufferToBase64(iv)}.${bufferToBase64(ciphertext)}`;
+  return `v1.${bufferToBase64(iv)}.${bufferToBase64(ciphertext as ArrayBuffer)}`;
 }
 
 async function decryptString(encrypted: string, key: CryptoKey): Promise<string> {
@@ -59,8 +60,9 @@ async function decryptString(encrypted: string, key: CryptoKey): Promise<string>
   if (parts.length !== 3 || parts[0] !== 'v1') return encrypted; // Si no está cifrado (fallback)
   const iv = base64ToBuffer(parts[1]);
   const ciphertext = base64ToBuffer(parts[2]);
+  const aad = enc.encode('gara-mesh|kv|node-keypair');
   const plaintext = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
+    { name: 'AES-GCM', iv, additionalData: aad },
     key,
     ciphertext
   );
@@ -69,6 +71,11 @@ async function decryptString(encrypted: string, key: CryptoKey): Promise<string>
 
 export async function loadSerializedKeypair(): Promise<string | null> {
   let raw: string | null = null;
+  const state = await getLockState();
+  if (state === 'locked' || state === 'transition') {
+    throw new LockedError('El dispositivo está bloqueado. Desbloquéalo para continuar.');
+  }
+
   try {
     if (typeof indexedDB === 'undefined') return memoryCopy;
     const db = await openDb();
@@ -86,8 +93,6 @@ export async function loadSerializedKeypair(): Promise<string | null> {
   }
 
   if (raw && raw.startsWith('v1.')) {
-    const state = await getLockState();
-    if (state === 'locked') throw new LockedError('Base de datos bloqueada');
     const key = getActiveKey();
     if (key) {
       return await decryptString(raw, key);
@@ -97,20 +102,19 @@ export async function loadSerializedKeypair(): Promise<string | null> {
 }
 
 export async function saveSerializedKeypair(value: string): Promise<void> {
+  const state = await getLockState();
+  if (state === 'locked' || state === 'transition') {
+    throw new LockedError('El dispositivo está bloqueado. Desbloquéalo para continuar.');
+  }
+
   memoryCopy = value;
   try {
     if (typeof indexedDB === 'undefined') return;
 
     let toSave = value;
-    const state = await getLockState();
-    if (state !== 'locked') {
-      const key = getActiveKey();
-      if (key) {
-        toSave = await encryptString(value, key);
-      }
-    } else {
-        // cannot save while locked since we wouldn't have the key to encrypt it.
-        return;
+    const key = getActiveKey();
+    if (key) {
+      toSave = await encryptString(value, key);
     }
 
     const db = await openDb();
@@ -131,7 +135,36 @@ export async function saveSerializedKeypair(value: string): Promise<void> {
 }
 
 export async function migrateIdentityStoreEncryption(key: CryptoKey | null): Promise<void> {
-  const current = await loadSerializedKeypair();
+  let raw: string | null = null;
+  try {
+    if (typeof indexedDB === 'undefined') {
+        raw = memoryCopy;
+    } else {
+        const db = await openDb();
+        try {
+            raw = await new Promise<string | null>((resolve, reject) => {
+            const r = db.transaction(STORE, 'readonly').objectStore(STORE).get(KEY);
+            r.onsuccess = () => resolve(typeof r.result === 'string' ? r.result : null);
+            r.onerror = () => reject(r.error);
+            });
+        } finally {
+            db.close();
+        }
+    }
+  } catch {
+    raw = memoryCopy;
+  }
+
+  let current = raw;
+  if (raw && raw.startsWith('v1.')) {
+    const activeKey = getActiveKey() || key;
+    if (activeKey) {
+      current = await decryptString(raw, activeKey);
+    } else {
+        throw new Error('Se requiere clave para descifrar durante migración');
+    }
+  }
+
   if (current) {
     if (typeof indexedDB === 'undefined') return;
     const db = await openDb();

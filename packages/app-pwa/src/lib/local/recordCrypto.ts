@@ -7,6 +7,13 @@ export class LockedError extends Error {
   }
 }
 
+export class TransitionInProgressError extends Error {
+  constructor(message = 'Transición en progreso') {
+    super(message);
+    this.name = 'TransitionInProgressError';
+  }
+}
+
 function bufferToBase64(buf: ArrayBuffer): string {
   let binary = '';
   const bytes = new Uint8Array(buf);
@@ -39,7 +46,7 @@ export async function encryptRecord(entity: string, id: string, record: DomainRe
     plaintext
   );
 
-  return `v1.${bufferToBase64(iv)}.${bufferToBase64(ciphertext)}`;
+  return `v1.${bufferToBase64(iv)}.${bufferToBase64(ciphertext as ArrayBuffer)}`;
 }
 
 export async function decryptRecord(entity: string, id: string, encrypted: string, key: CryptoKey): Promise<DomainRecord> {

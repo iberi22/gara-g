@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { LOCAL_CHANGED_EVENT, LOCAL_INSTANCE_ID } from '../appMode';
+import { exportLocalData, importLocalData, mergeLocalDumps } from './dump';
+import { closeLocalDb, getLocalAdapter, replaceLocalStores } from './indexedDbAdapter';
+import type { LocalDump } from './types';
 import { createEntity, deleteEntity, getEntity, listEntities, setStorageAdapter, updateEntity, getMemoryAdapter } from '../domain';
 import type { DomainRecord } from '../domain';
-import { exportLocalData, importLocalData, mergeLocalDumps } from './dump';
-import { closeLocalDb, getLocalAdapter } from './indexedDbAdapter';
-import type { LocalDump } from './types';
+import { LOCAL_CHANGED_EVENT, LOCAL_INSTANCE_ID } from '../appMode';
+import { enableProtection, lock } from './deviceLock';
+import { LockedError } from './recordCrypto';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const rec = (id: string, updated_at: string, extra: Record<string, unknown> = {}): DomainRecord => ({
   id,
@@ -201,7 +203,22 @@ describe('mergeLocalDumps', () => {
   });
 });
 
-  it('migrateLocalStoresEncryption aborts entirely if write fails', async () => {
+describe('LockedError checks', () => {
+  it('bloquea todas las operaciones de IDB cuando está protegido', async () => {
+    await createEntity('vehicle', { plate: 'ABC' }, LOCAL_INSTANCE_ID);
+    await enableProtection('pin', '123456');
+    lock();
+
+    await expect(listEntities('vehicle', LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
+    await expect(createEntity('vehicle', { plate: 'XYZ' }, LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
+    await expect(updateEntity('vehicle', '1', { plate: 'XYZ' }, LOCAL_INSTANCE_ID)).rejects.toThrow(LockedError);
+    await expect(exportLocalData()).rejects.toThrow(LockedError);
+    await expect(replaceLocalStores(dump())).rejects.toThrow(LockedError);
+  });
+});
+
+describe('migrateLocalStoresEncryption', () => {
+  it('aborts entirely if write fails', async () => {
     // 1. Setup unencrypted data
     await createEntity('vehicle', { plate: 'PLAIN' }, LOCAL_INSTANCE_ID);
     const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
@@ -239,3 +256,4 @@ describe('mergeLocalDumps', () => {
     expect(list.length).toBe(1);
     expect(list[0].plate).toBe('PLAIN');
   });
+});

@@ -1,22 +1,4 @@
-/**
- * src/lib/local/indexedDbAdapter.ts — Almacen local (modo sin cuenta): `StorageAdapter` de
- * domain.ts sobre IndexedDB, para que `createEntity`, `listEntities` y `buildGarageSnapshot`
- * funcionen en el navegador sin D1.
- *
- * SOLO NAVEGADOR. Importa `idb`, que no puede entrar al bundle SSR: quien lo use desde un
- * componente o desde otro modulo debe cargarlo con `await import('./indexedDbAdapter')`
- * dentro de codigo que solo corre en el cliente (ver `getLocalAdapter`).
- *
- * Base `gara-local` v1:
- *   - `records`: clave [entity, id], valor { entity, id, record } o { entity, id, enc }, indice `by-entity`.
- *   - `tombstones`: clave [entity, id], valor { entity, id, deletedAt } (lapidas de borrado,
- *     para que una fusion con otro dispositivo no resucite lo que el usuario elimino).
- *
- * domain.ts ya rellena `instance_id`, `created_at` y `updated_at` en `createEntity` (el adapter
- * recibe el registro completo) y el adapter solo renueva `updated_at` en `update`, igual que
- * el de memoria y el de D1. Tras cada escritura emite LOCAL_CHANGED_EVENT.
- */
-import { type DBSchema, type IDBPDatabase, openDB } from 'idb';
+import { type IDBPDatabase, type DBSchema, openDB } from 'idb';
 import { LOCAL_CHANGED_EVENT, LOCAL_INSTANCE_ID } from '../appMode';
 import type { DomainRecord, StorageAdapter } from '../domain';
 import type { LocalDump, LocalTombstone } from './types';
@@ -87,8 +69,14 @@ function notifyChanged(): void {
 }
 
 // Helpers for read/write interception - state pre-fetched to avoid breaking idb tx
+function checkLock(state: LockState) {
+  if (state === 'locked' || state === 'transition') {
+    throw new LockedError('El dispositivo está bloqueado. Desbloquéalo para continuar.');
+  }
+}
+
 async function prepareWrite(entity: string, id: string, record: DomainRecord, state: LockState, key: CryptoKey | null): Promise<RecordRow> {
-  if (state === 'locked') throw new LockedError();
+  checkLock(state);
   if (key) {
     const enc = await encryptRecord(entity, id, record, key);
     return { entity, id, enc };
@@ -99,11 +87,12 @@ async function prepareWrite(entity: string, id: string, record: DomainRecord, st
 async function prepareRead(row: RecordRow | undefined, state: LockState, key: CryptoKey | null): Promise<DomainRecord | null> {
   if (!row) return null;
   if (row.enc) {
-    if (state === 'locked') throw new LockedError();
+    checkLock(state);
     if (!key) throw new Error('Se requiere clave activa para leer registro cifrado');
     return decryptRecord(row.entity, row.id, row.enc, key);
   }
   if (row.record) {
+    checkLock(state); // Even plaintext rows shouldn't be read while locked
     return row.record;
   }
   return null;
@@ -112,6 +101,7 @@ async function prepareRead(row: RecordRow | undefined, state: LockState, key: Cr
 export class IndexedDbAdapter implements StorageAdapter {
   async create(entity: string, record: DomainRecord): Promise<DomainRecord> {
     const state = await getLockState();
+    checkLock(state);
     const key = getActiveKey();
     const row = await prepareWrite(entity, record.id, record, state, key);
 
@@ -129,6 +119,7 @@ export class IndexedDbAdapter implements StorageAdapter {
 
   async list(entity: string, instanceId: string): Promise<DomainRecord[]> {
     const state = await getLockState();
+    checkLock(state);
     const key = getActiveKey();
 
     const db = await openLocalDb();
@@ -141,6 +132,7 @@ export class IndexedDbAdapter implements StorageAdapter {
 
   async get(entity: string, id: string, instanceId: string): Promise<DomainRecord | null> {
     const state = await getLockState();
+    checkLock(state);
     const key = getActiveKey();
 
     const db = await openLocalDb();
@@ -157,6 +149,7 @@ export class IndexedDbAdapter implements StorageAdapter {
     instanceId: string,
   ): Promise<DomainRecord | null> {
     const state = await getLockState();
+    checkLock(state);
     const key = getActiveKey();
 
     const db = await openLocalDb();
@@ -184,6 +177,7 @@ export class IndexedDbAdapter implements StorageAdapter {
 
   async del(entity: string, id: string, instanceId: string): Promise<boolean> {
     const state = await getLockState();
+    checkLock(state);
     const key = getActiveKey();
 
     const db = await openLocalDb();
@@ -217,6 +211,7 @@ export class IndexedDbAdapter implements StorageAdapter {
 /** Registros y lapidas del tenant local, agrupados por entidad (insumo de `exportLocalData`). */
 export async function readLocalStores(): Promise<Pick<LocalDump, 'entities' | 'deleted'>> {
   const state = await getLockState();
+  checkLock(state);
   const key = getActiveKey();
 
   const db = await openLocalDb();
@@ -235,6 +230,7 @@ export async function readLocalStores(): Promise<Pick<LocalDump, 'entities' | 'd
 /** Reemplaza TODO el contenido en una sola transaccion (si algo falla, no queda nada a medias). */
 export async function replaceLocalStores(data: Pick<LocalDump, 'entities' | 'deleted'>): Promise<void> {
   const state = await getLockState();
+  checkLock(state);
   const key = getActiveKey();
 
   // Validate write possible before starting TX
@@ -267,7 +263,7 @@ export async function migrateLocalStoresEncryption(key: CryptoKey | null): Promi
   const db = await openLocalDb();
   const rows = await db.getAll('records');
 
-  // Prepare all new rows before opening transaction to ensure atomicity of the actual write phase
+  // Prepare all new rows outside the transaction because crypto is async
   const newRows: RecordRow[] = [];
   for (const row of rows) {
     let plain: DomainRecord | null = null;
@@ -282,19 +278,49 @@ export async function migrateLocalStoresEncryption(key: CryptoKey | null): Promi
     if (plain) {
       if (key) {
         const enc = await encryptRecord(row.entity, row.id, plain, key);
-        newRows.push({ entity: row.entity, id: row.id, enc });
+        newRows.push({ entity: row.entity, id: row.id, enc, record: undefined });
       } else {
-        newRows.push({ entity: row.entity, id: row.id, record: plain });
+        newRows.push({ entity: row.entity, id: row.id, record: plain, enc: undefined });
       }
     }
   }
 
+  // Write phase: start a new transaction and verify that rows have not been updated concurrently
   const tx = db.transaction('records', 'readwrite');
   const store = tx.objectStore('records');
 
   const writes: Promise<unknown>[] = [];
-  for (const row of newRows) {
-    writes.push(store.put(row));
+  for (const newRow of newRows) {
+    const current = await store.get([newRow.entity, newRow.id]);
+
+    // Only overwrite if the row hasn't changed.
+    // We check updated_at for plain records. If it was encrypted, we can't easily check updated_at without decrypting inside tx.
+    // However, during migration we assume no other writes should be happening because we set 'transition' state.
+    // But to be strictly safe as requested:
+    let safeToOverwrite = false;
+    if (!current) {
+      // Row was deleted concurrently? We skip it, don't resurrect.
+      continue;
+    }
+
+    if (current.record && newRow.record) {
+      safeToOverwrite = current.record.updated_at === newRow.record.updated_at;
+    } else if (current.record && !newRow.record) { // migrating to encrypted
+      const oldRecord = rows.find(r => r.entity === current.entity && r.id === current.id)?.record;
+      safeToOverwrite = oldRecord?.updated_at === current.record.updated_at;
+    } else if (current.enc && newRow.enc) { // re-encrypting? (not standard, but possible)
+      safeToOverwrite = current.enc === rows.find(r => r.entity === current.entity && r.id === current.id)?.enc;
+    } else if (current.enc && !newRow.enc) { // migrating to plain
+      safeToOverwrite = current.enc === rows.find(r => r.entity === current.entity && r.id === current.id)?.enc;
+    }
+
+    if (safeToOverwrite) {
+      // We must explicitly only write the keys that are defined, as undefined `enc` or `record` might otherwise be written literally
+      const toPut: any = { entity: newRow.entity, id: newRow.id };
+      if (newRow.enc) toPut.enc = newRow.enc;
+      if (newRow.record) toPut.record = newRow.record;
+      writes.push(store.put(toPut));
+    }
   }
   await Promise.all([...writes, tx.done]);
   notifyChanged();
