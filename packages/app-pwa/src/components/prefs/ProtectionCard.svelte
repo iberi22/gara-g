@@ -10,9 +10,10 @@
     changePin
   } from '../../lib/local/deviceLock';
 
-  let state = $state<'off' | 'locked' | 'unlocked' | 'transition' | 'error'>('off');
+  let state = $state<'loading' | 'off' | 'locked' | 'unlocked' | 'transition' | 'error'>('loading');
   let currentMethod = $state<'pin' | 'passkey' | null>(null);
   let errorMsg = $state('');
+  let successMsg = $state('');
 
   // State for enabling protection
   let pinInput = $state('');
@@ -28,21 +29,17 @@
       currentMethod = getMethod();
     } catch (err: any) {
       errorMsg = err.message || 'Error cargando estado';
+      state = 'error';
     }
   }
 
   onMount(() => {
     loadState();
-    // In a real app we might listen to broadcast events here, but for now we'll rely on our own actions to refresh state
-    const handler = () => loadState();
-    if (typeof window !== 'undefined') {
-      window.addEventListener('swal-device-lock-changed', handler);
-      return () => window.removeEventListener('swal-device-lock-changed', handler);
-    }
   });
 
   async function handleEnable(method: 'pin' | 'passkey') {
     errorMsg = '';
+    successMsg = '';
     recoveryCode = '';
     if (!/^\d{6}$/.test(pinInput)) {
       errorMsg = 'PIN debe tener exactamente 6 dígitos';
@@ -59,6 +56,7 @@
 
   async function handleLock() {
     errorMsg = '';
+    successMsg = '';
     try {
       lock();
       await loadState();
@@ -69,9 +67,13 @@
 
   async function handleUnlock() {
     errorMsg = '';
-    if (currentMethod === 'pin' && !/^\d{6}$/.test(pinInput)) {
-      errorMsg = 'PIN debe tener exactamente 6 dígitos';
-      return;
+    successMsg = '';
+    // if we are locked, currentMethod is null, so always require pin and pass 'pin'
+    if (state === 'locked' || currentMethod === 'pin') {
+      if (!/^\d{6}$/.test(pinInput)) {
+        errorMsg = 'PIN debe tener exactamente 6 dígitos';
+        return;
+      }
     }
     try {
       await unlock(currentMethod || 'pin', pinInput);
@@ -84,6 +86,7 @@
 
   async function handleDisable() {
     errorMsg = '';
+    successMsg = '';
     try {
       await disableProtection();
       await loadState();
@@ -94,6 +97,7 @@
 
   async function handleChangePin() {
     errorMsg = '';
+    successMsg = '';
     if (!/^\d{6}$/.test(oldPinInput) || !/^\d{6}$/.test(newPinInput)) {
       errorMsg = 'Ambos PINs deben tener exactamente 6 dígitos';
       return;
@@ -103,15 +107,20 @@
       await loadState();
       oldPinInput = '';
       newPinInput = '';
-      errorMsg = 'PIN cambiado correctamente'; // Un pequeño mensaje de éxito si se quiere
+      successMsg = 'PIN cambiado correctamente';
     } catch (err: any) {
       errorMsg = err.message || String(err);
     }
   }
 
-  function copyCode() {
+  async function copyCode() {
     if (recoveryCode) {
-      navigator.clipboard.writeText(recoveryCode);
+      try {
+        await navigator.clipboard.writeText(recoveryCode);
+        successMsg = 'Código copiado';
+      } catch (err) {
+        errorMsg = 'No se pudo copiar';
+      }
     }
   }
 </script>
@@ -125,8 +134,13 @@
     {#if errorMsg}
       <p class="error-msg" role="alert">{errorMsg}</p>
     {/if}
+    {#if successMsg}
+      <p class="success-msg" role="status">{successMsg}</p>
+    {/if}
 
-    {#if recoveryCode}
+    {#if state === 'loading'}
+      <p class="hint">Cargando...</p>
+    {:else if recoveryCode}
       <div class="recovery-box">
         <p class="hint"><strong>Guarda este código de recuperación.</strong> Sin él y sin este teléfono no podrás recuperar los datos encriptados.</p>
         <code class="code-block">{recoveryCode}</code>
@@ -156,20 +170,18 @@
       {/if}
 
     {:else if state === 'locked'}
-      <p class="hint">El dispositivo está bloqueado. Ingresa tu {currentMethod === 'passkey' ? 'passkey' : 'PIN'} para desbloquear.</p>
-      {#if currentMethod === 'pin'}
-        <div class="input-group">
-          <label for="pin-unlock">PIN de 6 dígitos:</label>
-          <input
-            id="pin-unlock"
-            type="password"
-            inputmode="numeric"
-            maxlength="6"
-            autocomplete="off"
-            bind:value={pinInput}
-          />
-        </div>
-      {/if}
+      <p class="hint">El dispositivo está bloqueado. Ingresa tu PIN para desbloquear.</p>
+      <div class="input-group">
+        <label for="pin-unlock">PIN de 6 dígitos:</label>
+        <input
+          id="pin-unlock"
+          type="password"
+          inputmode="numeric"
+          maxlength="6"
+          autocomplete="off"
+          bind:value={pinInput}
+        />
+      </div>
       <div class="btns">
         <button type="button" class="btn" onclick={handleUnlock}>Desbloquear</button>
       </div>
@@ -212,8 +224,24 @@
         <button type="button" class="btn" onclick={handleDisable}>Desactivar protección</button>
       </div>
 
-    {:else if state === 'transition' || state === 'error'}
+    {:else if state === 'transition'}
       <p class="hint">Un cambio de protección anterior no se completó. Desbloquea para reanudar el proceso.</p>
+      <div class="input-group">
+        <label for="pin-resume">PIN (si se requiere):</label>
+        <input
+          id="pin-resume"
+          type="password"
+          inputmode="numeric"
+          maxlength="6"
+          autocomplete="off"
+          bind:value={pinInput}
+        />
+      </div>
+      <div class="btns">
+        <button type="button" class="btn" onclick={handleUnlock}>Reanudar</button>
+      </div>
+    {:else if state === 'error'}
+      <p class="hint">Ocurrió un error con la protección del dispositivo. Por favor, recarga la página o intenta desbloquear.</p>
       <div class="input-group">
         <label for="pin-resume">PIN (si se requiere):</label>
         <input
@@ -241,7 +269,8 @@
   .btn:hover { background: var(--swal-surface-hover); }
   .btn:focus-visible { outline: 2px solid var(--swal-text); outline-offset: 2px; }
 
-  .error-msg { color: #d32f2f; font-weight: bold; margin: 0; font-size: 0.875rem; }
+  .error-msg { color: var(--swal-error, #d32f2f); font-weight: bold; margin: 0; font-size: 0.875rem; }
+  .success-msg { color: var(--swal-success, #2e7d32); font-weight: bold; margin: 0; font-size: 0.875rem; }
 
   .input-group { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.5rem; }
   .input-group label { font-size: 0.875rem; color: var(--swal-text); }
