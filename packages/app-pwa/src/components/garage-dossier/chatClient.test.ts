@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { type ChatTurn, finalizeAssistantTurn, loadManualChunks, pickExcerpts } from './chatClient';
+import { loadManualChunks, pickExcerpts, finalizeAssistantTurn, type ChatTurn } from './chatClient';
 
-const MD =
-  '## Contents\n### Page 12\nKit de arrastre: cadena 428H, pinon de 14 dientes y corona de 43.\n\n### Page 13\nTorque de la tuerca de la corona: 32 N·m.\n';
+const MD = '## Contents\n### Page 12\nKit de arrastre: cadena 428H, pinon de 14 dientes y corona de 43.\n\n### Page 13\nTorque de la tuerca de la corona: 32 N·m.\n';
 
 describe('chatClient', () => {
   it('carga el texto de los manuales indexados una sola vez', async () => {
@@ -12,10 +11,7 @@ describe('chatClient', () => {
       expect(url).toBe('/r2/t1/vehicle/v1/manual/1-Manual%20FZ.pdf.md');
       return new Response(MD);
     }) as unknown as typeof fetch;
-    const manuals = [
-      { name: 'Manual FZ.pdf', textKey: 't1/vehicle/v1/manual/1-Manual FZ.pdf.md' },
-      { name: 'sin indexar.pdf' },
-    ];
+    const manuals = [{ name: 'Manual FZ.pdf', textKey: 't1/vehicle/v1/manual/1-Manual FZ.pdf.md' }, { name: 'sin indexar.pdf' }];
     const a = await loadManualChunks(manuals, fetcher);
     const b = await loadManualChunks(manuals, fetcher);
     expect(a.map((c) => c.page)).toEqual([12, 13]);
@@ -60,22 +56,7 @@ describe('chatClient', () => {
       expect(resultAborted).toEqual({ content: 'Detuviste la respuesta.', error: false });
 
       const resultNotAborted = finalizeAssistantTurn('   \t  ', false);
-      expect(resultNotAborted).toEqual({
-        content: 'No se pudo responder con la IA local.',
-        error: true,
-      });
-    });
-
-    it('devuelve mensaje de cancelacion correcto sin alterar el estado error cuando esta vacio', () => {
-      const result = finalizeAssistantTurn(' ', true);
-      expect(result.error).toBe(false);
-      expect(result.content).toBe('Detuviste la respuesta.');
-    });
-
-    it('devuelve mensaje de error si el aborto no fue llamado explícitamente y el contenido está vacío', () => {
-      const result = finalizeAssistantTurn('  ', false);
-      expect(result.error).toBe(true);
-      expect(result.content).toBe('No se pudo responder con la IA local.');
+      expect(resultNotAborted).toEqual({ content: 'No se pudo responder con la IA local.', error: true });
     });
   });
 });

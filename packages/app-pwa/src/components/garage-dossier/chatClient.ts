@@ -8,12 +8,7 @@
  *  - Guarda la conversacion por vehiculo en localStorage (solo comodidad: si el navegador
  *    la borra, se empieza de cero).
  */
-import {
-  type ManualChunk,
-  chunkManual,
-  manualTitle,
-  retrieve,
-} from '../../garage/assistant/manualText';
+import { chunkManual, manualTitle, retrieve, type ManualChunk } from '../../garage/assistant/manualText';
 
 export interface ChatTurn {
   role: 'user' | 'assistant';
@@ -32,19 +27,14 @@ export interface IndexedManual {
 const chunkCache = new Map<string, Promise<ManualChunk[]>>();
 
 /** Fragmentos de todos los manuales indexados del vehiculo (cacheados por textKey). */
-export async function loadManualChunks(
-  manuals: IndexedManual[],
-  fetcher: typeof fetch = fetch,
-): Promise<ManualChunk[]> {
+export async function loadManualChunks(manuals: IndexedManual[], fetcher: typeof fetch = fetch): Promise<ManualChunk[]> {
   const lists = await Promise.all(
     manuals
       .filter((m): m is IndexedManual & { textKey: string } => !!m.textKey)
       .map((m) => {
         let p = chunkCache.get(m.textKey);
         if (!p) {
-          p = fetcher(`/r2/${m.textKey.split('/').map(encodeURIComponent).join('/')}`, {
-            credentials: 'same-origin',
-          })
+          p = fetcher(`/r2/${m.textKey.split('/').map(encodeURIComponent).join('/')}`, { credentials: 'same-origin' })
             .then((r) => (r.ok ? r.text() : ''))
             .then((md) => chunkManual(md, manualTitle(m.name)))
             .catch(() => []);
@@ -61,10 +51,7 @@ export async function loadManualChunks(
  * torque?" despues de "kit de arrastre" necesita las dos para encontrar la pagina.
  */
 export function pickExcerpts(chunks: ManualChunk[], turns: ChatTurn[], k = 5): ManualChunk[] {
-  const users = turns
-    .filter((t) => t.role === 'user')
-    .slice(-2)
-    .map((t) => t.content);
+  const users = turns.filter((t) => t.role === 'user').slice(-2).map((t) => t.content);
   if (!users.length) return [];
   const main = retrieve(chunks, users[users.length - 1], k);
   if (main.length >= k || users.length < 2) return main;
@@ -78,11 +65,7 @@ export function loadTurns(vehicleId: string): ChatTurn[] {
   try {
     const raw = localStorage.getItem(storeKey(vehicleId));
     const parsed = raw ? (JSON.parse(raw) as ChatTurn[]) : [];
-    return Array.isArray(parsed)
-      ? parsed.filter(
-          (t) => (t.role === 'user' || t.role === 'assistant') && typeof t.content === 'string',
-        )
-      : [];
+    return Array.isArray(parsed) ? parsed.filter((t) => (t.role === 'user' || t.role === 'assistant') && typeof t.content === 'string') : [];
   } catch {
     return [];
   }
@@ -104,10 +87,7 @@ export function clearTurns(vehicleId: string): void {
   }
 }
 
-export function finalizeAssistantTurn(
-  content: string,
-  aborted: boolean,
-): Pick<ChatTurn, 'content' | 'error'> {
+export function finalizeAssistantTurn(content: string, aborted: boolean): Pick<ChatTurn, 'content' | 'error'> {
   if (content.trim()) {
     return { content, error: false };
   }

@@ -172,7 +172,9 @@ async function send(text?: string): Promise<void> {
   } catch {
     // Intencionadamente vacío: el finally maneja tanto los resultados parciales abortados como los fallos totales.
   } finally {
-    update(finalizeAssistantTurn(turns[idx].content, cancelled));
+    if (turns[idx]) {
+      update(finalizeAssistantTurn(turns[idx].content, cancelled));
+    }
     controller = null;
     busy = false;
     thinking = false;
