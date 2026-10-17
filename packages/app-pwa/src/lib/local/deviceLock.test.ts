@@ -7,6 +7,7 @@ import { migrateLocalStoresEncryption, openLocalDb, closeLocalDb, getLocalAdapte
 import { decryptRecord, LockedError } from './recordCrypto';
 import { LOCAL_INSTANCE_ID } from '../appMode';
 import { VaultError, createVaultClient } from '@swal/vault/web';
+import { parseBackupCode } from '../e2ee/crypto';
 
 if (typeof crypto === 'undefined' || !crypto.subtle) {
   const nodeCrypto = await import('node:crypto');
@@ -309,5 +310,108 @@ describe('deviceLock', () => {
     // Ninguna fila puede quedar cifrada con la protección ya desactivada.
     expect(rows.every((r) => !!r.record && !r.enc)).toBe(true);
     expect(await getLockState()).toBe('off');
+  });
+
+  it('13. recovery flow generates a valid code and seals recoveryKit into envelope', async () => {
+    const code = await enableProtection('pin', '123456');
+    expect(code).toBeDefined();
+
+    // Verify it is a valid backup code format
+    await expect(parseBackupCode(code)).resolves.toBeDefined();
+
+    // Verify envelope has recovery kit
+    const env = await new Promise<any>((resolve, reject) => {
+      const req = indexedDB.open('gara-lock', 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction('gara-lock', 'readonly');
+        const get = tx.objectStore('gara-lock').get('envelope');
+        get.onsuccess = () => {
+          db.close();
+          resolve(get.result);
+        };
+        get.onerror = () => {
+          db.close();
+          reject(get.error);
+        };
+      };
+      req.onerror = () => reject(req.error);
+    });
+
+    expect(env.recoveryKit).toBeDefined();
+    expect(env.recoveryKit.format).toBe('swal-vault-recovery-kit');
+  });
+
+  it('14. recovery flow decrypts with valid code and restores usable key', async () => {
+    const code = await enableProtection('pin', '123456');
+    lock();
+
+    await unlock('recovery', code);
+    expect(await getLockState()).toBe('unlocked');
+
+    // Ensure the key is usable (symmetric AES-GCM)
+    const key = getActiveKey();
+    expect(key).not.toBeNull();
+    expect(key?.algorithm.name).toBe('AES-GCM');
+    expect(key?.usages).toContain('encrypt');
+    expect(key?.usages).toContain('decrypt');
+
+    // Test a basic encryption roundtrip with the key
+    const text = 'test message';
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key as CryptoKey,
+      new TextEncoder().encode(text)
+    );
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      key as CryptoKey,
+      encrypted
+    );
+    expect(new TextDecoder().decode(decrypted)).toBe(text);
+  });
+
+  it('15. recovery flow throws with wrong code and leaves state untouched', async () => {
+    await enableProtection('pin', '123456');
+    lock();
+
+    // Unlock fails with wrong code
+    await expect(unlock('recovery', 'bad-code')).rejects.toThrow();
+
+    // State is still locked
+    expect(await getLockState()).toBe('locked');
+  });
+
+  it('16. sealed recovery kit contains no plaintext key data', async () => {
+    const code = await enableProtection('pin', '123456');
+    const env = await new Promise<any>((resolve, reject) => {
+      const req = indexedDB.open('gara-lock', 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction('gara-lock', 'readonly');
+        const get = tx.objectStore('gara-lock').get('envelope');
+        get.onsuccess = () => {
+          db.close();
+          resolve(get.result);
+        };
+        get.onerror = () => {
+          db.close();
+          reject(get.error);
+        };
+      };
+      req.onerror = () => reject(req.error);
+    });
+
+    const kitStr = JSON.stringify(env.recoveryKit);
+
+    const parsed = await parseBackupCode(code);
+    const rawBytes = parsed.secret;
+    const b64Key = btoa(String.fromCharCode(...rawBytes));
+
+    // The kit must not contain the base64 encoded secret code
+    expect(kitStr).not.toContain(b64Key);
+    // It should also not contain the code as is
+    expect(kitStr).not.toContain(code);
   });
 });
