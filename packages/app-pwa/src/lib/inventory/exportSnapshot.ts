@@ -98,7 +98,7 @@ export function validateSnapshot(input: unknown): InventorySnapshot {
   if (parsed.format !== 'swal-inventory-export/v1') throw new InventoryExportError('formato', 'Formato desconocido');
 
   if (!parsed.source || typeof parsed.source !== 'object') throw new InventoryExportError('formato', 'source invalido');
-  if (parsed.source.appId !== 'gara-g') throw new InventoryExportError('formato', 'appId invalido');
+  if (!['gara-g', 'fize', 'shelf'].includes(parsed.source.appId)) throw new InventoryExportError('formato', 'appId invalido');
   if (typeof parsed.source.instanceId !== 'string') throw new InventoryExportError('formato', 'instanceId invalido');
   if (parsed.source.schemaVersion !== 1) throw new InventoryExportError('formato', 'schemaVersion invalido');
   if (!isValidIsoDate(parsed.source.exportedAt)) throw new InventoryExportError('formato', 'exportedAt invalido');

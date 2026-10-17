@@ -1,23 +1,20 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.describe('Bodega (Guest View)', () => {
-  test('como invitado puede abrir /fleet/bodega, cargar un snapshot, ver 3 filas y el badge, sin enviar red', async ({ page }) => {
-    // Abort network requests explicitly to ensure it runs fully offline and read-only
-    await page.route('**/*', (route) => {
-      const url = route.request().url();
-      // Allow navigation and local static assets to load
-      if (
-        url.startsWith('http://localhost') ||
-        url.startsWith('http://127.0.0.1')
-      ) {
-        return route.continue();
+  test('como invitado puede abrir /fleet/bodega, cargar un snapshot, ver 3 filas y el badge, sin enviar red', async ({ page, baseURL }) => {
+    // Record external network requests to assert offline and read-only requirement
+    const externalRequests: string[] = [];
+    page.on('request', (request) => {
+      const url = request.url();
+      if (baseURL && !url.startsWith(baseURL)) {
+        externalRequests.push(url);
       }
-      return route.abort();
     });
 
-    // Go to the bodega page setting gara_mode=guest via the route directly
+    // Use baseURL for domain in cookie
+    const urlObj = new URL(baseURL || 'http://localhost:4321');
     await page.context().addCookies([
-      { name: 'gara_mode', value: 'guest', domain: 'localhost', path: '/' }
+      { name: 'gara_mode', value: 'guest', domain: urlObj.hostname, path: '/' }
     ]);
 
     await page.goto('/fleet/bodega');
@@ -63,11 +60,14 @@ test.describe('Bodega (Guest View)', () => {
     await expect(page.locator('.badge')).toContainText('test-instance');
 
     // Check we have the 3 items rendered
-    const rows = page.locator('tbody tr');
+    const rows = page.locator('.table-container').last().locator('tbody tr');
     await expect(rows).toHaveCount(3);
 
     await expect(rows.nth(0)).toContainText('Aceite Motor');
     await expect(rows.nth(1)).toContainText('Filtro Aire');
     await expect(rows.nth(2)).toContainText('Bujía');
+
+    // Check external requests
+    expect(externalRequests).toEqual([]);
   });
 });

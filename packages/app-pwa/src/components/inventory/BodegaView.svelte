@@ -1,10 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getLocalAdapter } from '../../lib/local/indexedDbAdapter';
-  import { openInventorySnapshot, buildInventorySnapshot, sealInventorySnapshot } from '../../lib/inventory/exportSnapshot';
+  import { openInventorySnapshot, buildInventorySnapshot, sealInventorySnapshot, InventoryExportError } from '../../lib/inventory/exportSnapshot';
   import type { InventorySnapshot } from '../../lib/inventory/exportSnapshot';
   import { isLowStock, filterRows, ageInDays } from '../../lib/inventory/bodegaView';
   import { LOCAL_INSTANCE_ID } from '../../lib/appMode';
+
+  const ERROR_MESSAGES: Record<string, string> = {
+    'formato': 'El archivo no tiene un formato válido o está corrupto.',
+    'clave': 'La contraseña es incorrecta o el archivo está alterado.',
+    'alterado': 'El contenido del archivo ha sido alterado o está corrupto.',
+  };
 
   // Section 1: Mi inventario
   let localItems: any[] = $state([]);
@@ -37,6 +43,8 @@
     }
   });
 
+  let fileInput: HTMLInputElement;
+
   async function handleFileSelect(event: Event) {
     const target = event.target as HTMLInputElement;
     const file = target.files?.[0];
@@ -47,6 +55,13 @@
     askPassphrase = false;
     pendingFile = null;
     passphraseInput = '';
+
+    if (file.size > 20 * 1024 * 1024) {
+      snapshotError = 'El archivo es demasiado grande (máximo 20 MB).';
+      loadingFile = false;
+      target.value = '';
+      return;
+    }
 
     try {
       const text = await file.text();
@@ -61,7 +76,13 @@
 
       loadedSnapshot = await openInventorySnapshot(data);
     } catch (e: any) {
-      snapshotError = e.message || 'Error al leer el archivo';
+      if (e instanceof SyntaxError) {
+        snapshotError = 'El archivo no es un JSON válido.';
+      } else if (e instanceof InventoryExportError && e.kind) {
+        snapshotError = ERROR_MESSAGES[e.kind] || e.message;
+      } else {
+        snapshotError = e.message || 'Error al leer el archivo';
+      }
     } finally {
       loadingFile = false;
       target.value = '';
@@ -82,7 +103,13 @@
       pendingFile = null;
       passphraseInput = '';
     } catch (e: any) {
-      snapshotError = e.message || 'Contraseña incorrecta o archivo corrupto';
+      if (e instanceof SyntaxError) {
+        snapshotError = 'El archivo descifrado no es un JSON válido.';
+      } else if (e instanceof InventoryExportError && e.kind) {
+        snapshotError = ERROR_MESSAGES[e.kind] || e.message;
+      } else {
+        snapshotError = e.message || 'Contraseña incorrecta o archivo corrupto';
+      }
     } finally {
       loadingFile = false;
     }
@@ -148,8 +175,27 @@
       {:else if localItems.length === 0}
         <p>Tu inventario local está vacío. Próximamente podrás editarlo. Shelf puede leer el archivo exportado.</p>
       {:else}
-        <p>Tienes {localItems.length} elementos en tu inventario local.</p>
         <p class="hint">Próximamente podrás editarlo desde aquí. Shelf puede leer el archivo exportado.</p>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>SKU</th>
+                <th>Cantidad</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each localItems as item}
+                <tr class:low-stock={isLowStock(item.quantity, item.minStock)}>
+                  <td>{item.name} {#if isLowStock(item.quantity, item.minStock)}<span class="low-stock-text">(Stock bajo)</span>{/if}</td>
+                  <td>{item.sku || '-'}</td>
+                  <td>{item.quantity} {item.unit || ''}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
       {/if}
     </div>
   </section>
@@ -183,7 +229,7 @@
             <tbody>
               {#each filteredRows as item}
                 <tr class:low-stock={isLowStock(item.quantity, item.minStock)}>
-                  <td>{item.name}</td>
+                  <td>{item.name} {#if isLowStock(item.quantity, item.minStock)}<span class="low-stock-text">(Stock bajo)</span>{/if}</td>
                   <td>{item.sku || '-'}</td>
                   <td>{item.quantity} {item.unit || ''}</td>
                   <td>
@@ -222,10 +268,12 @@
         </div>
       {:else}
         <p>Carga un archivo de inventario exportado para verlo aquí. No se guardará nada.</p>
-        <label class="btn file-btn">
-          <span>{loadingFile ? 'Cargando...' : 'Seleccionar archivo'}</span>
-          <input type="file" accept=".json" onchange={handleFileSelect} disabled={loadingFile} hidden />
-        </label>
+        <div class="btns">
+          <button type="button" class="btn" onclick={() => fileInput.click()} disabled={loadingFile}>
+            {loadingFile ? 'Cargando...' : 'Seleccionar archivo'}
+          </button>
+          <input type="file" bind:this={fileInput} accept=".json" onchange={handleFileSelect} disabled={loadingFile} style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;" tabindex="-1" />
+        </div>
         {#if snapshotError}<p class="err">{snapshotError}</p>{/if}
       {/if}
     </div>
@@ -294,5 +342,6 @@
   th, td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--swal-border); }
   th { background: var(--swal-bg-elevated); font-weight: 600; }
   .low-stock td { color: var(--swal-danger); font-weight: 500; }
+  .low-stock-text { font-size: 0.75rem; color: var(--swal-danger); margin-left: 0.25rem; font-weight: 600; }
   .empty-state { text-align: center; color: var(--swal-text-muted); font-style: italic; }
 </style>
