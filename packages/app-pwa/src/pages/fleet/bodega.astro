@@ -1,0 +1,12 @@
+---
+/**
+ * /fleet/bodega — Vista de solo lectura de un archivo de inventario (snapshot).
+ * Svelte con client:only: parsea archivos locales del navegador y usa IndexedDB local-first.
+ */
+import FleetLayout from '../../layouts/FleetLayout.astro';
+import BodegaView from '../../components/inventory/BodegaView.svelte';
+---
+
+<FleetLayout title="Bodega" section="dashboard">
+  <BodegaView client:only="svelte" />
+</FleetLayout>
