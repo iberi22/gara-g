@@ -377,7 +377,25 @@ describe('deviceLock', () => {
     lock();
 
     // Unlock fails with wrong code
-    await expect(unlock('recovery', 'bad-code')).rejects.toThrow();
+    let thrownError: any;
+    try {
+      await unlock('recovery', 'bad-code');
+    } catch (e) {
+      thrownError = e;
+    }
+    expect(thrownError).toBeDefined();
+    expect(thrownError.code).toBe('bad-code');
+
+    // Valid format but wrong code triggers decrypt-failed
+    const foreignCode = await import('../e2ee/crypto').then(m => m.generateBackupCode());
+    let foreignError: any;
+    try {
+      await unlock('recovery', foreignCode);
+    } catch (e) {
+      foreignError = e;
+    }
+    expect(foreignError).toBeDefined();
+    expect(foreignError.code).toBe('decrypt-failed');
 
     // State is still locked
     expect(await getLockState()).toBe('locked');
