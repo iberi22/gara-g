@@ -2,6 +2,7 @@
   /** SettingsApp — ajustes de interfaz: tema, perfiles, menu y paneles, con autoguardado. */
   import { onMount } from 'svelte';
   import PrefsEditor from '../../lib/swal-prefs/PrefsEditor.svelte';
+  import ProtectionCard from './ProtectionCard.svelte';
   import { applyPreset, resolvePrefs } from '../../lib/swal-prefs';
   import type { Preferences } from '../../lib/swal-prefs';
   import { GARA_PREFS_SCHEMA as schema, ONBOARDING_PATH, SETTINGS_PATH } from '../../lib/prefs.config';
@@ -119,6 +120,8 @@
     </section>
 
     <PrefsEditor {schema} {value} onchange={change} />
+
+    <ProtectionCard />
   {:else}
     <p class="swal-kicker">Cargando…</p>
   {/if}
