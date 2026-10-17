@@ -124,6 +124,7 @@ describe('modo invitado: solo GUEST_ALLOWED_PATHS es accesible, y nada mas', () 
         '/fleet',
         '/fleet/ajustes',
         '/fleet/bienvenida',
+        '/fleet/bodega',
         '/fleet/catalog',
         '/fleet/cuenta-requerida',
         '/fleet/garage',

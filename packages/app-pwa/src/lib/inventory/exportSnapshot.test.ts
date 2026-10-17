@@ -462,3 +462,25 @@ describe('Inventory Export Snapshot', () => {
     expect((opened as unknown as unknown as Record<string, unknown>).password).toBeUndefined();
   });
 });
+
+  it('validateSnapshot accepts fize, gara-g and shelf as valid appIds', () => {
+    const baseSnapshot = {
+      format: 'swal-inventory-export/v1',
+      source: {
+        instanceId: 'test-inst',
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString()
+      },
+      currency: 'COP',
+      locations: [],
+      items: [],
+      movements: []
+    };
+
+    expect(() => validateSnapshot({ ...baseSnapshot, source: { ...baseSnapshot.source, appId: 'gara-g' } })).not.toThrow();
+    expect(() => validateSnapshot({ ...baseSnapshot, source: { ...baseSnapshot.source, appId: 'fize' } })).not.toThrow();
+    expect(() => validateSnapshot({ ...baseSnapshot, source: { ...baseSnapshot.source, appId: 'shelf' } })).not.toThrow();
+
+    // Invalid appId
+    expect(() => validateSnapshot({ ...baseSnapshot, source: { ...baseSnapshot.source, appId: 'unknown' } })).toThrowError(/appId invalido/);
+  });
