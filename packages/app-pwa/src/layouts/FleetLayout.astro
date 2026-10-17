@@ -22,6 +22,7 @@ import ThemeModeSwitch from '../components/theme/ThemeModeSwitch.astro';
 import PrefsBootstrap from '../components/prefs/PrefsBootstrap.astro';
 import { BACKUP_PATH, GUEST_BLOCKED_PATH, LOCAL_INSTANCE_ID, isGuestAllowedPath } from '../lib/appMode';
 import { isRouteHidden } from '../lib/features';
+import LockGate from '../components/prefs/LockGate.svelte';
 // La version visible sale de package.json: antes era un 'v0.6.0' escrito a mano que no seguia a ninguna release.
 import { version as APP_VERSION } from '../../package.json';
 
@@ -260,6 +261,7 @@ const navView = navItems.map((item) => {
       <ToastContainer />
     </main>
   </div>
+  <LockGate client:only="svelte" />
 </Layout>
 
 <style>
