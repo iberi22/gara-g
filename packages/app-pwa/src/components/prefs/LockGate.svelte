@@ -6,6 +6,7 @@
 
   let state = $state<LockState>('off');
   let pin = $state('');
+  let pinInput = $state<HTMLInputElement | null>(null);
   let method = $state<'pin' | 'passkey' | null>(null);
   let errorMsg = $state<string | null>(null);
   let loading = $state(true);
@@ -46,13 +47,25 @@
     e.preventDefault();
     handleUnlock('pin');
   }
+
+  $effect(() => {
+    const isBlocking = !loading && (state === 'locked' || state === 'transition');
+    const shell = document.querySelector('.fleet-shell');
+    if (isBlocking) {
+      if (pinInput) pinInput.focus();
+      shell?.setAttribute('inert', '');
+    } else {
+      shell?.removeAttribute('inert');
+    }
+    return () => shell?.removeAttribute('inert');
+  });
 </script>
 
 {#if !loading && (state === 'locked' || state === 'transition')}
-  <div class="lock-gate-overlay" data-testid="lock-gate">
+  <div class="lock-gate-overlay" data-testid="lock-gate" role="dialog" aria-modal="true" aria-labelledby="lock-gate-title">
     <div class="swal-card-frame">
       <div class="swal-card-inner inner lock-gate-inner">
-        <h2 class="swal-kicker">
+        <h2 class="swal-kicker" id="lock-gate-title">
           <span class="swal-tick" aria-hidden="true"></span>
           Dispositivo bloqueado
         </h2>
@@ -67,8 +80,9 @@
             id="lock-gate-pin"
             type="password"
             inputmode="numeric"
-            pattern="[0-9]{6}"
+            pattern={'[0-9]{6}'}
             maxlength="6"
+            bind:this={pinInput}
             bind:value={pin}
             placeholder="PIN de 6 dígitos"
             class="input-pin"
