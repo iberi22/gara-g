@@ -63,6 +63,7 @@ export const GUEST_ALLOWED_PATHS = [
   '/fleet/mercado/vender',
   '/fleet/radar',
   BACKUP_PATH,
+  '/fleet/bodega',
 ] as const;
 
 export function isGuestAllowedPath(pathname: string): boolean {
