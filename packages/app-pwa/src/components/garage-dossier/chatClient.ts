@@ -86,3 +86,13 @@ export function clearTurns(vehicleId: string): void {
     /* nada que borrar */
   }
 }
+
+export function finalizeAssistantTurn(content: string, aborted: boolean): Pick<ChatTurn, 'content' | 'error'> {
+  if (content.trim()) {
+    return { content, error: false };
+  }
+  if (aborted) {
+    return { content: 'Detuviste la respuesta.', error: false };
+  }
+  return { content: 'No se pudo responder con la IA local.', error: true };
+}
