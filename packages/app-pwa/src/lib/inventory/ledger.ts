@@ -1,4 +1,4 @@
-import type { StorageAdapter, DomainRecord } from '../domain';
+import type { DomainRecord, StorageAdapter } from '../domain';
 
 export const TX_KINDS = ['purchase', 'use', 'waste', 'adjust'] as const;
 export type TxKind = (typeof TX_KINDS)[number];
@@ -27,6 +27,13 @@ function genId(): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+export class StockSyncConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StockSyncConflictError';
+  }
+}
+
 export interface AppendMovementOptions {
   /**
    * Id fijo del movimiento. Si ya existe, no se vuelve a sumar: reintentar la
@@ -45,7 +52,11 @@ export function signedQtyOf(tx: Record<string, unknown>): number {
   return Number.isFinite(qty) ? txSign(kind, qty) : 0;
 }
 
-async function itemMovements(adapter: StorageAdapter, instanceId: string, itemId: string): Promise<DomainRecord[]> {
+async function itemMovements(
+  adapter: StorageAdapter,
+  instanceId: string,
+  itemId: string,
+): Promise<DomainRecord[]> {
   const all = await adapter.list('stockMovement', instanceId);
   return all.filter((t) => {
     const data = t as Record<string, unknown>;
@@ -104,7 +115,11 @@ async function withMovementIdLock<T>(movementId: string, task: () => Promise<T>)
  * Delega en `createIfAbsent` cuando el adapter lo soporta (atomico, incluso
  * entre pestanas); si no, el llamador lo serializa con `withMovementIdLock`.
  */
-async function claimMovement(adapter: StorageAdapter, instanceId: string, movement: DomainRecord): Promise<boolean> {
+async function claimMovement(
+  adapter: StorageAdapter,
+  instanceId: string,
+  movement: DomainRecord,
+): Promise<boolean> {
   if (adapter.createIfAbsent) return adapter.createIfAbsent('stockMovement', movement);
   const existing = await adapter.get('stockMovement', movement.id, instanceId);
   if (existing) return false;
@@ -116,8 +131,15 @@ async function claimMovement(adapter: StorageAdapter, instanceId: string, moveme
  * Un insumo con stock pero sin ningun movimiento recibe un
  * movimiento de saldo inicial: si no, el primer movimiento recalcula desde cero y ese stock desaparece.
  */
-async function ensureOpeningBalance(adapter: StorageAdapter, instanceId: string, itemId: string): Promise<void> {
-  const item = (await adapter.get('inventoryItem', itemId, instanceId)) as Record<string, unknown> | null;
+async function ensureOpeningBalance(
+  adapter: StorageAdapter,
+  instanceId: string,
+  itemId: string,
+): Promise<void> {
+  const item = (await adapter.get('inventoryItem', itemId, instanceId)) as Record<
+    string,
+    unknown
+  > | null;
   if (!item) return;
   const quantity = Number(item.quantity ?? 0);
   if (!Number.isFinite(quantity)) {
@@ -168,7 +190,11 @@ async function ensureOpeningBalance(adapter: StorageAdapter, instanceId: string,
  * visibles en su relectura, asi que al cesar la contienda el insumo converge
  * al total del libro en vez de quedarse con un valor obsoleto.
  */
-export async function syncQuantity(adapter: StorageAdapter, instanceId: string, itemId: string): Promise<number> {
+export async function syncQuantity(
+  adapter: StorageAdapter,
+  instanceId: string,
+  itemId: string,
+): Promise<number> {
   for (let attempt = 0; ; attempt++) {
     if (!adapter.updateIfCurrent) {
       const quantity = await quantityOf(adapter, instanceId, itemId);
@@ -178,7 +204,10 @@ export async function syncQuantity(adapter: StorageAdapter, instanceId: string, 
     // Version primero: todo movimiento creado antes de esta lectura queda
     // incluido en la suma posterior; si el CAS tiene exito, ningun escritor se
     // intercalo y la suma es completa.
-    const item = (await adapter.get('inventoryItem', itemId, instanceId)) as Record<string, unknown> | null;
+    const item = (await adapter.get('inventoryItem', itemId, instanceId)) as Record<
+      string,
+      unknown
+    > | null;
     if (!item) return quantityOf(adapter, instanceId, itemId);
     const quantity = await quantityOf(adapter, instanceId, itemId);
     const next = await adapter.updateIfCurrent(
@@ -190,8 +219,25 @@ export async function syncQuantity(adapter: StorageAdapter, instanceId: string, 
     );
     if (next) return quantity;
     if (attempt + 1 >= SYNC_MAX_ATTEMPTS) {
-      throw new Error('Conflicto de concurrencia al sincronizar el stock: reintente la operacion');
+      throw new StockSyncConflictError(
+        'Conflicto de concurrencia al sincronizar el stock: reintente la operacion',
+      );
     }
+  }
+}
+
+async function bestEffortSync(
+  adapter: StorageAdapter,
+  instanceId: string,
+  itemId: string,
+): Promise<void> {
+  try {
+    await syncQuantity(adapter, instanceId, itemId);
+  } catch (error) {
+    if (error instanceof StockSyncConflictError) {
+      return;
+    }
+    throw error;
   }
 }
 
@@ -244,7 +290,10 @@ export async function appendMovement(
     return withMovementIdLock(fixedId, async () => {
       const created = await claimMovement(adapter, instanceId, candidate);
       if (!created) {
-        const existing = (await adapter.get('stockMovement', fixedId, instanceId)) as Record<string, unknown> | null;
+        const existing = (await adapter.get('stockMovement', fixedId, instanceId)) as Record<
+          string,
+          unknown
+        > | null;
         if (
           !existing ||
           existing.itemId !== itemId ||
@@ -255,21 +304,25 @@ export async function appendMovement(
         ) {
           throw new Error('Conflicto de movimiento: el id ya existe con datos diferentes');
         }
-        await syncQuantity(adapter, instanceId, itemId);
+        await bestEffortSync(adapter, instanceId, itemId);
         return existing as DomainRecord;
       }
-      await syncQuantity(adapter, instanceId, itemId);
+      await bestEffortSync(adapter, instanceId, itemId);
       return candidate;
     });
   }
 
   await adapter.create('stockMovement', candidate);
 
-  await syncQuantity(adapter, instanceId, itemId);
+  await bestEffortSync(adapter, instanceId, itemId);
   return candidate;
 }
 
-export async function quantityOf(adapter: StorageAdapter, instanceId: string, itemId: string): Promise<number> {
+export async function quantityOf(
+  adapter: StorageAdapter,
+  instanceId: string,
+  itemId: string,
+): Promise<number> {
   // SUM(signedQty) — stock derivado
   return (await itemMovements(adapter, instanceId, itemId)).reduce(
     (sum, t) => sum + signedQtyOf(t as Record<string, unknown>),
@@ -277,7 +330,11 @@ export async function quantityOf(adapter: StorageAdapter, instanceId: string, it
   );
 }
 
-export async function movementHistory(adapter: StorageAdapter, instanceId: string, itemId: string): Promise<DomainRecord[]> {
+export async function movementHistory(
+  adapter: StorageAdapter,
+  instanceId: string,
+  itemId: string,
+): Promise<DomainRecord[]> {
   // Mismo filtro que `quantityOf` (incluye borrado suave): el historial nunca
   // muestra movimientos que el stock ya ignora.
   const movements = await itemMovements(adapter, instanceId, itemId);
