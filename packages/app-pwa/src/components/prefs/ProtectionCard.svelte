@@ -27,6 +27,9 @@
     try {
       state = await getLockState();
       currentMethod = getMethod();
+      if (state === 'locked') {
+        recoveryCode = '';
+      }
     } catch (err: any) {
       errorMsg = err.message || 'Error cargando estado';
       state = 'error';
@@ -57,6 +60,7 @@
   async function handleLock() {
     errorMsg = '';
     successMsg = '';
+    recoveryCode = '';
     try {
       lock();
       await loadState();
