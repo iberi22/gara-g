@@ -1,13 +1,7 @@
-import { type PasskeyPrfProvider, VaultError, createVaultClient } from '@swal/vault/web';
-import { LOCAL_INSTANCE_ID } from '../appMode';
-import {
-  RecoveryKitError,
-  type RecoveryKitV1,
-  generateRecoveryKitCode,
-  openRecoveryKit,
-  sealRecoveryKit,
-} from '../vaultRecoveryKit';
+import { createVaultClient, type PasskeyPrfProvider, VaultError } from '@swal/vault/web';
 import { LockedError, TransitionInProgressError } from './recordCrypto';
+import { LOCAL_INSTANCE_ID } from '../appMode';
+import { type RecoveryKitV1, generateRecoveryKitCode, sealRecoveryKit, openRecoveryKit } from '../vaultRecoveryKit';
 
 export type LockState = 'off' | 'locked' | 'unlocked' | 'transition' | 'error';
 
@@ -119,7 +113,7 @@ async function getEnvelope(): Promise<DeviceLockStore | null | 'unreadable'> {
           } catch {
             resolve('unreadable');
           }
-        }),
+        })
     );
   } catch {
     return 'unreadable';
@@ -196,7 +190,7 @@ function sameEnvelopeIdentity(a: EnvelopeIdentity, b: EnvelopeIdentity): boolean
  */
 async function casMutateEnvelope(
   expected: DeviceLockStore,
-  mutate: (cur: DeviceLockStore) => void,
+  mutate: (cur: DeviceLockStore) => void
 ): Promise<boolean> {
   const want = envelopeIdentity(expected);
   return withLockDb(
@@ -223,7 +217,7 @@ async function casMutateEnvelope(
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => resolve(false);
         tx.onabort = () => resolve(false);
-      }),
+      })
   );
 }
 
@@ -263,7 +257,7 @@ async function casDeleteEnvelopeIf(expected: DeviceLockStore): Promise<boolean> 
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => resolve(false);
         tx.onabort = () => resolve(false);
-      }),
+      })
   );
 }
 
@@ -303,7 +297,7 @@ async function recordFailedAttempt(): Promise<void> {
         tx.oncomplete = () => resolve(wrote);
         tx.onerror = () => resolve(false);
         tx.onabort = () => resolve(false);
-      }),
+      })
   );
   if (!incremented) {
     throw new StaleTicketError(PROTECTION_CHANGED_MSG);
@@ -360,7 +354,7 @@ async function casInsertTransitionMarker(marker: DeviceLockStore): Promise<boole
           resolve(false);
         };
         tx.onabort = () => resolve(false);
-      }),
+      })
   );
 }
 
@@ -410,7 +404,7 @@ async function casWriteEnvelopeIfMarker(markerId: string, next: DeviceLockStore)
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => resolve(false);
         tx.onabort = () => resolve(false);
-      }),
+      })
   );
 }
 
@@ -423,7 +417,7 @@ async function casWriteEnvelopeIfMarker(markerId: string, next: DeviceLockStore)
  */
 async function casDeleteOwnMarker(
   expected: DeviceLockStore,
-  onlyIfAbandoned: boolean,
+  onlyIfAbandoned: boolean
 ): Promise<boolean> {
   return withLockDb(
     (db) =>
@@ -456,7 +450,7 @@ async function casDeleteOwnMarker(
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => resolve(false);
         tx.onabort = () => resolve(false);
-      }),
+      })
   );
 }
 
@@ -470,6 +464,8 @@ async function touchTransitionMarker(marker: DeviceLockStore): Promise<boolean> 
   marker.startedAt = Date.now();
   return casWriteEnvelopeIfMarker(marker.markerId, marker);
 }
+
+
 
 function getVaultClient() {
   if (!vaultClientInstance) {
@@ -534,7 +530,7 @@ async function getEnvelopeRaw(): Promise<DeviceLockStore | null | 'unreadable'> 
           } catch {
             resolve('unreadable');
           }
-        }),
+        })
     );
   } catch {
     return 'unreadable';
@@ -545,8 +541,7 @@ export function ensureLockListener(): void {
   if (lockListenerOn) return;
   lockListenerOn = true;
   try {
-    const BC = (globalThis as unknown as { BroadcastChannel?: typeof BroadcastChannel })
-      .BroadcastChannel;
+    const BC = (globalThis as unknown as { BroadcastChannel?: typeof BroadcastChannel }).BroadcastChannel;
     if (typeof BC !== 'undefined') {
       const ch = new BC(LOCK_CHANNEL);
       ch.onmessage = () => handleLockInvalidation();
@@ -569,8 +564,7 @@ let lockChannel: BroadcastChannel | null = null;
 
 function broadcastLockChange(): void {
   try {
-    const BC = (globalThis as unknown as { BroadcastChannel?: typeof BroadcastChannel })
-      .BroadcastChannel;
+    const BC = (globalThis as unknown as { BroadcastChannel?: typeof BroadcastChannel }).BroadcastChannel;
     if (typeof BC !== 'undefined') {
       lockChannel ??= new BC(LOCK_CHANNEL);
       lockChannel.postMessage({ t: Date.now() });
@@ -827,19 +821,14 @@ async function resumeTransition(env: DeviceLockStore, key: CryptoKey): Promise<v
 }
 
 // Devuelve código de recuperación de alta entropía (16 bytes en hex) al habilitar
-export async function enableProtection(
-  method: 'pin' | 'passkey',
-  secret?: string,
-): Promise<string> {
+export async function enableProtection(method: 'pin' | 'passkey', secret?: string): Promise<string> {
   return withTransitionMutex(async () => {
     const env0 = await getEnvelope();
     if (env0 === 'unreadable') {
       throw new Error('Estado de protección ilegible: no se puede habilitar.');
     }
     if (env0 && env0.state === 'transition') {
-      throw new Error(
-        'Hay una transición pendiente. Desbloquea para reanudarla antes de volver a habilitar.',
-      );
+      throw new Error('Hay una transición pendiente. Desbloquea para reanudarla antes de volver a habilitar.');
     }
     if (env0 && env0.state === 'active') {
       throw new Error('La protección ya está habilitada');
@@ -849,8 +838,7 @@ export async function enableProtection(
     // deja de estar disponible no debe quedar sin alternativa.
     const pin = secret ?? '';
     if (!PIN_PATTERN.test(pin)) {
-      if (method === 'passkey')
-        throw new Error('Se requiere un PIN de 6 dígitos como respaldo de la passkey');
+      if (method === 'passkey') throw new Error('Se requiere un PIN de 6 dígitos como respaldo de la passkey');
       if (method === 'pin') throw new Error('PIN debe tener exactamente 6 dígitos');
       throw new Error('Método desconocido');
     }
@@ -881,7 +869,7 @@ export async function enableProtection(
         rawKey,
         { name: 'AES-GCM' },
         false,
-        ['encrypt', 'decrypt'],
+        ['encrypt', 'decrypt']
       );
 
       const vc = getVaultClient();
@@ -894,7 +882,7 @@ export async function enableProtection(
         // ya sin tocar nada.
         if (!(await touchTransitionMarker(envelopeStore))) {
           throw new Error(
-            'La protección cambió en otra pestaña durante la habilitación; operación cancelada sin modificar tus datos.',
+            'La protección cambió en otra pestaña durante la habilitación; operación cancelada sin modificar tus datos.'
           );
         }
         await vc.unlock({ passkey: true });
@@ -918,7 +906,7 @@ export async function enableProtection(
       envelopeStore.startedAt = Date.now();
       if (!(await casWriteEnvelopeIfMarker(markerId, envelopeStore))) {
         throw new Error(
-          'La protección cambió en otra pestaña durante la habilitación; operación cancelada sin modificar tus datos.',
+          'La protección cambió en otra pestaña durante la habilitación; operación cancelada sin modificar tus datos.'
         );
       }
 
@@ -938,18 +926,12 @@ export async function enableProtection(
       envelopeStore.recoveryKit = await sealRecoveryKit(
         'gara-g',
         LOCAL_INSTANCE_ID,
-        [
-          {
-            entity: 'device-lock',
-            id: 'data-key',
-            share: { index: 2, value: toBase64Std(rawKey) },
-          },
-        ],
-        code,
+        [{ entity: 'device-lock', id: 'data-key', share: { index: 2, value: toBase64Std(rawKey) } }],
+        code
       );
       if (!(await casWriteEnvelopeIfMarker(markerId, envelopeStore))) {
         throw new StaleTicketError(
-          'La protección cambió en otra pestaña durante la habilitación; operación cancelada sin modificar tus datos.',
+          'La protección cambió en otra pestaña durante la habilitación; operación cancelada sin modificar tus datos.'
         );
       }
       broadcastLockChange();
@@ -986,10 +968,7 @@ export async function enableProtection(
   });
 }
 
-export async function unlock(
-  method: 'pin' | 'passkey' | 'recovery',
-  secret?: string,
-): Promise<void> {
+export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: string): Promise<void> {
   // Pre-chequeo ANTES de encolar en el mutex: intentos genuinamente paralelos
   // ven el mismo contador y cada uno cuenta; el lockout solo frena a los que
   // llegan después de que ya haya espera programada.
@@ -1036,7 +1015,7 @@ export async function unlock(
         if (!env.recoveryKit) throw new Error('No hay código de recuperación configurado');
         const entries = await openRecoveryKit(env.recoveryKit, secret ?? '', {
           appId: 'gara-g',
-          instanceId: LOCAL_INSTANCE_ID,
+          instanceId: LOCAL_INSTANCE_ID
         });
         const entry = entries[0];
         const b64 = (entry.share as { value: string }).value;
@@ -1083,7 +1062,7 @@ export async function unlock(
       rawKey as unknown as BufferSource,
       { name: 'AES-GCM' },
       false,
-      ['encrypt', 'decrypt'],
+      ['encrypt', 'decrypt']
     );
 
     // U1: la importación es asíncrona; revalidar antes de publicar la clave en
@@ -1101,12 +1080,7 @@ export async function unlock(
     activeDataKey = key;
     activeDataKeyGen = envelopeGeneration(env);
     if (method === 'recovery') {
-      currentMethod =
-        env.targetMethod && env.targetMethod !== 'off'
-          ? env.targetMethod
-          : env.pinEnvelope
-            ? 'pin'
-            : 'passkey';
+      currentMethod = env.targetMethod && env.targetMethod !== 'off' ? env.targetMethod : (env.pinEnvelope ? 'pin' : 'passkey');
     } else {
       currentMethod = method === 'passkey' ? 'passkey' : 'pin';
     }
