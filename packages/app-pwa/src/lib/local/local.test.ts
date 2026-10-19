@@ -272,7 +272,8 @@ describe('migrateLocalStoresEncryption', () => {
     const originalStore = txProto.objectStore;
     let puts = 0;
 
-    vi.spyOn(txProto, 'objectStore').mockImplementation(function (this: unknown, name: string) {
+    vi.spyOn(txProto, 'objectStore').mockImplementation(function (this: unknown, ...args: unknown[]) {
+      const name = args[0] as string;
       const store = originalStore.call(this, name);
       if (name === 'records') {
         const origPut = store.put;
