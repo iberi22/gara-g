@@ -488,6 +488,18 @@ export function setPasskeyProvider(provider?: PasskeyPrfProvider) {
 // la relectura del sobre antes de cada escritura es la garantía real.
 let lockListenerOn = false;
 
+// Suscriptores (la UI de bloqueo) avisados tras cada invalidación entre pestañas.
+const lockChangeListeners = new Set<() => void>();
+
+/** Avisa cuando otra pestaña cambia la protección. Devuelve la función para dejar de escuchar. */
+export function subscribeLockChanges(listener: () => void): () => void {
+  ensureLockListener();
+  lockChangeListeners.add(listener);
+  return () => {
+    lockChangeListeners.delete(listener);
+  };
+}
+
 function handleLockInvalidation(): void {
   void getEnvelopeRaw().then((env) => {
     // Solo un sobre AUSENTE invalida la clave: en 'transition' la clave sigue
@@ -511,6 +523,14 @@ function handleLockInvalidation(): void {
     // rehabilitó sin que nos llegara el aviso, o con la pestaña congelada).
     if (env.state === 'active' && activeDataKey && !isMemoryKeyValidFor(env)) {
       clearStaleMemoryKey();
+    }
+  }).finally(() => {
+    for (const listener of lockChangeListeners) {
+      try {
+        listener();
+      } catch {
+        /* un suscriptor roto no debe frenar a los demás */
+      }
     }
   });
 }
@@ -617,7 +637,21 @@ function isMemoryKeyValidFor(env: DeviceLockStore | null | 'unreadable'): boolea
 }
 
 export async function getLockState(): Promise<LockState> {
+  return (await getLockSnapshot()).state;
+}
+
+/**
+ * Estado de la protección y métodos disponibles en UNA lectura del sobre.
+ * `hasPasskey` sale del sobre persistido (no de `currentMethod`, que es null
+ * tras recargar): la UI de desbloqueo lo necesita antes de cualquier unlock.
+ */
+export async function getLockSnapshot(): Promise<{ state: LockState; hasPasskey: boolean }> {
   const env = await getEnvelope();
+  const hasPasskey = !!env && env !== 'unreadable' && !!env.passkeyEnvelope;
+  return { state: stateFromEnvelope(env), hasPasskey };
+}
+
+function stateFromEnvelope(env: DeviceLockStore | null | 'unreadable'): LockState {
   if (env === 'unreadable') return 'error';
 
   if (env && env.state === 'transition') return 'transition';

@@ -12,6 +12,7 @@ import {
   disableProtection,
   enableProtection,
   getActiveKey,
+  getLockSnapshot,
   getLockState,
   getMethod,
   lock,
@@ -698,5 +699,40 @@ describe('deviceLock', () => {
     lock();
     await expect(unlock('recovery', '00000000000000000000000000000000')).rejects.toThrow();
     expect(await getLockState()).toBe('locked');
+  });
+  it('snapshot reports passkey presence from the persisted envelope after a reload', async () => {
+    const dummyKey = crypto.getRandomValues(new Uint8Array(32));
+    setPasskeyProvider({
+      isSupported: async () => true,
+      create: async () => ({
+        id: '1',
+        rawId: '1',
+        type: 'public-key',
+        response: {} as unknown as AuthenticatorAttestationResponse,
+        getClientExtensionResults: () => ({ prf: { enabled: true, results: {} } }),
+      }),
+      get: async () => ({
+        id: '1',
+        rawId: '1',
+        type: 'public-key',
+        response: {} as unknown as AuthenticatorAssertionResponse,
+        getClientExtensionResults: () => ({ prf: { results: { first: dummyKey } } }),
+      }),
+      extractPrfOutputs: () => ({ first: dummyKey }),
+      getPrfOutput: () => dummyKey as unknown as Uint8Array<ArrayBufferLike>,
+    } as any);
+
+    await enableProtection('passkey', '123456');
+    lock();
+    // Tras recargar no hay método en memoria, pero el sobre sí dice que hay passkey.
+    expect(getMethod()).toBeNull();
+    expect(await getLockSnapshot()).toEqual({ state: 'locked', hasPasskey: true });
+    setPasskeyProvider(undefined);
+  });
+
+  it('snapshot reports no passkey for a PIN-only envelope', async () => {
+    await enableProtection('pin', '123456');
+    lock();
+    expect(await getLockSnapshot()).toEqual({ state: 'locked', hasPasskey: false });
   });
 });
