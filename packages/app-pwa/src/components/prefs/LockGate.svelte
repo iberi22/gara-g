@@ -1,26 +1,47 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getLockState, getMethod, unlock } from '../../lib/local/deviceLock';
+  import { getLockSnapshot, subscribeLockChanges, unlock } from '../../lib/local/deviceLock';
   import type { LockState } from '../../lib/local/deviceLock';
   import { VaultError } from '@swal/vault/web';
 
+  /**
+   * Puerta de bloqueo global. Bloquea mientras NO sepa que el dispositivo está
+   * libre: durante la carga inicial (loading), con el sobre en 'locked' o
+   * 'transition', y con 'error' (sobre ilegible: fail-closed, sin formulario).
+   * Mientras bloquea marca como `inert` cada contenedor de la app
+   * (`.fleet-shell` y `[data-lock-gate-target]`), así no hay foco ni clics.
+   */
+  const GATE_TARGETS = '.fleet-shell, [data-lock-gate-target]';
+
   let state = $state<LockState>('off');
+  let loading = $state(true);
+  let hasPasskey = $state(false);
   let pin = $state('');
   let pinInput = $state<HTMLInputElement | null>(null);
-  let method = $state<'pin' | 'passkey' | null>(null);
+  let gateEl = $state<HTMLElement | null>(null);
   let errorMsg = $state<string | null>(null);
-  let loading = $state(true);
   let unlocking = $state(false);
 
-  onMount(() => {
-    getLockState().then((s) => {
-      state = s;
-      method = getMethod() as 'pin' | 'passkey' | null;
-      loading = false;
-    }).catch((err) => {
+  const blocking = $derived(loading || state === 'locked' || state === 'transition' || state === 'error');
+  const showForm = $derived(!loading && (state === 'locked' || state === 'transition'));
+
+  async function refresh() {
+    try {
+      const snap = await getLockSnapshot();
+      state = snap.state;
+      hasPasskey = snap.hasPasskey;
+    } catch (err) {
       console.error(err);
+      state = 'error';
+    } finally {
       loading = false;
-    });
+    }
+  }
+
+  onMount(() => {
+    void refresh();
+    // Otra pestaña puede bloquear o desactivar la protección: releer el sobre.
+    return subscribeLockChanges(() => void refresh());
   });
 
   async function handleUnlock(m: 'pin' | 'passkey') {
@@ -49,64 +70,98 @@
   }
 
   $effect(() => {
-    const isBlocking = !loading && (state === 'locked' || state === 'transition');
-    const shell = document.querySelector('.fleet-shell');
-    if (isBlocking) {
-      if (pinInput) pinInput.focus();
-      shell?.setAttribute('inert', '');
-    } else {
-      shell?.removeAttribute('inert');
+    const isBlocking = blocking;
+    const targets = Array.from(document.querySelectorAll<HTMLElement>(GATE_TARGETS)).filter(
+      (t) => !(gateEl && t.contains(gateEl))
+    );
+    for (const t of targets) {
+      if (isBlocking) t.setAttribute('inert', '');
+      else t.removeAttribute('inert');
     }
-    return () => shell?.removeAttribute('inert');
+    return () => {
+      for (const t of targets) t.removeAttribute('inert');
+    };
+  });
+
+  // Foco inicial en el PIN cada vez que aparece el formulario.
+  $effect(() => {
+    if (pinInput) pinInput.focus();
   });
 </script>
 
-{#if !loading && (state === 'locked' || state === 'transition')}
-  <div class="lock-gate-overlay" data-testid="lock-gate" role="dialog" aria-modal="true" aria-labelledby="lock-gate-title" aria-describedby={errorMsg ? "lock-gate-error" : state === "transition" ? "lock-gate-desc" : undefined}>
+{#if blocking}
+  <div
+    class="lock-gate-overlay"
+    data-testid="lock-gate"
+    data-state={loading ? 'loading' : state}
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="lock-gate-title"
+    aria-describedby={state === 'error' || errorMsg ? 'lock-gate-error' : state === 'transition' ? 'lock-gate-desc' : undefined}
+    bind:this={gateEl}
+  >
     <div class="swal-card-frame">
       <div class="swal-card-inner inner lock-gate-inner">
         <h2 class="swal-kicker" id="lock-gate-title">
           <span class="swal-tick" aria-hidden="true"></span>
-          Dispositivo bloqueado
+          {#if loading}
+            Comprobando protección
+          {:else if state === 'error'}
+            Protección no disponible
+          {:else}
+            Dispositivo bloqueado
+          {/if}
         </h2>
 
-        {#if state === 'transition'}
-          <p class="hint" id="lock-gate-desc">Una modificación anterior de la protección fue interrumpida. Desbloquea el dispositivo para terminarla.</p>
-        {/if}
-
-        <form onsubmit={submitPin} class="st">
-          <label class="sr-only" for="lock-gate-pin">PIN de 6 dígitos</label>
-          <input
-            id="lock-gate-pin"
-            type="password"
-            inputmode="numeric"
-            pattern={'[0-9]{6}'}
-            maxlength="6"
-            bind:this={pinInput}
-            bind:value={pin}
-            placeholder="PIN de 6 dígitos"
-            class="input-pin"
-            disabled={unlocking}
-            required
-            autocomplete="current-password"
-            aria-invalid={!!errorMsg}
-          />
-
-          {#if errorMsg}
-            <p class="error-msg" role="alert" id="lock-gate-error">{errorMsg}</p>
+        {#if loading}
+          <p class="hint" role="status">Comprobando la protección de este dispositivo…</p>
+        {:else if state === 'error'}
+          <p class="error-msg" role="alert" id="lock-gate-error">
+            No se puede leer la protección de este dispositivo, así que la app permanece cerrada para proteger tus datos. Recarga la página; si el problema continúa, contacta con soporte.
+          </p>
+          <div class="btns">
+            <button type="button" class="btn on" onclick={() => location.reload()}>Recargar</button>
+          </div>
+        {:else}
+          {#if state === 'transition'}
+            <p class="hint" id="lock-gate-desc">Una modificación anterior de la protección fue interrumpida. Desbloquea el dispositivo para terminarla.</p>
           {/if}
 
-          <div class="btns">
-            <button type="submit" class="btn" class:on={true} disabled={unlocking || pin.length !== 6}>
-              {unlocking ? 'Desbloqueando...' : 'Desbloquear'}
-            </button>
-            {#if method === 'passkey' && state !== 'transition'}
-              <button type="button" class="btn" disabled={unlocking} onclick={() => handleUnlock('passkey')}>
-                Usar passkey
-              </button>
+          <form onsubmit={submitPin} class="st">
+            <label class="sr-only" for="lock-gate-pin">PIN de 6 dígitos</label>
+            <input
+              id="lock-gate-pin"
+              type="password"
+              inputmode="numeric"
+              pattern={'[0-9]{6}'}
+              maxlength="6"
+              bind:this={pinInput}
+              bind:value={pin}
+              placeholder="PIN de 6 dígitos"
+              class="input-pin"
+              disabled={unlocking}
+              required
+              autocomplete="current-password"
+              aria-invalid={errorMsg ? 'true' : 'false'}
+              aria-describedby={errorMsg ? 'lock-gate-error' : undefined}
+            />
+
+            {#if errorMsg}
+              <p class="error-msg" role="alert" id="lock-gate-error">{errorMsg}</p>
             {/if}
-          </div>
-        </form>
+
+            <div class="btns">
+              <button type="submit" class="btn" class:on={true} disabled={unlocking || pin.length !== 6}>
+                {unlocking ? 'Desbloqueando...' : 'Desbloquear'}
+              </button>
+              {#if hasPasskey && state !== 'transition'}
+                <button type="button" class="btn" disabled={unlocking} onclick={() => handleUnlock('passkey')}>
+                  Usar passkey
+                </button>
+              {/if}
+            </div>
+          </form>
+        {/if}
       </div>
     </div>
   </div>

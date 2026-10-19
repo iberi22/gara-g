@@ -7,12 +7,19 @@ import StagingBanner from '../components/StagingBanner.astro';
 import ThemeBootstrap from '../components/theme/ThemeBootstrap.astro';
 import { STAGING_TITLE_PREFIX, isStaging } from '../lib/staging';
 import { isFleetOnly } from '../lib/features';
-interface Props { title?: string; description?: string; }
+import LockGate from '../components/prefs/LockGate.svelte';
+/**
+ * gated (por defecto true): monta la puerta de bloqueo del dispositivo (LockGate). Solo las
+ * páginas públicas sin datos de la app la desactivan explícitamente (`gated={false}`): hoy
+ * solo la portada `/` (src/pages/index.astro). `/login` y `/fleet/bienvenida` usan Layout.astro
+ * directamente y no pasan por aquí.
+ */
+interface Props { title?: string; description?: string; gated?: boolean; }
 // FLEET_ONLY: la descripcion por defecto no habla de DePIN (src/lib/features.ts).
 const defaultDescription = isFleetOnly()
   ? 'Gara-G: gestión de flotas, conductores, mantenimiento, combustible y documentos'
   : 'Gara-G DePIN con Astro + Svelte 5 + @swal/ui + Xavier + edge-mesh';
-const { title = 'Gara-G Gestión de Flotas', description = defaultDescription } = Astro.props;
+const { title = 'Gara-G Gestión de Flotas', description = defaultDescription, gated = true } = Astro.props;
 // El prefijo va en el titulo de la portada tambien: es la primera pagina que ve
 // quien abre el stage (ver src/lib/staging.ts).
 const pageTitle = isStaging() ? STAGING_TITLE_PREFIX + title : title;
@@ -31,12 +38,14 @@ const pageTitle = isStaging() ? STAGING_TITLE_PREFIX + title : title;
         });
       }
     </script>
+    <style is:global>.lock-gate-target { display: contents; }</style>
   </head>
   <body>
     {isStaging() && <StagingBanner />}
-    <slot />
+    <div data-lock-gate-target class="lock-gate-target"><slot /></div>
     {/* client:only: el SSR de islas Svelte esta roto en workerd (ver bienvenida.astro); con client:load la pagina sale vacia en `astro dev`. */}
     <Toaster client:only="svelte" />
+    {gated && <LockGate client:only="svelte" />}
 
   </body>
 </html>

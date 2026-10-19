@@ -2,9 +2,12 @@
 /**
  * /fleet/garage/lab — Laboratorio de plantillas 3D (ver src/garage/lab/labMain.ts).
  * Pagina sin layout a proposito: las capturas de verificacion salen limpias.
+ * Aun asi lleva la puerta de bloqueo del dispositivo (LockGate): el canvas es
+ * `data-lock-gate-target` y queda inerte mientras el dispositivo esta bloqueado.
  */
 import '../../../styles/swal-taller.css';
 import ThemeBootstrap from '../../../components/theme/ThemeBootstrap.astro';
+import LockGate from '../../../components/prefs/LockGate.svelte';
 
 export const prerender = false;
 ---
@@ -23,7 +26,8 @@ export const prerender = false;
     </style>
   </head>
   <body>
-    <canvas id="lab"></canvas>
+    <canvas id="lab" data-lock-gate-target></canvas>
+    <LockGate client:only="svelte" />
     <pre id="lab-error"></pre>
     <script>
       import { startLab } from '../../../garage/lab/labMain';
