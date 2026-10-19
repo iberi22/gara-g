@@ -14,7 +14,7 @@ export class TransitionInProgressError extends Error {
   }
 }
 
-function bufferToBase64(buf: ArrayBuffer): string {
+function bufferToBase64(buf: ArrayBuffer | Uint8Array): string {
   let binary = '';
   const bytes = new Uint8Array(buf);
   for (let i = 0; i < bytes.byteLength; i++) {
