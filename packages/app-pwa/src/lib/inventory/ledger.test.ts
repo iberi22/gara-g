@@ -1,11 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  type DomainRecord,
-  type StorageAdapter,
-  getMemoryAdapter,
-  setStorageAdapter,
-} from '../domain';
-import { appendMovement, movementHistory, quantityOf, syncQuantity, txSign } from './ledger';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { getMemoryAdapter, setStorageAdapter, type DomainRecord, type StorageAdapter } from '../domain';
+import { appendMovement, movementHistory, quantityOf, txSign, syncQuantity } from './ledger';
 
 /**
  * Adapter que comparte el almacenamiento entre "pestanas" y retiene la PRIMERA
@@ -90,20 +85,13 @@ describe('Inventory Ledger', () => {
 
   it('appendMovement rejects unknown items', async () => {
     const adapter = getMemoryAdapter();
-    await expect(appendMovement(adapter, 'inst1', 'no-item', 'purchase', 10)).rejects.toThrow(
-      /Item no encontrado/,
-    );
+    await expect(appendMovement(adapter, 'inst1', 'no-item', 'purchase', 10))
+      .rejects.toThrow(/Item no encontrado/);
   });
 
   it('appendMovement updates item quantity and logs movement', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'item1',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'item1', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     await appendMovement(adapter, 'inst1', 'item1', 'purchase', 50);
     expect(await quantityOf(adapter, 'inst1', 'item1')).toBe(50);
@@ -116,13 +104,7 @@ describe('Inventory Ledger', () => {
 
   it('appendMovement correctly handles multiple movements and signs', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'item2',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'item2', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     await appendMovement(adapter, 'inst1', 'item2', 'purchase', 100);
     await appendMovement(adapter, 'inst1', 'item2', 'use', 30);
@@ -137,35 +119,19 @@ describe('Inventory Ledger', () => {
 
   it('appendMovement is idempotent when same id is retried', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'item3',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'item3', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
-    const tx1 = await appendMovement(adapter, 'inst1', 'item3', 'purchase', 20, undefined, {
-      id: 'tx-fixed-1',
-    });
+    const tx1 = await appendMovement(adapter, 'inst1', 'item3', 'purchase', 20, undefined, { id: 'tx-fixed-1' });
     expect(await quantityOf(adapter, 'inst1', 'item3')).toBe(20);
 
-    const tx2 = await appendMovement(adapter, 'inst1', 'item3', 'purchase', 20, undefined, {
-      id: 'tx-fixed-1',
-    });
+    const tx2 = await appendMovement(adapter, 'inst1', 'item3', 'purchase', 20, undefined, { id: 'tx-fixed-1' });
     expect(await quantityOf(adapter, 'inst1', 'item3')).toBe(20); // still 20
     expect(tx2.id).toEqual(tx1.id); // returns same tx id
   });
 
   it('genera el id del movimiento con crypto.randomUUID cuando esta disponible', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'uuid-item',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'uuid-item', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     const real = globalThis.crypto;
     const randomUUID = vi.fn(() => '11111111-2222-4333-8444-555555555555');
@@ -181,36 +147,18 @@ describe('Inventory Ledger', () => {
 
   it('movementHistory oculta movimientos con borrado suave y no altera el stock', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'sd-item',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'sd-item', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
     await appendMovement(adapter, 'inst1', 'sd-item', 'purchase', 10);
     const [live] = await movementHistory(adapter, 'inst1', 'sd-item');
 
     const now = new Date().toISOString();
     await adapter.create('stockMovement', {
-      id: 'sd-del-camel',
-      instance_id: 'inst1',
-      itemId: 'sd-item',
-      kind: 'purchase',
-      qty: 7,
-      deletedAt: now,
-      created_at: now,
-      updated_at: now,
+      id: 'sd-del-camel', instance_id: 'inst1', itemId: 'sd-item', kind: 'purchase', qty: 7,
+      deletedAt: now, created_at: now, updated_at: now,
     } as unknown as DomainRecord);
     await adapter.create('stockMovement', {
-      id: 'sd-del-snake',
-      instance_id: 'inst1',
-      itemId: 'sd-item',
-      kind: 'use',
-      qty: 4,
-      deleted_at: now,
-      created_at: now,
-      updated_at: now,
+      id: 'sd-del-snake', instance_id: 'inst1', itemId: 'sd-item', kind: 'use', qty: 4,
+      deleted_at: now, created_at: now, updated_at: now,
     } as unknown as DomainRecord);
 
     const history = await movementHistory(adapter, 'inst1', 'sd-item');
@@ -220,13 +168,7 @@ describe('Inventory Ledger', () => {
 
   it('creates opening balance if item has quantity but no movements', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'item4',
-      instance_id: 'inst1',
-      quantity: 15,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'item4', instance_id: 'inst1', quantity: 15, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     await appendMovement(adapter, 'inst1', 'item4', 'purchase', 10);
 
@@ -240,13 +182,7 @@ describe('Inventory Ledger', () => {
 
   it('syncQuantity updates item.quantity from sum of movements', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'item5',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'item5', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     await appendMovement(adapter, 'inst1', 'item5', 'purchase', 40);
     const item = await adapter.get('inventoryItem', 'item5', 'inst1');
@@ -256,20 +192,8 @@ describe('Inventory Ledger', () => {
   it('instance isolation: movements are scoped to instanceId', async () => {
     const adapter = getMemoryAdapter();
     // different items
-    await adapter.create('inventoryItem', {
-      id: 'itemA',
-      instance_id: 'instA',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
-    await adapter.create('inventoryItem', {
-      id: 'itemB',
-      instance_id: 'instB',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'itemA', instance_id: 'instA', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'itemB', instance_id: 'instB', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     await appendMovement(adapter, 'instA', 'itemA', 'purchase', 100);
     await appendMovement(adapter, 'instB', 'itemB', 'purchase', 50);
@@ -280,13 +204,7 @@ describe('Inventory Ledger', () => {
 
   it('adjust handles positive and negative values correctly', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'item7',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'item7', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     await appendMovement(adapter, 'inst1', 'item7', 'adjust', 20);
     expect(await quantityOf(adapter, 'inst1', 'item7')).toBe(20);
@@ -297,143 +215,67 @@ describe('Inventory Ledger', () => {
 
   it('appendMovement rejects invalid kinds', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'i1',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'i1', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
-    await expect(
-      appendMovement(
-        adapter,
-        'inst1',
-        'i1',
-        'magic' as unknown as unknown as import('./ledger').TxKind,
-        10,
-      ),
-    ).rejects.toThrow(/Tipo de movimiento invalido/);
+    await expect(appendMovement(adapter, 'inst1', 'i1', 'magic' as unknown as unknown as import('./ledger').TxKind, 10))
+      .rejects.toThrow(/Tipo de movimiento invalido/);
   });
 
   it('appendMovement rejects invalid quantities', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'i1',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'i1', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
-    await expect(appendMovement(adapter, 'inst1', 'i1', 'purchase', Number.NaN)).rejects.toThrow(
-      /Cantidad de movimiento invalida/,
-    );
+    await expect(appendMovement(adapter, 'inst1', 'i1', 'purchase', NaN))
+      .rejects.toThrow(/Cantidad de movimiento invalida/);
   });
 
   it('appendMovement rejects fixed id conflicts', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'i1',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
-    await adapter.create('inventoryItem', {
-      id: 'i2',
-      instance_id: 'inst1',
-      quantity: 0,
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'i1', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'i2', instance_id: 'inst1', quantity: 0 } as unknown as DomainRecord);
 
     await appendMovement(adapter, 'inst1', 'i1', 'purchase', 10, undefined, { id: 'conflict-id' });
 
-    await expect(
-      appendMovement(adapter, 'inst1', 'i2', 'purchase', 10, undefined, { id: 'conflict-id' }),
-    ).rejects.toThrow(/Conflicto de movimiento/);
+    await expect(appendMovement(adapter, 'inst1', 'i2', 'purchase', 10, undefined, { id: 'conflict-id' }))
+      .rejects.toThrow(/Conflicto de movimiento/);
   });
 
   it('appendMovement returns existing when id matches with identical data', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'i1',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
-    const tx1 = await appendMovement(adapter, 'inst1', 'i1', 'purchase', 10, 'note', {
-      id: 'tx-same',
-      maintenanceId: 'job1',
-    });
-    const tx2 = await appendMovement(adapter, 'inst1', 'i1', 'purchase', 10, 'note', {
-      id: 'tx-same',
-      maintenanceId: 'job1',
-    });
+    await adapter.create('inventoryItem', { id: 'i1', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
+    const tx1 = await appendMovement(adapter, 'inst1', 'i1', 'purchase', 10, 'note', { id: 'tx-same', maintenanceId: 'job1' });
+    const tx2 = await appendMovement(adapter, 'inst1', 'i1', 'purchase', 10, 'note', { id: 'tx-same', maintenanceId: 'job1' });
     expect(tx1.id).toBe(tx2.id);
     expect(await quantityOf(adapter, 'inst1', 'i1')).toBe(10);
   });
 
   it('appendMovement throws conflict when id matches but qty is different', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'i1',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
-    await appendMovement(adapter, 'inst1', 'i1', 'purchase', 10, 'note', {
-      id: 'tx-diff',
-      maintenanceId: 'job1',
-    });
-    await expect(
-      appendMovement(adapter, 'inst1', 'i1', 'purchase', 99, 'note', {
-        id: 'tx-diff',
-        maintenanceId: 'job1',
-      }),
-    ).rejects.toThrow(/Conflicto de movimiento/);
+    await adapter.create('inventoryItem', { id: 'i1', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
+    await appendMovement(adapter, 'inst1', 'i1', 'purchase', 10, 'note', { id: 'tx-diff', maintenanceId: 'job1' });
+    await expect(appendMovement(adapter, 'inst1', 'i1', 'purchase', 99, 'note', { id: 'tx-diff', maintenanceId: 'job1' }))
+      .rejects.toThrow(/Conflicto de movimiento/);
     expect(await quantityOf(adapter, 'inst1', 'i1')).toBe(10);
   });
 
   it('appendMovement throws conflict when id matches but maintenanceId is different', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'i1',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
-    await appendMovement(adapter, 'inst1', 'i1', 'purchase', 10, 'note', {
-      id: 'tx-diff-maint',
-      maintenanceId: 'job1',
-    });
-    await expect(
-      appendMovement(adapter, 'inst1', 'i1', 'purchase', 10, 'note', {
-        id: 'tx-diff-maint',
-        maintenanceId: 'job2',
-      }),
-    ).rejects.toThrow(/Conflicto de movimiento/);
+    await adapter.create('inventoryItem', { id: 'i1', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
+    await appendMovement(adapter, 'inst1', 'i1', 'purchase', 10, 'note', { id: 'tx-diff-maint', maintenanceId: 'job1' });
+    await expect(appendMovement(adapter, 'inst1', 'i1', 'purchase', 10, 'note', { id: 'tx-diff-maint', maintenanceId: 'job2' }))
+      .rejects.toThrow(/Conflicto de movimiento/);
     expect(await quantityOf(adapter, 'inst1', 'i1')).toBe(10);
   });
 
   it('appendMovement throws conflict for opening balance id manually provided', async () => {
     const adapter = getMemoryAdapter();
     // Item with initial 15
-    await adapter.create('inventoryItem', {
-      id: 'a',
-      instance_id: 'inst1',
-      quantity: 15,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'a', instance_id: 'inst1', quantity: 15, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     // Trying to use opening balance id manually should throw conflict because the system will generate it first and it will clash or be created.
     // Wait, the test says: "{id:"mov-open:a"} on an item with initial 15 throws conflict, stock 15, then normal purchase(10) -> 25"
-    await expect(
-      appendMovement(adapter, 'inst1', 'a', 'purchase', 10, undefined, { id: 'mov-open:a' }),
-    ).rejects.toThrow(/Conflicto de movimiento/);
+    await expect(appendMovement(adapter, 'inst1', 'a', 'purchase', 10, undefined, { id: 'mov-open:a' }))
+      .rejects.toThrow(/Conflicto de movimiento/);
     expect(await quantityOf(adapter, 'inst1', 'a')).toBe(15);
 
     // Normal purchase
@@ -443,25 +285,13 @@ describe('Inventory Ledger', () => {
 
   it('el saldo inicial no sobrescribe un movimiento de otro insumo con el mismo id reservado', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'a',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'a', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     // "mov-open-b" es el id reservado del saldo inicial de b, pero se usa como id manual de a.
     await appendMovement(adapter, 'inst1', 'a', 'purchase', 10, undefined, { id: 'mov-open-b' });
     expect(await quantityOf(adapter, 'inst1', 'a')).toBe(10);
 
-    await adapter.create('inventoryItem', {
-      id: 'b',
-      instance_id: 'inst1',
-      quantity: 15,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'b', instance_id: 'inst1', quantity: 15, created_at: '', updated_at: '' } as unknown as DomainRecord);
     await appendMovement(adapter, 'inst1', 'b', 'purchase', 5);
 
     expect(await quantityOf(adapter, 'inst1', 'a')).toBe(10); // el saldo inicial de b no lo pisa
@@ -475,13 +305,7 @@ describe('Inventory Ledger', () => {
 
   it('dos altas concurrentes con el mismo id rechazan la incompatible', async () => {
     const adapter = getMemoryAdapter();
-    await adapter.create('inventoryItem', {
-      id: 'c',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'c', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     const results = await Promise.allSettled([
       appendMovement(adapter, 'inst1', 'c', 'purchase', 10, undefined, { id: 'race-id' }),
@@ -493,16 +317,12 @@ describe('Inventory Ledger', () => {
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
     expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(Error);
-    expect(((rejected[0] as PromiseRejectedResult).reason as Error).message).toMatch(
-      /Conflicto de movimiento/,
-    );
+    expect(((rejected[0] as PromiseRejectedResult).reason as Error).message).toMatch(/Conflicto de movimiento/);
 
     const history = await movementHistory(adapter, 'inst1', 'c');
     expect(history).toHaveLength(1);
     // El stock refleja exactamente el unico movimiento que gano la carrera.
-    expect(await quantityOf(adapter, 'inst1', 'c')).toBe(
-      Number((history[0] as unknown as DomainRecord).qty),
-    );
+    expect(await quantityOf(adapter, 'inst1', 'c')).toBe(Number((history[0] as unknown as DomainRecord).qty));
   });
 
   it('dos compras concurrentes crean un solo saldo inicial aunque el id determinista este ocupado', async () => {
@@ -510,32 +330,15 @@ describe('Inventory Ledger', () => {
     // Legado: el id determinista del saldo inicial ocupado por otro insumo.
     // Se planta por las dos codificaciones (guion historico y `:` actual)
     // directo en el adapter, porque el libro rechaza el prefijo reservado.
-    await adapter.create('inventoryItem', {
-      id: 'a',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'a', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
     const now = new Date().toISOString();
     for (const legacyId of ['mov-open-b', 'mov-open:b']) {
       await adapter.create('stockMovement', {
-        id: legacyId,
-        instance_id: 'inst1',
-        itemId: 'a',
-        kind: 'purchase',
-        qty: 1,
-        created_at: now,
-        updated_at: now,
+        id: legacyId, instance_id: 'inst1', itemId: 'a', kind: 'purchase', qty: 1,
+        created_at: now, updated_at: now,
       } as unknown as DomainRecord);
     }
-    await adapter.create('inventoryItem', {
-      id: 'b',
-      instance_id: 'inst1',
-      quantity: 15,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await adapter.create('inventoryItem', { id: 'b', instance_id: 'inst1', quantity: 15, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     // Dos "pestanas": dos instancias del modulo (sin cerrojo en memoria
     // compartido) sobre el mismo almacenamiento, como dos tabs IndexedDB.
@@ -567,13 +370,7 @@ describe('Inventory Ledger', () => {
       enteredResolve = r;
     });
     const adapter = new GatedWritesAdapter(inner, { holdFirst, onFirstWrite: enteredResolve });
-    await inner.create('inventoryItem', {
-      id: 'race-stock',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await inner.create('inventoryItem', { id: 'race-stock', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     // Primera compra: calcula 10 y se queda retenida justo antes de guardar el stock.
     const slow = appendMovement(adapter, 'inst1', 'race-stock', 'purchase', 10);
@@ -584,42 +381,25 @@ describe('Inventory Ledger', () => {
     await slow;
 
     expect(await quantityOf(adapter, 'inst1', 'race-stock')).toBe(109);
-    const item = (await inner.get(
-      'inventoryItem',
-      'race-stock',
-      'inst1',
-    )) as unknown as DomainRecord;
+    const item = (await inner.get('inventoryItem', 'race-stock', 'inst1')) as unknown as DomainRecord;
     expect(item.quantity).toBe(109);
   });
 
+
   it('appendMovement resolves despite deterministic sync conflict (case 1)', async () => {
     const memoryAdapter = getMemoryAdapter();
-    await memoryAdapter.create('inventoryItem', {
-      id: 'i1',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await memoryAdapter.create('inventoryItem', { id: 'i1', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     const adapter = new Proxy(memoryAdapter, {
       get(target, prop, receiver) {
         if (prop === 'updateIfCurrent') {
-          return async (
-            entity: string,
-            id: string,
-            patch: Record<string, unknown>,
-            instanceId: string,
-            expectedUpdatedAt: string,
-          ) => {
+          return async (entity: string, id: string, patch: Record<string, unknown>, instanceId: string, expectedUpdatedAt: string) => {
             if (entity === 'inventoryItem') return null;
-            return (
-              target.updateIfCurrent?.(entity, id, patch, instanceId, expectedUpdatedAt) ?? null
-            );
+            return target.updateIfCurrent?.(entity, id, patch, instanceId, expectedUpdatedAt) ?? null;
           };
         }
         return Reflect.get(target, prop, receiver);
-      },
+      }
     });
 
     const mov = await appendMovement(adapter, 'inst1', 'i1', 'purchase', 3);
@@ -631,70 +411,42 @@ describe('Inventory Ledger', () => {
 
   it('syncQuantity throws StockSyncConflictError directly when exhausted (case 2)', async () => {
     const memoryAdapter = getMemoryAdapter();
-    await memoryAdapter.create('inventoryItem', {
-      id: 'i1',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await memoryAdapter.create('inventoryItem', { id: 'i1', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     const adapter = new Proxy(memoryAdapter, {
       get(target, prop, receiver) {
         if (prop === 'updateIfCurrent') {
-          return async (
-            entity: string,
-            id: string,
-            patch: Record<string, unknown>,
-            instanceId: string,
-            expectedUpdatedAt: string,
-          ) => {
+          return async (entity: string, id: string, patch: Record<string, unknown>, instanceId: string, expectedUpdatedAt: string) => {
             if (entity === 'inventoryItem') return null;
-            return (
-              target.updateIfCurrent?.(entity, id, patch, instanceId, expectedUpdatedAt) ?? null
-            );
+            return target.updateIfCurrent?.(entity, id, patch, instanceId, expectedUpdatedAt) ?? null;
           };
         }
         return Reflect.get(target, prop, receiver);
-      },
+      }
     });
 
-    await expect(syncQuantity(adapter, 'inst1', 'i1')).rejects.toThrow(
-      'Conflicto de concurrencia al sincronizar el stock: reintente la operacion',
-    );
+    await expect(syncQuantity(adapter, 'inst1', 'i1')).rejects.toThrow('Conflicto de concurrencia al sincronizar el stock: reintente la operacion');
+    await expect(syncQuantity(adapter, 'inst1', 'i1')).rejects.toMatchObject({ name: 'StockSyncConflictError' });
   });
 
   it('appendMovement supports 20 concurrent appends (case 3)', async () => {
     const memoryAdapter = getMemoryAdapter();
-    await memoryAdapter.create('inventoryItem', {
-      id: 'i1',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await memoryAdapter.create('inventoryItem', { id: 'i1', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     const adapter = new Proxy(memoryAdapter, {
       get(target, prop, receiver) {
         const originalMethod = Reflect.get(target, prop, receiver);
-        if (
-          typeof originalMethod === 'function' &&
-          ['get', 'list', 'create', 'update', 'updateIfCurrent', 'createIfAbsent'].includes(
-            prop as string,
-          )
-        ) {
+        if (typeof originalMethod === 'function' && ['get', 'list', 'create', 'update', 'updateIfCurrent', 'createIfAbsent'].includes(prop as string)) {
           return async (...args: any[]) => {
             await new Promise((r) => setTimeout(r, 0));
             return originalMethod.apply(target, args);
           };
         }
         return originalMethod;
-      },
+      }
     });
 
-    const promises = Array.from({ length: 20 }, () =>
-      appendMovement(adapter, 'inst1', 'i1', 'purchase', 1),
-    );
+    const promises = Array.from({ length: 20 }, () => appendMovement(adapter, 'inst1', 'i1', 'purchase', 1));
     const results = await Promise.allSettled(promises);
 
     const rejected = results.filter((r) => r.status === 'rejected');
@@ -702,19 +454,13 @@ describe('Inventory Ledger', () => {
     expect(await quantityOf(adapter, 'inst1', 'i1')).toBe(20);
 
     await syncQuantity(adapter, 'inst1', 'i1');
-    const item = (await adapter.get('inventoryItem', 'i1', 'inst1')) as unknown as DomainRecord;
+    const item = await adapter.get('inventoryItem', 'i1', 'inst1') as unknown as DomainRecord;
     expect(item.quantity).toBe(20);
   });
 
   it('appendMovement propagates non-conflict errors (case 4)', async () => {
     const memoryAdapter = getMemoryAdapter();
-    await memoryAdapter.create('inventoryItem', {
-      id: 'i1',
-      instance_id: 'inst1',
-      quantity: 0,
-      created_at: '',
-      updated_at: '',
-    } as unknown as DomainRecord);
+    await memoryAdapter.create('inventoryItem', { id: 'i1', instance_id: 'inst1', quantity: 0, created_at: '', updated_at: '' } as unknown as DomainRecord);
 
     const adapter = new Proxy(memoryAdapter, {
       get(target, prop, receiver) {
@@ -724,11 +470,9 @@ describe('Inventory Ledger', () => {
           };
         }
         return Reflect.get(target, prop, receiver);
-      },
+      }
     });
 
-    await expect(appendMovement(adapter, 'inst1', 'i1', 'purchase', 1)).rejects.toThrow(
-      'disk full',
-    );
+    await expect(appendMovement(adapter, 'inst1', 'i1', 'purchase', 1)).rejects.toThrow('disk full');
   });
 });
