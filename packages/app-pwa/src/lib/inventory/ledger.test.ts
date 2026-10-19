@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { getMemoryAdapter, setStorageAdapter, type DomainRecord, type StorageAdapter } from '../domain';
-import { appendMovement, movementHistory, quantityOf, txSign, syncQuantity } from './ledger';
+import { appendMovement, movementHistory, quantityOf, txSign, syncQuantity, StockSyncConflictError } from './ledger';
 
 /**
  * Adapter que comparte el almacenamiento entre "pestanas" y retiene la PRIMERA
@@ -426,7 +426,7 @@ describe('Inventory Ledger', () => {
     });
 
     await expect(syncQuantity(adapter, 'inst1', 'i1')).rejects.toThrow('Conflicto de concurrencia al sincronizar el stock: reintente la operacion');
-    await expect(syncQuantity(adapter, 'inst1', 'i1')).rejects.toMatchObject({ name: 'StockSyncConflictError' });
+    await expect(syncQuantity(adapter, 'inst1', 'i1')).rejects.toThrow(StockSyncConflictError);
   });
 
   it('appendMovement supports 20 concurrent appends (case 3)', async () => {
