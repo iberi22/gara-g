@@ -62,7 +62,7 @@
 </script>
 
 {#if !loading && (state === 'locked' || state === 'transition')}
-  <div class="lock-gate-overlay" data-testid="lock-gate" role="dialog" aria-modal="true" aria-labelledby="lock-gate-title">
+  <div class="lock-gate-overlay" data-testid="lock-gate" role="dialog" aria-modal="true" aria-labelledby="lock-gate-title" aria-describedby={errorMsg ? "lock-gate-error" : state === "transition" ? "lock-gate-desc" : undefined}>
     <div class="swal-card-frame">
       <div class="swal-card-inner inner lock-gate-inner">
         <h2 class="swal-kicker" id="lock-gate-title">
@@ -71,7 +71,7 @@
         </h2>
 
         {#if state === 'transition'}
-          <p class="hint">Una modificación anterior de la protección fue interrumpida. Desbloquea el dispositivo para terminarla.</p>
+          <p class="hint" id="lock-gate-desc">Una modificación anterior de la protección fue interrumpida. Desbloquea el dispositivo para terminarla.</p>
         {/if}
 
         <form onsubmit={submitPin} class="st">
@@ -89,10 +89,11 @@
             disabled={unlocking}
             required
             autocomplete="current-password"
+            aria-invalid={!!errorMsg}
           />
 
           {#if errorMsg}
-            <p class="error-msg" role="alert">{errorMsg}</p>
+            <p class="error-msg" role="alert" id="lock-gate-error">{errorMsg}</p>
           {/if}
 
           <div class="btns">
