@@ -1,3 +1,4 @@
+import { webcrypto } from 'node:crypto';
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
 import { VaultError, createVaultClient } from '@swal/vault/web';
@@ -5,12 +6,14 @@ import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LOCAL_INSTANCE_ID } from '../appMode';
 import { parseBackupCode } from '../e2ee/crypto';
+import { type RecoveryKitEntry, openRecoveryKit } from '../vaultRecoveryKit';
 import {
   changePin,
   disableProtection,
   enableProtection,
   getActiveKey,
   getLockState,
+  getMethod,
   lock,
   setPasskeyProvider,
   unlock,
@@ -23,9 +26,8 @@ import {
 } from './indexedDbAdapter';
 import { LockedError, decryptRecord } from './recordCrypto';
 
-if (typeof crypto === 'undefined' || !crypto.subtle) {
-  const nodeCrypto = await import('node:crypto');
-  (globalThis as unknown as { crypto: unknown }).crypto = nodeCrypto.webcrypto;
+if (!globalThis.crypto || !globalThis.crypto.subtle) {
+  (globalThis as any).crypto = webcrypto;
 }
 
 beforeEach(async () => {
@@ -38,6 +40,106 @@ afterEach(() => {
   vi.restoreAllMocks();
   lock();
 });
+
+/** Lee el sobre persistido del candado (`gara-lock`/`envelope`). */
+async function readLockEnvelope(): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('gara-lock', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('gara-lock');
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction('gara-lock', 'readonly');
+      const get = tx.objectStore('gara-lock').get('envelope');
+      get.onsuccess = () => {
+        db.close();
+        resolve(get.result);
+      };
+      get.onerror = () => {
+        db.close();
+        reject(get.error);
+      };
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/** Modifica el sobre persistido (para modelar estados heredados/parciales). */
+async function patchLockEnvelope(patch: (env: any) => void): Promise<void> {
+  const env = await readLockEnvelope();
+  patch(env);
+  await new Promise<void>((resolve, reject) => {
+    const req = indexedDB.open('gara-lock', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('gara-lock');
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction('gara-lock', 'readwrite');
+      tx.objectStore('gara-lock').put(env, 'envelope');
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        reject(tx.error);
+      };
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// Clave de datos fijada: su base64 estándar usa '+' y '/', los únicos caracteres
+// que distinguen el alfabeto estándar del base64url. Fijarla hace determinista la
+// comprobación de formato (con una clave aleatoria, 1 de cada 4 no contiene
+// ninguno de los dos y un mutante base64url pasaría inadvertido).
+const PINNED_DATA_KEY = new Uint8Array(32);
+for (let i = 0; i < PINNED_DATA_KEY.length; i++) {
+  PINNED_DATA_KEY[i] = [0xfb, 0xff, 0xbf][i % 3];
+}
+
+/**
+ * Habilita la protección con la clave de datos fijada y devuelve además los
+ * bytes crudos de esa clave, para poder comprobar qué se selló exactamente en
+ * el kit de recuperación.
+ */
+async function enableWithPinnedKey(
+  method: 'pin' | 'passkey',
+  secret: string,
+): Promise<{ code: string; rawKey: Uint8Array }> {
+  const realGetRandomValues = crypto.getRandomValues.bind(crypto);
+  const proto = Object.getPrototypeOf(crypto.subtle) as SubtleCrypto;
+  const realImportKey = proto.importKey;
+  let rawKey: Uint8Array | null = null;
+  const randomSpy = vi.spyOn(crypto, 'getRandomValues').mockImplementation(((array: Uint8Array) => {
+    if (array instanceof Uint8Array && array.length === 32) {
+      array.set(PINNED_DATA_KEY);
+      return array;
+    }
+    return realGetRandomValues(array);
+  }) as typeof crypto.getRandomValues);
+  const importSpy = vi.spyOn(proto, 'importKey').mockImplementation(function (
+    this: SubtleCrypto,
+    ...args: Parameters<SubtleCrypto['importKey']>
+  ) {
+    const [format, keyData, algorithm] = args;
+    if (
+      !rawKey &&
+      format === 'raw' &&
+      keyData instanceof Uint8Array &&
+      keyData.length === 32 &&
+      (algorithm as KeyAlgorithm).name === 'AES-GCM'
+    ) {
+      rawKey = new Uint8Array(keyData);
+    }
+    return realImportKey.apply(this, args);
+  });
+  try {
+    const code = await enableProtection(method, secret);
+    return { code, rawKey: rawKey as unknown as Uint8Array };
+  } finally {
+    randomSpy.mockRestore();
+    importSpy.mockRestore();
+  }
+}
 
 describe('deviceLock', () => {
   it('1. enables and disables protection cycle on raw IDB values', async () => {
@@ -416,23 +518,7 @@ describe('deviceLock', () => {
     await expect(parseBackupCode(code)).resolves.toBeDefined();
 
     // Verify envelope has recovery kit
-    const env = await new Promise<any>((resolve, reject) => {
-      const req = indexedDB.open('gara-lock', 1);
-      req.onsuccess = () => {
-        const db = req.result;
-        const tx = db.transaction('gara-lock', 'readonly');
-        const get = tx.objectStore('gara-lock').get('envelope');
-        get.onsuccess = () => {
-          db.close();
-          resolve(get.result);
-        };
-        get.onerror = () => {
-          db.close();
-          reject(get.error);
-        };
-      };
-      req.onerror = () => reject(req.error);
-    });
+    const env = await readLockEnvelope();
 
     expect(env.recoveryKit).toBeDefined();
     expect(env.recoveryKit.format).toBe('swal-vault-recovery-kit');
@@ -499,23 +585,7 @@ describe('deviceLock', () => {
 
   it('16. sealed recovery kit contains no plaintext key data', async () => {
     const code = await enableProtection('pin', '123456');
-    const env = await new Promise<any>((resolve, reject) => {
-      const req = indexedDB.open('gara-lock', 1);
-      req.onsuccess = () => {
-        const db = req.result;
-        const tx = db.transaction('gara-lock', 'readonly');
-        const get = tx.objectStore('gara-lock').get('envelope');
-        get.onsuccess = () => {
-          db.close();
-          resolve(get.result);
-        };
-        get.onerror = () => {
-          db.close();
-          reject(get.error);
-        };
-      };
-      req.onerror = () => reject(req.error);
-    });
+    const env = await readLockEnvelope();
 
     const kitStr = JSON.stringify(env.recoveryKit);
 
@@ -527,5 +597,106 @@ describe('deviceLock', () => {
     expect(kitStr).not.toContain(b64Key);
     // It should also not contain the code as is
     expect(kitStr).not.toContain(code);
+  });
+
+  it('17. recovery restores the exact data key that protects the records', async () => {
+    const { code } = await enableWithPinnedKey('pin', '123456');
+    const adapter = getLocalAdapter();
+    await adapter.create('vehicle', {
+      id: 'rec-17',
+      instance_id: LOCAL_INSTANCE_ID,
+      created_at: 'now',
+      updated_at: 'now',
+    });
+    const db = await openLocalDb();
+    const row = await db.get('records', ['vehicle', 'rec-17']);
+    expect(row?.record).toBeUndefined();
+    expect(row?.enc).toBeDefined();
+
+    // La app se cierra (se pierde la clave en memoria) y se reabre con el código.
+    lock();
+    await unlock('recovery', code);
+    expect(await getLockState()).toBe('unlocked');
+
+    // La clave restaurada tiene que descifrar lo que cifró la original: un mutante
+    // que altere los bytes decodificados deja el desbloqueo aparentemente correcto
+    // pero inutiliza todos los datos del usuario.
+    expect(await adapter.get('vehicle', 'rec-17', LOCAL_INSTANCE_ID)).toMatchObject({
+      id: 'rec-17',
+    });
+  });
+
+  it('18. the sealed kit carries the exact recovery entry in standard base64', async () => {
+    const { code, rawKey } = await enableWithPinnedKey('pin', '123456');
+    const env = await readLockEnvelope();
+
+    const entries: RecoveryKitEntry[] = await openRecoveryKit(env.recoveryKit, code, {
+      appId: 'gara-g',
+      instanceId: LOCAL_INSTANCE_ID,
+    });
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].entity).toBe('device-lock');
+    expect(entries[0].id).toBe('data-key');
+    expect((entries[0].share as { index: number }).index).toBe(2);
+
+    // Base64 ESTÁNDAR exacto (alfabeto A-Za-z0-9+/ y un único '=' final) de los 32
+    // bytes de la clave de datos: ni base64url, ni hex, ni otro largo.
+    const share = (entries[0].share as { value: string }).value;
+    expect(share).toMatch(/^[A-Za-z0-9+/]{43}=$/);
+    expect(share).toBe(btoa(String.fromCharCode(...rawKey)));
+  });
+
+  it('19. recovery unlock restores the configured method', async () => {
+    // Con respaldo PIN (el caso normal) el método vigente tras recuperar es 'pin'.
+    const withPin = await enableWithPinnedKey('pin', '123456');
+    lock();
+    await unlock('recovery', withPin.code);
+    expect(await getLockState()).toBe('unlocked');
+    expect(getMethod()).toBe('pin');
+
+    await disableProtection();
+
+    // Sobre heredado con solo passkey: la recuperación no debe fijar 'pin' a mano.
+    const dummyKey = new Uint8Array(32).fill(7);
+    setPasskeyProvider({
+      isSupported: async () => true,
+      create: async () => ({
+        id: '1',
+        rawId: '1',
+        type: 'public-key',
+        response: {} as unknown as AuthenticatorAttestationResponse,
+        getClientExtensionResults: () => ({ prf: { enabled: true, results: {} } }),
+      }),
+      get: async () => ({
+        id: '1',
+        rawId: '1',
+        type: 'public-key',
+        response: {} as unknown as AuthenticatorAssertionResponse,
+        getClientExtensionResults: () => ({ prf: { results: { first: dummyKey } } }),
+      }),
+      extractPrfOutputs: () => ({ first: dummyKey }),
+      getPrfOutput: () => dummyKey as unknown as Uint8Array<ArrayBufferLike>,
+    } as any);
+
+    const passkeyOnly = await enableWithPinnedKey('passkey', '123456');
+    await patchLockEnvelope((env) => {
+      delete env.pinEnvelope;
+    });
+    lock();
+    await unlock('recovery', passkeyOnly.code);
+    expect(await getLockState()).toBe('unlocked');
+    expect(getMethod()).toBe('passkey');
+
+    setPasskeyProvider(undefined);
+  });
+  it('20. recovery rejects zero-placeholder dummy codes and never exposes placeholder', async () => {
+    const code = await enableProtection('pin', '123456');
+    expect(code).not.toBe('00000000000000000000000000000000');
+    expect(code).not.toMatch(/^0+$/);
+
+    lock();
+    await expect(unlock('recovery', '00000000000000000000000000000000')).rejects.toThrow();
+    expect(await getLockState()).toBe('locked');
   });
 });
