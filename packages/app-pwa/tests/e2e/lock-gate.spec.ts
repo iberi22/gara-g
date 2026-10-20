@@ -64,11 +64,12 @@ async function writeLockEnvelope(page: Page, env: Record<string, unknown>): Prom
   );
 }
 
-async function enableLockWithPin(page: Page): Promise<void> {
-  await page.evaluate(async () => {
+/** Activa la protección con PIN 123456 y devuelve el código de recuperación generado. */
+async function enableLockWithPin(page: Page): Promise<string> {
+  return page.evaluate(async () => {
     // @ts-ignore
     const { enableProtection } = await import('/src/lib/local/deviceLock.ts');
-    await enableProtection('pin', '123456');
+    return (await enableProtection('pin', '123456')) as string;
   });
 }
 
@@ -202,6 +203,35 @@ test.describe('Lock Gate', () => {
     // El PIN de respaldo sigue siendo obligatorio
     await expect(gate.locator('#lock-gate-pin')).toBeVisible();
     await expect(gate.getByRole('button', { name: 'Desbloquear' })).toBeDisabled();
+  });
+
+  test('canje del código de recuperación: un código erróneo cuenta como intento y el correcto desbloquea', async ({ page }) => {
+    await page.goto('/fleet/ajustes');
+    await expect(page.getByTestId('settings-app')).toBeVisible();
+    const recoveryCode = await enableLockWithPin(page);
+
+    await page.reload();
+    const gate = page.getByTestId('lock-gate');
+    await expect(gate).toBeVisible();
+
+    await gate.getByRole('button', { name: 'Usar código de recuperación' }).click();
+    const recoveryInput = gate.locator('#lock-gate-recovery');
+    const redeem = gate.getByRole('button', { name: 'Canjear código' });
+    await expect(recoveryInput).toBeVisible();
+    await expect(redeem).toBeDisabled();
+
+    // Código erróneo: rechazado y cuenta como intento (arma el lockout)
+    await recoveryInput.fill('AAAA-BBBB-CCCC-DDDD-EEEE-FFFF');
+    await redeem.click();
+    await expect(gate.getByRole('alert')).toHaveText(/no es válido/i);
+    await expect(recoveryInput).toHaveAttribute('aria-invalid', 'true');
+
+    // Espera por la expiración real del lockout y canjea el código correcto
+    await expect.poll(() => page.evaluate(lockoutExpiredInPage), { timeout: 10000 }).toBe(true);
+    await recoveryInput.fill(recoveryCode);
+    await redeem.click();
+    await expect(gate).not.toBeVisible();
+    await expect(page.locator('.fleet-shell')).not.toHaveAttribute('inert');
   });
 
   test('sin passkey persistida no se ofrece el botón', async ({ page }) => {

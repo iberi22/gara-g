@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getLockSnapshot, subscribeLockChanges, unlock } from '../../lib/local/deviceLock';
+  import { RecoveryKitError } from '../../lib/vaultRecoveryKit';
   import type { LockState } from '../../lib/local/deviceLock';
   import { VaultError } from '@swal/vault/web';
 
@@ -21,6 +22,9 @@
   let gateEl = $state<HTMLElement | null>(null);
   let errorMsg = $state<string | null>(null);
   let unlocking = $state(false);
+  // Canje del código de recuperación (sin PIN): acceso secundario, mismo lockout que el PIN.
+  let recoveryOpen = $state(false);
+  let recoveryCode = $state('');
 
   const blocking = $derived(loading || state === 'locked' || state === 'transition' || state === 'error');
   const showForm = $derived(!loading && (state === 'locked' || state === 'transition'));
@@ -61,6 +65,26 @@
     } finally {
       unlocking = false;
       pin = '';
+    }
+  }
+
+  async function handleRecovery() {
+    errorMsg = null;
+    unlocking = true;
+    try {
+      await unlock('recovery', recoveryCode.trim());
+      state = 'unlocked';
+    } catch (err: unknown) {
+      if (err instanceof RecoveryKitError) {
+        errorMsg = 'El código de recuperación no es válido.';
+      } else if (err instanceof Error) {
+        errorMsg = err.message;
+      } else {
+        errorMsg = 'Error desconocido al desbloquear';
+      }
+    } finally {
+      unlocking = false;
+      recoveryCode = '';
     }
   }
 
@@ -146,10 +170,6 @@
               aria-describedby={errorMsg ? 'lock-gate-error' : undefined}
             />
 
-            {#if errorMsg}
-              <p class="error-msg" role="alert" id="lock-gate-error">{errorMsg}</p>
-            {/if}
-
             <div class="btns">
               <button type="submit" class="btn" class:on={true} disabled={unlocking || pin.length !== 6}>
                 {unlocking ? 'Desbloqueando...' : 'Desbloquear'}
@@ -159,8 +179,40 @@
                   Usar passkey
                 </button>
               {/if}
+              <button type="button" class="btn" aria-expanded={recoveryOpen} aria-controls="lock-gate-recovery-form" disabled={unlocking} onclick={() => (recoveryOpen = !recoveryOpen)}>
+                {recoveryOpen ? 'Ocultar código de recuperación' : 'Usar código de recuperación'}
+              </button>
             </div>
           </form>
+
+          {#if recoveryOpen}
+            <form id="lock-gate-recovery-form" class="st" onsubmit={(e) => { e.preventDefault(); void handleRecovery(); }}>
+              <label class="sr-only" for="lock-gate-recovery">Código de recuperación</label>
+              <input
+                id="lock-gate-recovery"
+                type="text"
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+                bind:value={recoveryCode}
+                placeholder="Código de recuperación"
+                class="input-pin input-recovery"
+                disabled={unlocking}
+                required
+                aria-invalid={errorMsg ? 'true' : 'false'}
+                aria-describedby={errorMsg ? 'lock-gate-error' : undefined}
+              />
+              <div class="btns">
+                <button type="submit" class="btn on" disabled={unlocking || recoveryCode.trim().length === 0}>
+                  {unlocking ? 'Desbloqueando...' : 'Canjear código'}
+                </button>
+              </div>
+            </form>
+          {/if}
+
+          {#if errorMsg}
+            <p class="error-msg" role="alert" id="lock-gate-error">{errorMsg}</p>
+          {/if}
         {/if}
       </div>
     </div>
@@ -204,6 +256,7 @@
     background: var(--swal-surface);
     border: 1px solid var(--swal-border-strong);
   }
+  .input-recovery { letter-spacing: normal; font-size: 1rem; }
   .input-pin:focus-visible {
     outline: 2px solid var(--swal-text);
     outline-offset: 2px;
