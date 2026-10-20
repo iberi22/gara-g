@@ -103,8 +103,9 @@ const navView = navItems.map((item) => {
 
 <Layout title={title} description={description}>
   <PrefsBootstrap slot="head" />
-  <a href="#fleet-main-content" class="skip-link">Saltar al contenido principal</a>
   <div class="fleet-shell" data-sidebar-open="false">
+    <!-- Dentro de .fleet-shell: la puerta de bloqueo lo deja inerte junto con la app (no entra en el ciclo de Tab). -->
+    <a href="#fleet-main-content" class="skip-link">Saltar al contenido principal</a>
     <button
       class="sidebar-backdrop"
       data-testid="sidebar-backdrop"

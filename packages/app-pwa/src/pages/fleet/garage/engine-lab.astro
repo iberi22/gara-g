@@ -13,6 +13,7 @@
  */
 import '../../../styles/swal-taller.css';
 import ThemeBootstrap from '../../../components/theme/ThemeBootstrap.astro';
+import LockGate from '../../../components/prefs/LockGate.svelte';
 
 export const prerender = false;
 ---
@@ -114,9 +115,10 @@ export const prerender = false;
       <line x1="0" y1="92%" x2="100%" y2="92%" class="sheet-rule" />
     </svg>
 
-    <canvas id="garage-canvas"></canvas>
+    <canvas id="garage-canvas" data-lock-gate-target></canvas>
     <svg id="anchors-overlay" class="anchors-overlay" xmlns="http://www.w3.org/2000/svg"></svg>
     <pre id="engine-error"></pre>
+    <LockGate client:only="svelte" />
 
     <script>
       import type { QualityTier, PartState, StageTheme, ViewMode, VehicleSpec, DimensionAnchors } from '../../../garage/contracts';

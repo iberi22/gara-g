@@ -1,6 +1,7 @@
 ---
 import AlertFeed from '../../components/alert/AlertFeed.svelte';
 import ThemeBootstrap from '../../components/theme/ThemeBootstrap.astro';
+import LockGate from '../../components/prefs/LockGate.svelte';
 import '../../styles/gara-theme.css';
 import { instanceIdFor } from '../../garage/domain/tenant.js';
 
@@ -18,7 +19,7 @@ const instanceId = instanceIdFor(Astro.request, Astro.locals);
     <ThemeBootstrap />
   </head>
   <body class="swal-themed-page min-h-screen p-4 md:p-8">
-    <div class="max-w-7xl mx-auto space-y-6">
+    <div class="max-w-7xl mx-auto space-y-6" data-lock-gate-target>
       <header class="border-b pb-4 mb-6 flex flex-wrap justify-between items-center gap-4">
         <div>
           <h1 class="text-3xl font-bold tracking-tight">Alertas del sistema</h1>
@@ -42,6 +43,7 @@ const instanceId = instanceIdFor(Astro.request, Astro.locals);
         </AlertFeed>
       </main>
     </div>
+    <LockGate client:only="svelte" />
   </body>
 </html>
 
