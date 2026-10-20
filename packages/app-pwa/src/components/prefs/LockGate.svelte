@@ -47,43 +47,38 @@
   onMount(() => {
     void refresh();
     // Otra pestaña puede bloquear o desactivar la protección: releer el sobre.
-    const unsubscribe = subscribeLockChanges(() => void refresh());
-    // BFcache: la página restaurada desde la caché no repite el arranque; releer el sobre.
-    const onPageShow = (e: PageTransitionEvent) => {
-      if (e.persisted) void refresh();
-    };
-    window.addEventListener('pageshow', onPageShow);
-    // Trampa de foco: Tab/Shift+Tab dan la vuelta dentro del diálogo y nunca salen a la barra del navegador.
-    const onKeydown = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab' || !blocking || !gateEl) return;
-      const items = Array.from(gateEl.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-        (el) => !(el as HTMLButtonElement).disabled
-      );
-      if (items.length === 0) {
-        e.preventDefault(); // cargando: no hay nada que enfocar y el foco no debe salir
-        return;
-      }
-      const first = items[0];
-      const last = items[items.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-      if (!active || !gateEl.contains(active)) {
-        e.preventDefault();
-        (e.shiftKey ? last : first).focus();
-      } else if (e.shiftKey && active === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener('keydown', onKeydown);
-    return () => {
-      unsubscribe();
-      window.removeEventListener('pageshow', onPageShow);
-      window.removeEventListener('keydown', onKeydown);
-    };
+    return subscribeLockChanges(() => void refresh());
   });
+
+  // BFcache: la página restaurada desde la caché no repite el arranque; releer el sobre.
+  function onPageShow(e: PageTransitionEvent) {
+    if (e.persisted) void refresh();
+  }
+
+  // Trampa de foco: Tab/Shift+Tab dan la vuelta dentro del diálogo y nunca salen a la barra del navegador.
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key !== 'Tab' || !blocking || !gateEl) return;
+    const items = Array.from(gateEl.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+      (el) => !(el as HTMLButtonElement).disabled
+    );
+    if (items.length === 0) {
+      e.preventDefault(); // cargando: no hay nada que enfocar y el foco no debe salir
+      return;
+    }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (!active || !gateEl.contains(active)) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    } else if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 
   async function handleUnlock(m: 'pin' | 'passkey') {
     errorMsg = null;
@@ -159,6 +154,8 @@
     if (recoveryOpen) void tick().then(() => recoveryInput?.focus());
   });
 </script>
+
+<svelte:window onkeydown={onKeydown} onpageshow={onPageShow} />
 
 {#if blocking}
   <div
