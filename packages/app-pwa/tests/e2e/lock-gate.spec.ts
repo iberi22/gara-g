@@ -122,6 +122,8 @@ test.describe('Lock Gate', () => {
     await expect(gate.getByRole('alert')).toBeVisible();
     await expect(pinInput).toHaveAttribute('aria-invalid', 'true');
     await expect(pinInput).toHaveAttribute('aria-describedby', 'lock-gate-error');
+    // Tras el error el foco vuelve al PIN (el input se deshabilita mientras procesa)
+    await expect(pinInput).toBeFocused();
 
     // El primer fallo arma un retardo (1 s): esperar a que expire por condición real, no por sleep
     await expect.poll(() => page.evaluate(lockoutExpiredInPage), { timeout: 10000 }).toBe(true);
@@ -133,6 +135,26 @@ test.describe('Lock Gate', () => {
 
     // Verify fleet-shell is no longer inert
     await expect(page.locator('.fleet-shell')).not.toHaveAttribute('inert');
+  });
+
+  test('desbloquear y "Bloquear ahora" vuelve a mostrar la puerta sin recargar', async ({ page }) => {
+    await page.goto('/fleet/ajustes');
+    await expect(page.getByTestId('settings-app')).toBeVisible();
+    await enableLockWithPin(page);
+    await page.reload();
+
+    const gate = page.getByTestId('lock-gate');
+    await expect(gate).toBeVisible();
+    await gate.locator('#lock-gate-pin').fill('123456');
+    await gate.getByRole('button', { name: 'Desbloquear' }).click();
+    await expect(gate).not.toBeVisible();
+    await expect(page.locator('.fleet-shell')).not.toHaveAttribute('inert');
+
+    // Bloquear desde la tarjeta: la puerta aparece y la app queda inerte, sin recargar
+    await page.getByRole('button', { name: 'Bloquear ahora' }).click();
+    await expect(gate).toBeVisible();
+    await expect(gate.locator('#lock-gate-pin')).toBeFocused();
+    await expect(page.locator('.fleet-shell')).toHaveAttribute('inert', '');
   });
 
   test('camino bloqueado: multiples intentos fallidos activan lockout y espera por condicion', async ({ page }) => {
@@ -205,7 +227,7 @@ test.describe('Lock Gate', () => {
     await expect(gate.getByRole('button', { name: 'Desbloquear' })).toBeDisabled();
   });
 
-  test('canje del código de recuperación: un código erróneo cuenta como intento y el correcto desbloquea', async ({ page }) => {
+  test('canje del código de recuperación: un código mal formado no cuenta; uno bien formado y erróneo sí', async ({ page }) => {
     await page.goto('/fleet/ajustes');
     await expect(page.getByTestId('settings-app')).toBeVisible();
     const recoveryCode = await enableLockWithPin(page);
@@ -218,13 +240,32 @@ test.describe('Lock Gate', () => {
     const recoveryInput = gate.locator('#lock-gate-recovery');
     const redeem = gate.getByRole('button', { name: 'Canjear código' });
     await expect(recoveryInput).toBeVisible();
+    // Al abrir el formulario, el foco va a su input
+    await expect(recoveryInput).toBeFocused();
     await expect(redeem).toBeDisabled();
 
-    // Código erróneo: rechazado y cuenta como intento (arma el lockout)
+    // Código mal formado (24 caracteres, no 28): se rechaza SIN contar como intento
     await recoveryInput.fill('AAAA-BBBB-CCCC-DDDD-EEEE-FFFF');
     await redeem.click();
     await expect(gate.getByRole('alert')).toHaveText(/no es válido/i);
     await expect(recoveryInput).toHaveAttribute('aria-invalid', 'true');
+    await expect(recoveryInput).toBeFocused();
+    expect(((await page.evaluate(readLockEnvelopeInPage)) as { failedAttempts?: number })?.failedAttempts ?? 0).toBe(0);
+
+    // Código bien formado (28 caracteres, checksum válido) pero de otra clave: cuenta como intento y arma el lockout
+    const wrongCode = await page.evaluate(async () => {
+      // @ts-ignore
+      const { generateRecoveryKitCode } = await import('/src/lib/vaultRecoveryKit.ts');
+      return (await generateRecoveryKitCode()) as string;
+    });
+    expect(wrongCode).not.toBe(recoveryCode);
+    await recoveryInput.fill(wrongCode);
+    await redeem.click();
+    await expect(gate.getByRole('alert')).toHaveText(/no es válido/i);
+    await expect.poll(async () => {
+      const env = (await page.evaluate(readLockEnvelopeInPage)) as { failedAttempts?: number; lockedUntil?: number };
+      return { failed: env.failedAttempts ?? 0, locked: (env.lockedUntil ?? 0) > Date.now() };
+    }).toEqual({ failed: 1, locked: true });
 
     // Espera por la expiración real del lockout y canjea el código correcto
     await expect.poll(() => page.evaluate(lockoutExpiredInPage), { timeout: 10000 }).toBe(true);
@@ -232,6 +273,34 @@ test.describe('Lock Gate', () => {
     await redeem.click();
     await expect(gate).not.toBeVisible();
     await expect(page.locator('.fleet-shell')).not.toHaveAttribute('inert');
+  });
+
+  test('el foco no sale del diálogo de la puerta con Tab ni Shift+Tab', async ({ page }) => {
+    await page.goto('/fleet/ajustes');
+    await expect(page.getByTestId('settings-app')).toBeVisible();
+    await enableLockWithPin(page);
+    await page.reload();
+
+    const gate = page.getByTestId('lock-gate');
+    await expect(gate).toBeVisible();
+    // Espera a que el formulario exista y tenga el foco (la puerta también aparece en 'loading', sin controles)
+    await expect(gate.locator('#lock-gate-pin')).toBeFocused();
+    const focusedDesc = () =>
+      page.evaluate(() => {
+        const el = document.activeElement;
+        return el ? `${el.tagName}#${el.id} ${el.outerHTML.slice(0, 120)}` : 'none';
+      });
+    const insideGate = () =>
+      page.evaluate(() => document.activeElement?.closest('[data-testid="lock-gate"]') != null);
+
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press('Shift+Tab');
+      expect(await insideGate(), `Shift+Tab ${i + 1}: foco en ${await focusedDesc()}`).toBe(true);
+    }
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press('Tab');
+      expect(await insideGate(), `Tab ${i + 1}: foco en ${await focusedDesc()}`).toBe(true);
+    }
   });
 
   test('sin passkey persistida no se ofrece el botón', async ({ page }) => {
@@ -311,12 +380,17 @@ test.describe('Lock Gate', () => {
     await expect(page.getByTestId('settings-app')).toBeVisible();
     await enableLockWithPin(page);
 
-    for (const route of ['/fleets', '/drivers', '/fleet/garage/lab']) {
+    for (const route of ['/fleets', '/drivers', '/fleet/garage/lab', '/documents', '/alerts', '/fleet/garage/engine-lab']) {
       await page.goto(route);
       const gate = page.getByTestId('lock-gate');
       await expect(gate, route).toBeVisible();
       await expect(gate.locator('#lock-gate-pin'), route).toBeVisible();
-      await expect(page.locator('.fleet-shell, [data-lock-gate-target]').first(), route).toHaveAttribute('inert', '');
+      // Cada contenedor de la app (no solo el primero) queda inerte bajo la puerta
+      const targets = page.locator('.fleet-shell, [data-lock-gate-target]');
+      expect(await targets.count(), route).toBeGreaterThan(0);
+      for (const target of await targets.all()) {
+        await expect(target, route).toHaveAttribute('inert', '');
+      }
     }
   });
 });

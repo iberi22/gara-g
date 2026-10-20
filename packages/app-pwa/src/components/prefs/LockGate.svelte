@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { getLockSnapshot, subscribeLockChanges, unlock } from '../../lib/local/deviceLock';
   import { RecoveryKitError } from '../../lib/vaultRecoveryKit';
   import type { LockState } from '../../lib/local/deviceLock';
@@ -13,12 +13,14 @@
    * (`.fleet-shell` y `[data-lock-gate-target]`), así no hay foco ni clics.
    */
   const GATE_TARGETS = '.fleet-shell, [data-lock-gate-target]';
+  const FOCUSABLE = 'button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])';
 
   let state = $state<LockState>('off');
   let loading = $state(true);
   let hasPasskey = $state(false);
   let pin = $state('');
   let pinInput = $state<HTMLInputElement | null>(null);
+  let recoveryInput = $state<HTMLInputElement | null>(null);
   let gateEl = $state<HTMLElement | null>(null);
   let errorMsg = $state<string | null>(null);
   let unlocking = $state(false);
@@ -45,7 +47,42 @@
   onMount(() => {
     void refresh();
     // Otra pestaña puede bloquear o desactivar la protección: releer el sobre.
-    return subscribeLockChanges(() => void refresh());
+    const unsubscribe = subscribeLockChanges(() => void refresh());
+    // BFcache: la página restaurada desde la caché no repite el arranque; releer el sobre.
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) void refresh();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    // Trampa de foco: Tab/Shift+Tab dan la vuelta dentro del diálogo y nunca salen a la barra del navegador.
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || !blocking || !gateEl) return;
+      const items = Array.from(gateEl.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+        (el) => !(el as HTMLButtonElement).disabled
+      );
+      if (items.length === 0) {
+        e.preventDefault(); // cargando: no hay nada que enfocar y el foco no debe salir
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (!active || !gateEl.contains(active)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', onKeydown);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('keydown', onKeydown);
+    };
   });
 
   async function handleUnlock(m: 'pin' | 'passkey') {
@@ -65,6 +102,9 @@
     } finally {
       unlocking = false;
       pin = '';
+      // El input se deshabilita mientras se procesa: devolver el foco tras el intento.
+      await tick();
+      pinInput?.focus();
     }
   }
 
@@ -85,6 +125,8 @@
     } finally {
       unlocking = false;
       recoveryCode = '';
+      await tick();
+      recoveryInput?.focus();
     }
   }
 
@@ -110,6 +152,11 @@
   // Foco inicial en el PIN cada vez que aparece el formulario.
   $effect(() => {
     if (pinInput) pinInput.focus();
+  });
+
+  // Al abrir el formulario de recuperación, el foco va a su input.
+  $effect(() => {
+    if (recoveryOpen) void tick().then(() => recoveryInput?.focus());
   });
 </script>
 
@@ -194,6 +241,7 @@
                 autocomplete="off"
                 autocapitalize="off"
                 spellcheck="false"
+                bind:this={recoveryInput}
                 bind:value={recoveryCode}
                 placeholder="Código de recuperación"
                 class="input-pin input-recovery"
