@@ -89,7 +89,7 @@ test.describe('local-first sin red externa y sin modulo cloud', () => {
 
     // 3. Vista de la flota demo (solo lectura), sin salir del host.
     await page.getByTestId('guest-demo-fleet').click();
-    await expect(page).toHaveURL(/\/fleet\/garage\/flota-demo-chile$/);
+    await slow(page).toHaveURL(/\/fleet\/garage\/flota-demo-chile$/);
     await slow(page.getByTestId('demo-fleet-chile')).toBeVisible();
     await expect(page.getByTestId('demo-kpi-vehicles')).toHaveText('10');
     await expect(page.getByTestId('demo-vehicles')).toContainText('ZZBC-11');
