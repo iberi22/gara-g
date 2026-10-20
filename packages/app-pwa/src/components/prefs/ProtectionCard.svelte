@@ -3,6 +3,7 @@
   import {
     getLockState,
     getMethod,
+    subscribeLockChanges,
     enableProtection,
     unlock,
     lock,
@@ -50,6 +51,8 @@
 
   onMount(() => {
     loadState();
+    // B2/B1: el bloqueo o desbloqueo hecho desde la puerta (u otra pestaña) se refleja aquí.
+    return subscribeLockChanges(() => void loadState());
   });
 
   function handleEnable(method: 'pin' | 'passkey') {

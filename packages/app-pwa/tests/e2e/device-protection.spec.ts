@@ -160,10 +160,12 @@ test.describe('Device Protection Settings UI', () => {
 
     await card.getByRole('button', { name: 'Bloquear ahora' }).click();
     await expect(card.locator('code.code-block')).toHaveCount(0);
-    await expect(card.getByRole('button', { name: 'Desbloquear' })).toBeVisible(SLOW);
-
-    await card.locator('input#pin-unlock').fill(PIN);
-    await card.getByRole('button', { name: 'Desbloquear' }).click();
+    // Al bloquear, la puerta cubre la app (la tarjeta incluida): se desbloquea desde ella
+    const gate = page.getByTestId('lock-gate');
+    await expect(gate).toBeVisible(SLOW);
+    await gate.locator('#lock-gate-pin').fill(PIN);
+    await gate.getByRole('button', { name: 'Desbloquear' }).click();
+    await expect(gate).not.toBeVisible(SLOW);
     await expect(card.getByRole('button', { name: 'Bloquear ahora' })).toBeVisible(SLOW);
     await expect(card.locator('code.code-block')).toHaveCount(0);
     await expect(card.locator('.recovery-box')).toHaveCount(0);

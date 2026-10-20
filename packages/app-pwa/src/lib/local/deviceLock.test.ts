@@ -6,16 +6,18 @@ import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LOCAL_INSTANCE_ID } from '../appMode';
 import { parseBackupCode } from '../e2ee/crypto';
-import { type RecoveryKitEntry, openRecoveryKit } from '../vaultRecoveryKit';
+import { type RecoveryKitEntry, generateRecoveryKitCode, openRecoveryKit } from '../vaultRecoveryKit';
 import {
   changePin,
   disableProtection,
   enableProtection,
   getActiveKey,
+  getLockSnapshot,
   getLockState,
   getMethod,
   lock,
   setPasskeyProvider,
+  subscribeLockChanges,
   unlock,
 } from './deviceLock';
 import {
@@ -698,5 +700,99 @@ describe('deviceLock', () => {
     lock();
     await expect(unlock('recovery', '00000000000000000000000000000000')).rejects.toThrow();
     expect(await getLockState()).toBe('locked');
+  });
+  it('snapshot reports passkey presence from the persisted envelope after a reload', async () => {
+    const dummyKey = crypto.getRandomValues(new Uint8Array(32));
+    setPasskeyProvider({
+      isSupported: async () => true,
+      create: async () => ({
+        id: '1',
+        rawId: '1',
+        type: 'public-key',
+        response: {} as unknown as AuthenticatorAttestationResponse,
+        getClientExtensionResults: () => ({ prf: { enabled: true, results: {} } }),
+      }),
+      get: async () => ({
+        id: '1',
+        rawId: '1',
+        type: 'public-key',
+        response: {} as unknown as AuthenticatorAssertionResponse,
+        getClientExtensionResults: () => ({ prf: { results: { first: dummyKey } } }),
+      }),
+      extractPrfOutputs: () => ({ first: dummyKey }),
+      getPrfOutput: () => dummyKey as unknown as Uint8Array<ArrayBufferLike>,
+    } as any);
+
+    await enableProtection('passkey', '123456');
+    lock();
+    // Tras recargar no hay método en memoria, pero el sobre sí dice que hay passkey.
+    expect(getMethod()).toBeNull();
+    expect(await getLockSnapshot()).toEqual({ state: 'locked', hasPasskey: true });
+    setPasskeyProvider(undefined);
+  });
+
+  it('a wrong recovery code counts as a failed attempt and arms the lockout', async () => {
+    const code = await enableProtection('pin', '123456');
+    lock();
+    const wrong = await generateRecoveryKitCode();
+    expect(wrong).not.toBe(code);
+    await expect(unlock('recovery', wrong)).rejects.toThrow();
+    // Un segundo intento inmediato ya está en lockout: el código correcto no se prueba.
+    await expect(unlock('recovery', code)).rejects.toMatchObject({ code: 'LOCKED' });
+    expect(await getLockState()).toBe('locked');
+  });
+
+  it('snapshot reports no passkey for a PIN-only envelope', async () => {
+    await enableProtection('pin', '123456');
+    lock();
+    expect(await getLockSnapshot()).toEqual({ state: 'locked', hasPasskey: false });
+  });
+
+  // B1: la puerta y la tarjeta de ajustes se suscriben a los cambios de bloqueo.
+  it('lock() avisa a los suscriptores (la puerta y la tarjeta se enteran sin recargar)', async () => {
+    await enableProtection('pin', '123456');
+    const listener = vi.fn();
+    const unsubscribe = subscribeLockChanges(listener);
+    listener.mockClear();
+    lock();
+    // Síncrono: no depende de ningún aviso asíncrono entre pestañas.
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it('tras dejar de suscribirse, lock() ya no avisa a ese listener', async () => {
+    await enableProtection('pin', '123456');
+    const listener = vi.fn();
+    const unsubscribe = subscribeLockChanges(listener);
+    unsubscribe();
+    listener.mockClear();
+    lock();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  // M2: al terminar una operación de bloqueo se avisa con el estado final (síncrono).
+  it('al terminar una operación de bloqueo se avisa a los suscriptores', async () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeLockChanges(listener);
+    await enableProtection('pin', '123456');
+    expect(listener).toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  // M3: mientras hay una operación en curso no se avisa con estados intermedios.
+  it('no avisa a mitad de una operación (solo al final, con el estado definitivo)', async () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeLockChanges(listener);
+    let running = true;
+    const duringOp: boolean[] = [];
+    listener.mockImplementation(() => duringOp.push(running));
+    const op = enableProtection('pin', '123456').finally(() => {
+      running = false;
+    });
+    await op;
+    // Exactamente un aviso durante la operación: el de su final. Los avisos
+    // asíncronos por el canal entre pestañas no deben colarse mientras dura.
+    expect(duringOp.filter(Boolean).length).toBe(1);
+    unsubscribe();
   });
 });

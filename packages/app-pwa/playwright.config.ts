@@ -35,6 +35,7 @@ const FLEET_SCOPE_SPECS = [
   /smoke\.spec\.ts$/,
   // Tarjeta de protección del dispositivo (ajustes de flota): cuarto spec del alcance CI.
   /device-protection\.spec\.ts$/,
+  /lock-gate\.spec\.ts$/,
 ];
 
 export default defineConfig({

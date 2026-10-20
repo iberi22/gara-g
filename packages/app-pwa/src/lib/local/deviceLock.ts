@@ -1,7 +1,7 @@
 import { createVaultClient, type PasskeyPrfProvider, VaultError } from '@swal/vault/web';
 import { LockedError, TransitionInProgressError } from './recordCrypto';
 import { LOCAL_INSTANCE_ID } from '../appMode';
-import { type RecoveryKitV1, generateRecoveryKitCode, sealRecoveryKit, openRecoveryKit } from '../vaultRecoveryKit';
+import { type RecoveryKitV1, RecoveryKitError, generateRecoveryKitCode, sealRecoveryKit, openRecoveryKit } from '../vaultRecoveryKit';
 
 export type LockState = 'off' | 'locked' | 'unlocked' | 'transition' | 'error';
 
@@ -54,6 +54,13 @@ let overridePasskeyProvider: PasskeyPrfProvider | undefined = undefined;
 // contador de lockout.
 let transitionMutex: Promise<void> = Promise.resolve();
 
+// Operaciones de bloqueo en curso en ESTA pestaña. Mientras haya una, los avisos
+// de cambio (que llegan también a la propia pestaña) no refrescan la UI de
+// bloqueo: si no, la puerta vería el estado 'transition' intermedio de
+// enableProtection, marcaría la app como inerte y el foco del código de
+// recuperación se perdería. Al terminar, se avisa una vez con el estado final.
+let lockOpsInFlight = 0;
+
 async function withTransitionMutex<T>(fn: () => Promise<T>): Promise<T> {
   const previous = transitionMutex;
   let release!: () => void;
@@ -61,10 +68,13 @@ async function withTransitionMutex<T>(fn: () => Promise<T>): Promise<T> {
     release = resolve;
   });
   await previous;
+  lockOpsInFlight++;
   try {
     return await fn();
   } finally {
+    lockOpsInFlight--;
     release();
+    if (lockOpsInFlight === 0) notifyLockListeners();
   }
 }
 
@@ -488,6 +498,18 @@ export function setPasskeyProvider(provider?: PasskeyPrfProvider) {
 // la relectura del sobre antes de cada escritura es la garantía real.
 let lockListenerOn = false;
 
+// Suscriptores (la UI de bloqueo) avisados tras cada invalidación entre pestañas.
+const lockChangeListeners = new Set<() => void>();
+
+/** Avisa cuando otra pestaña cambia la protección. Devuelve la función para dejar de escuchar. */
+export function subscribeLockChanges(listener: () => void): () => void {
+  ensureLockListener();
+  lockChangeListeners.add(listener);
+  return () => {
+    lockChangeListeners.delete(listener);
+  };
+}
+
 function handleLockInvalidation(): void {
   void getEnvelopeRaw().then((env) => {
     // Solo un sobre AUSENTE invalida la clave: en 'transition' la clave sigue
@@ -512,7 +534,19 @@ function handleLockInvalidation(): void {
     if (env.state === 'active' && activeDataKey && !isMemoryKeyValidFor(env)) {
       clearStaleMemoryKey();
     }
+  }).finally(() => {
+    if (lockOpsInFlight === 0) notifyLockListeners();
   });
+}
+
+function notifyLockListeners(): void {
+  for (const listener of lockChangeListeners) {
+    try {
+      listener();
+    } catch {
+      /* un suscriptor roto no debe frenar a los demás */
+    }
+  }
 }
 
 // Lectura sin re-enganchar el listener (para usar desde el propio listener).
@@ -617,7 +651,21 @@ function isMemoryKeyValidFor(env: DeviceLockStore | null | 'unreadable'): boolea
 }
 
 export async function getLockState(): Promise<LockState> {
+  return (await getLockSnapshot()).state;
+}
+
+/**
+ * Estado de la protección y métodos disponibles en UNA lectura del sobre.
+ * `hasPasskey` sale del sobre persistido (no de `currentMethod`, que es null
+ * tras recargar): la UI de desbloqueo lo necesita antes de cualquier unlock.
+ */
+export async function getLockSnapshot(): Promise<{ state: LockState; hasPasskey: boolean }> {
   const env = await getEnvelope();
+  const hasPasskey = !!env && env !== 'unreadable' && !!env.passkeyEnvelope;
+  return { state: stateFromEnvelope(env), hasPasskey };
+}
+
+function stateFromEnvelope(env: DeviceLockStore | null | 'unreadable'): LockState {
   if (env === 'unreadable') return 'error';
 
   if (env && env.state === 'transition') return 'transition';
@@ -1037,9 +1085,14 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
       // Solo un fallo criptográfico real (BAD_KEY) cuenta como intento, y lo
       // cuenta sobre el sobre ACTUAL (U1/U2): restaurar la copia `env` tras la
       // KDF lenta resucitaría K1 tras un disable+enable o revertiría un changePin.
+      // El código de recuperación erróneo también cuenta: sin esto, el canje
+      // sería una vía de adivinación sin lockout.
       if (err instanceof VaultError && err.code === 'BAD_KEY') {
         await recordFailedAttempt();
         throw new VaultError('BAD_KEY', 'PIN o código incorrecto');
+      }
+      if (err instanceof RecoveryKitError && err.code === 'decrypt-failed') {
+        await recordFailedAttempt();
       }
       throw err;
     }
@@ -1092,6 +1145,9 @@ export function lock(): void {
   activeDataKeyGen = null;
   currentMethod = null;
   if (vaultClientInstance) vaultClientInstance.lock();
+  // B1: la puerta y la tarjeta de ajustes se enteran del bloqueo hecho aquí
+  // (si hay una operación en curso, su final avisa con el estado definitivo).
+  if (lockOpsInFlight === 0) notifyLockListeners();
 }
 
 export async function disableProtection(): Promise<void> {

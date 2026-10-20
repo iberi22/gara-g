@@ -2,6 +2,7 @@
 import DocumentVault from '../../components/document/DocumentVault.svelte';
 import { listEntities } from '../../lib/domain.js';
 import ThemeBootstrap from '../../components/theme/ThemeBootstrap.astro';
+import LockGate from '../../components/prefs/LockGate.svelte';
 import '../../styles/gara-theme.css';
 import { instanceIdFor } from '../../garage/domain/tenant.js';
 import { isFleetOnly } from '../../lib/features';
@@ -32,11 +33,12 @@ const vehicles = (await listEntities('vehicle', instanceId).catch(() => [] as an
       </p>
     </header>
 
-    <main class="max-w-6xl mx-auto">
+    <main class="max-w-6xl mx-auto" data-lock-gate-target>
       <DocumentVault client:only="svelte" instanceId={instanceId} vehicles={vehicles}>
         <div slot="fallback" style="min-height: 28rem" aria-hidden="true"></div>
       </DocumentVault>
     </main>
+    <LockGate client:only="svelte" />
   </body>
 </html>
 
