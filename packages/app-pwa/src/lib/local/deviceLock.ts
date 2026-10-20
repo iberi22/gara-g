@@ -1145,6 +1145,9 @@ export function lock(): void {
   activeDataKeyGen = null;
   currentMethod = null;
   if (vaultClientInstance) vaultClientInstance.lock();
+  // B1: la puerta y la tarjeta de ajustes se enteran del bloqueo hecho aquí
+  // (si hay una operación en curso, su final avisa con el estado definitivo).
+  if (lockOpsInFlight === 0) notifyLockListeners();
 }
 
 export async function disableProtection(): Promise<void> {

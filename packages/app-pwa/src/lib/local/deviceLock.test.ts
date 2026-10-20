@@ -17,6 +17,7 @@ import {
   getMethod,
   lock,
   setPasskeyProvider,
+  subscribeLockChanges,
   unlock,
 } from './deviceLock';
 import {
@@ -745,5 +746,53 @@ describe('deviceLock', () => {
     await enableProtection('pin', '123456');
     lock();
     expect(await getLockSnapshot()).toEqual({ state: 'locked', hasPasskey: false });
+  });
+
+  // B1: la puerta y la tarjeta de ajustes se suscriben a los cambios de bloqueo.
+  it('lock() avisa a los suscriptores (la puerta y la tarjeta se enteran sin recargar)', async () => {
+    await enableProtection('pin', '123456');
+    const listener = vi.fn();
+    const unsubscribe = subscribeLockChanges(listener);
+    listener.mockClear();
+    lock();
+    // Síncrono: no depende de ningún aviso asíncrono entre pestañas.
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it('tras dejar de suscribirse, lock() ya no avisa a ese listener', async () => {
+    await enableProtection('pin', '123456');
+    const listener = vi.fn();
+    const unsubscribe = subscribeLockChanges(listener);
+    unsubscribe();
+    listener.mockClear();
+    lock();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  // M2: al terminar una operación de bloqueo se avisa con el estado final (síncrono).
+  it('al terminar una operación de bloqueo se avisa a los suscriptores', async () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeLockChanges(listener);
+    await enableProtection('pin', '123456');
+    expect(listener).toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  // M3: mientras hay una operación en curso no se avisa con estados intermedios.
+  it('no avisa a mitad de una operación (solo al final, con el estado definitivo)', async () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeLockChanges(listener);
+    let running = true;
+    const duringOp: boolean[] = [];
+    listener.mockImplementation(() => duringOp.push(running));
+    const op = enableProtection('pin', '123456').finally(() => {
+      running = false;
+    });
+    await op;
+    // Exactamente un aviso durante la operación: el de su final. Los avisos
+    // asíncronos por el canal entre pestañas no deben colarse mientras dura.
+    expect(duringOp.filter(Boolean).length).toBe(1);
+    unsubscribe();
   });
 });
