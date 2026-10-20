@@ -58,7 +58,7 @@ for (const vp of VIEWPORTS) {
       const fleetRes = page.waitForResponse((r) => new URL(r.url()).pathname === '/fleet/garage/flota-demo-chile');
       await page.getByTestId('guest-demo-fleet').click();
       expect((await fleetRes).status()).toBe(200);
-      await expect(page).toHaveURL(/\/fleet\/garage\/flota-demo-chile$/);
+      await slow(page).toHaveURL(/\/fleet\/garage\/flota-demo-chile$/);
 
       const fleet = page.getByTestId('demo-fleet-chile');
       await slow(fleet).toBeVisible();
