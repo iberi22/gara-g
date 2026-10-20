@@ -1,7 +1,7 @@
 import { createVaultClient, type PasskeyPrfProvider, VaultError } from '@swal/vault/web';
 import { LockedError, TransitionInProgressError } from './recordCrypto';
 import { LOCAL_INSTANCE_ID } from '../appMode';
-import { type RecoveryKitV1, generateRecoveryKitCode, sealRecoveryKit, openRecoveryKit } from '../vaultRecoveryKit';
+import { type RecoveryKitV1, RecoveryKitError, generateRecoveryKitCode, sealRecoveryKit, openRecoveryKit } from '../vaultRecoveryKit';
 
 export type LockState = 'off' | 'locked' | 'unlocked' | 'transition' | 'error';
 
@@ -54,6 +54,13 @@ let overridePasskeyProvider: PasskeyPrfProvider | undefined = undefined;
 // contador de lockout.
 let transitionMutex: Promise<void> = Promise.resolve();
 
+// Operaciones de bloqueo en curso en ESTA pestaña. Mientras haya una, los avisos
+// de cambio (que llegan también a la propia pestaña) no refrescan la UI de
+// bloqueo: si no, la puerta vería el estado 'transition' intermedio de
+// enableProtection, marcaría la app como inerte y el foco del código de
+// recuperación se perdería. Al terminar, se avisa una vez con el estado final.
+let lockOpsInFlight = 0;
+
 async function withTransitionMutex<T>(fn: () => Promise<T>): Promise<T> {
   const previous = transitionMutex;
   let release!: () => void;
@@ -61,10 +68,13 @@ async function withTransitionMutex<T>(fn: () => Promise<T>): Promise<T> {
     release = resolve;
   });
   await previous;
+  lockOpsInFlight++;
   try {
     return await fn();
   } finally {
+    lockOpsInFlight--;
     release();
+    if (lockOpsInFlight === 0) notifyLockListeners();
   }
 }
 
@@ -525,14 +535,18 @@ function handleLockInvalidation(): void {
       clearStaleMemoryKey();
     }
   }).finally(() => {
-    for (const listener of lockChangeListeners) {
-      try {
-        listener();
-      } catch {
-        /* un suscriptor roto no debe frenar a los demás */
-      }
-    }
+    if (lockOpsInFlight === 0) notifyLockListeners();
   });
+}
+
+function notifyLockListeners(): void {
+  for (const listener of lockChangeListeners) {
+    try {
+      listener();
+    } catch {
+      /* un suscriptor roto no debe frenar a los demás */
+    }
+  }
 }
 
 // Lectura sin re-enganchar el listener (para usar desde el propio listener).
@@ -1071,9 +1085,14 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
       // Solo un fallo criptográfico real (BAD_KEY) cuenta como intento, y lo
       // cuenta sobre el sobre ACTUAL (U1/U2): restaurar la copia `env` tras la
       // KDF lenta resucitaría K1 tras un disable+enable o revertiría un changePin.
+      // El código de recuperación erróneo también cuenta: sin esto, el canje
+      // sería una vía de adivinación sin lockout.
       if (err instanceof VaultError && err.code === 'BAD_KEY') {
         await recordFailedAttempt();
         throw new VaultError('BAD_KEY', 'PIN o código incorrecto');
+      }
+      if (err instanceof RecoveryKitError && err.code === 'decrypt-failed') {
+        await recordFailedAttempt();
       }
       throw err;
     }

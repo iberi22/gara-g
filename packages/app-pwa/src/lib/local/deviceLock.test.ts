@@ -6,7 +6,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LOCAL_INSTANCE_ID } from '../appMode';
 import { parseBackupCode } from '../e2ee/crypto';
-import { type RecoveryKitEntry, openRecoveryKit } from '../vaultRecoveryKit';
+import { type RecoveryKitEntry, generateRecoveryKitCode, openRecoveryKit } from '../vaultRecoveryKit';
 import {
   changePin,
   disableProtection,
@@ -728,6 +728,17 @@ describe('deviceLock', () => {
     expect(getMethod()).toBeNull();
     expect(await getLockSnapshot()).toEqual({ state: 'locked', hasPasskey: true });
     setPasskeyProvider(undefined);
+  });
+
+  it('a wrong recovery code counts as a failed attempt and arms the lockout', async () => {
+    const code = await enableProtection('pin', '123456');
+    lock();
+    const wrong = await generateRecoveryKitCode();
+    expect(wrong).not.toBe(code);
+    await expect(unlock('recovery', wrong)).rejects.toThrow();
+    // Un segundo intento inmediato ya está en lockout: el código correcto no se prueba.
+    await expect(unlock('recovery', code)).rejects.toMatchObject({ code: 'LOCKED' });
+    expect(await getLockState()).toBe('locked');
   });
 
   it('snapshot reports no passkey for a PIN-only envelope', async () => {
