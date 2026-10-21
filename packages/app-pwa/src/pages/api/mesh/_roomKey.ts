@@ -8,7 +8,7 @@
  * Presupuesto de CPU (Workers Free, 10 ms): una importKey + tres deriveBits de HKDF son
  * microsegundos. No hay PBKDF2 ni nada iterado: el secreto ya es de alta entropia.
  */
-import { env } from 'cloudflare:workers';
+import { isExplicitDev } from '../../../garage/devEnvironment';
 
 const enc = new TextEncoder();
 
@@ -69,15 +69,7 @@ export interface RoomKeys {
  * ni al reves (info y salt distintos).
  */
 function isProduction(): boolean {
-  if ((import.meta as { env?: { PROD?: boolean } }).env?.PROD === true) return true;
-  let e: string | undefined;
-  try {
-    e = (env as unknown as { ENVIRONMENT?: string }).ENVIRONMENT;
-  } catch {
-    /* sin env */
-  }
-  if (e === undefined && typeof process !== 'undefined') e = process.env.ENVIRONMENT;
-  return e === 'production';
+  return !isExplicitDev();
 }
 
 export async function deriveRoomKeys(secret: string, instanceId: string, now: number = Date.now()): Promise<RoomKeys> {

@@ -256,14 +256,26 @@ describe('/api/mesh/room-key', () => {
     envMock.ENVIRONMENT = 'production';
     await expect(deriveRoomKeys(DEV_MESH_ROOM_SECRET, 'tenant-a')).rejects.toThrow(/dev/i);
     envMock.MESH_ROOM_SECRET = DEV_MESH_ROOM_SECRET;
-    const res = await GET(ctx('tok-a1')).catch(() => null);
-    if (res) {
-      expect(res.status).toBeGreaterThanOrEqual(500);
-      expect(await res.text()).not.toContain('"key"');
-    }
+    const res = await GET(ctx('tok-a1'));
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as any;
+    expect(body).not.toHaveProperty('key');
+    expect(body.error).toBe('Malla cifrada no configurada');
     // Fuera de produccion el secreto de dev sigue funcionando.
     envMock.ENVIRONMENT = 'development';
     await expect(deriveRoomKeys(DEV_MESH_ROOM_SECRET, 'tenant-a')).resolves.toHaveProperty('key');
+  });
+
+  it('fuera de dev explicito (ENVIRONMENT desconocido) falla cerrado con 503', async () => {
+    for (const secret of [undefined, 'corto', DEV_MESH_ROOM_SECRET]) {
+      envMock.ENVIRONMENT = 'staging';
+      envMock.MESH_ROOM_SECRET = secret;
+      const r = await GET(ctx('tok-a1'));
+      expect(r.status).toBe(503);
+      expect(await r.text()).not.toContain('"key"');
+    }
+    // ENVIRONMENT ausente: Vite inlinea import.meta.env.DEV (no se puede stubear) y vitest cuenta como dev,
+    // asi que ese caso no es probable aqui; un valor desconocido ('staging') cubre la rama fail-closed.
   });
 
   it('es barato: derivar los tres valores cabe de sobra en el presupuesto de CPU', async () => {
