@@ -998,7 +998,7 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
       activeDataKey = newActiveDataKey;
       activeDataKeyGen = envelopeGeneration(envelopeStore);
       currentMethod = method;
-  clearRecoveryRawKey();
+      clearRecoveryRawKey();
 
       return code;
     } catch (err) {
@@ -1231,7 +1231,10 @@ export async function resetPinAfterRecovery(newPin: string): Promise<void> {
     const vc = getVaultClient();
     const env = await getEnvelope();
     if (env === 'unreadable' || !env || env.state !== 'active') throw new Error('No hay protección activa');
-    if (!env.pinEnvelope) return;
+    if (!env.pinEnvelope) {
+      clearRecoveryRawKey();
+      return;
+    }
     if (envelopeGeneration(env) !== activeDataKeyGen) throw new StaleTicketError(PROTECTION_CHANGED_MSG);
 
     const rawKey = recoveryRawKey;
@@ -1244,6 +1247,7 @@ export async function resetPinAfterRecovery(newPin: string): Promise<void> {
     if (!won) throw new StaleTicketError(PROTECTION_CHANGED_MSG);
     activeDataKeyGen = envelopeGeneration({ ...env, pinEnvelope: newEnvelope });
     broadcastLockChange();
+    clearRecoveryRawKey();
   });
 }
 
