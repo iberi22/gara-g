@@ -377,6 +377,6 @@ private/
 *.pfx
 secrets.json
 *.secret.*
-service-account*.json
+service?account*.json
 *-adminsdk-*.json
 docs/private/

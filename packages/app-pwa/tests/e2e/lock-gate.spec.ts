@@ -236,7 +236,7 @@ test.describe('Lock Gate', () => {
     const gate = page.getByTestId('lock-gate');
     await expect(gate).toBeVisible();
 
-    await gate.getByRole('button', { name: 'Usar código de recuperación' }).click();
+    await gate.getByTestId('lock-gate-forgot-pin').click();
     const recoveryInput = gate.locator('#lock-gate-recovery');
     const redeem = gate.getByRole('button', { name: 'Canjear código' });
     await expect(recoveryInput).toBeVisible();
@@ -271,8 +271,20 @@ test.describe('Lock Gate', () => {
     await expect.poll(() => page.evaluate(lockoutExpiredInPage), { timeout: 10000 }).toBe(true);
     await recoveryInput.fill(recoveryCode);
     await redeem.click();
+    // Tras canjear el código correcto la puerta sigue abierta para el paso de PIN nuevo (#64)
+    const newPin = gate.locator('#lock-gate-new-pin');
+    await expect(newPin).toBeVisible();
+    await newPin.fill('654321');
+    await gate.locator('#lock-gate-new-pin2').fill('654321');
+    await gate.getByRole('button', { name: 'Guardar PIN nuevo' }).click();
     await expect(gate).not.toBeVisible();
     await expect(page.locator('.fleet-shell')).not.toHaveAttribute('inert');
+
+    await page.reload();
+    await expect(gate).toBeVisible();
+    await gate.locator('#lock-gate-pin').fill('654321');
+    await gate.getByRole('button', { name: 'Desbloquear' }).click();
+    await expect(gate).not.toBeVisible();
   });
 
   test('el foco no sale del diálogo de la puerta con Tab ni Shift+Tab', async ({ page }) => {
