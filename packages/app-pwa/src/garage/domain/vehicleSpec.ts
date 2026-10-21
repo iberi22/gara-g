@@ -19,6 +19,7 @@ import { type VehicleType, findModel, normalizeVehicleType } from '../../lib/veh
 import type { BodyType, PaintFinish, PaintSpec, VehicleFamily, VehicleSpec } from '../contracts';
 import { findModelSpec } from '../specs/modelSpecs';
 import { bodyForCatalogType, defaultSpec } from '../templates/registry';
+import { applyBuild3d, sanitizeBuild3d } from './build3d';
 import { type VehicleRow, normalizeText, num, str, tidy } from './records';
 
 /** Paleta sobria: grises, azuletes y verdes apagados. Nada que parezca un logo. */
@@ -121,7 +122,8 @@ export function specForVehicle(vehicle: VehicleRow, id = ''): VehicleSpec {
       }
     : defaultSpec(body, family);
 
-  return { ...base, paint: paintFor(vehicle, str(vehicle.id) ?? id, family) };
+  const paint = paintFor(vehicle, str(vehicle.id) ?? id, family);
+  return applyBuild3d({ ...base, paint }, sanitizeBuild3d(vehicle.build3d, base.family));
 }
 
 /** Etiqueta corta "Toyota Hilux 2022" para aria-labels y capturas. */
