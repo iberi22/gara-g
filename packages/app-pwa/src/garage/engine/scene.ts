@@ -70,30 +70,71 @@ export function createContactShadowTexture(): CanvasTexture | null {
 /**
  * Genera el entorno equirectangular de estudio con gradiente de ciclorama y softboxes.
  */
-export function createStudioEnvTexture(pmrem: PMREMGenerator): Texture | null {
+export function createStudioEnvTexture(pmrem: PMREMGenerator, theme: StageTheme = 'studio'): Texture | null {
   if (typeof document === 'undefined') return null;
+  const W = 512;
+  const H = 256;
   const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 256;
+  canvas.width = W;
+  canvas.height = H;
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
+  const garage = theme === 'garage';
 
-  // Gradiente de ciclorama de estudio
-  const grad = ctx.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0.0, '#1E242B');
-  grad.addColorStop(0.25, '#DDE3EC');
-  grad.addColorStop(0.48, '#2C333D');
-  grad.addColorStop(0.52, '#14171C');
-  grad.addColorStop(1.0, '#0D0F12');
+  // Ciclorama: cielo -> horizonte -> suelo
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  if (garage) {
+    grad.addColorStop(0.0, '#10141A');
+    grad.addColorStop(0.28, '#3A4452');
+    grad.addColorStop(0.49, '#262D37');
+    grad.addColorStop(0.51, '#12151A');
+    grad.addColorStop(1.0, '#07080A');
+  } else {
+    grad.addColorStop(0.0, '#1E242B');
+    grad.addColorStop(0.25, '#DDE3EC');
+    grad.addColorStop(0.46, '#6B7482');
+    grad.addColorStop(0.5, '#2C333D');
+    grad.addColorStop(0.54, '#14171C');
+    grad.addColorStop(1.0, '#0D0F12');
+  }
   ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 512, 256);
+  ctx.fillRect(0, 0, W, H);
 
-  // Softboxes superiores y de acento azul suave
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(40, 22, 180, 28);
-  ctx.fillRect(280, 18, 190, 32);
-  ctx.fillStyle = '#93C5FD';
-  ctx.fillRect(90, 85, 110, 14);
+  // Linea de horizonte
+  ctx.fillStyle = garage ? 'rgba(186,230,253,0.35)' : 'rgba(255,255,255,0.45)';
+  ctx.fillRect(0, H / 2 - 1, W, 2);
+
+  // Rebote de suelo (resplandor suave bajo el horizonte)
+  const bounce = ctx.createLinearGradient(0, H / 2, 0, H * 0.78);
+  bounce.addColorStop(0, garage ? 'rgba(120,140,165,0.30)' : 'rgba(200,210,225,0.38)');
+  bounce.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = bounce;
+  ctx.fillRect(0, H / 2, W, H * 0.28);
+
+  // Softboxes (3) con borde suave
+  const soft = (x: number, y: number, w: number, h: number, c: string): void => {
+    ctx.save();
+    ctx.shadowColor = c;
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = c;
+    ctx.fillRect(x, y, w, h);
+    ctx.restore();
+  };
+  if (garage) {
+    // Tiras de luz como las del muro trasero (tono frio)
+    for (const y of [70, 92, 114]) soft(60, y, 170, 5, '#BAE6FD');
+    soft(300, 74, 150, 5, '#BAE6FD');
+    soft(40, 24, 150, 22, '#F1F5F9');
+    soft(330, 20, 130, 24, '#E2E8F0');
+  } else {
+    soft(40, 22, 180, 28, '#FFFFFF');
+    soft(280, 18, 190, 32, '#FFFFFF');
+    soft(238, 56, 34, 60, '#FFFFFF');
+    soft(90, 85, 110, 14, '#93C5FD');
+    // Tiras laterales que reflejan la carroceria
+    soft(10, 60, 150, 5, '#E0F2FE');
+    soft(350, 66, 150, 5, '#E0F2FE');
+  }
 
   const tex = new CanvasTexture(canvas);
   tex.mapping = EquirectangularReflectionMapping;
@@ -282,10 +323,13 @@ export class GarageSceneManager {
     }
 
     if (!this.garageEnvTexture) {
-      try {
-        this.garageEnvTexture = this.pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-      } catch {
-        // Fallback para entornos donde RoomEnvironment no compile
+      this.garageEnvTexture = createStudioEnvTexture(this.pmrem, 'garage');
+      if (!this.garageEnvTexture) {
+        try {
+          this.garageEnvTexture = this.pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+        } catch {
+          // Fallback para entornos donde RoomEnvironment no compile
+        }
       }
     }
 

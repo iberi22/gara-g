@@ -33,6 +33,7 @@ import {
 } from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { createStudioEnvTexture } from '../engine/scene';
 import type { PaintFinish, VehicleSpec } from '../contracts';
 import { createMaterialKit } from '../templates/common/materials';
 import { getTemplateById, TEMPLATES } from '../templates/registry';
@@ -72,7 +73,7 @@ export async function startLab(canvas: HTMLCanvasElement, params: URLSearchParam
   const scene = new Scene();
   scene.background = new Color(params.get('bg') ?? '#dfe3e8');
   const pmrem = new PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environment = createStudioEnvTexture(pmrem) ?? pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environmentIntensity = 0.9;
 
   const floorMat = new MeshStandardNodeMaterial();
