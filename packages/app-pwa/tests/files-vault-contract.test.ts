@@ -26,6 +26,7 @@ import { POST as FILES_POST } from '../src/pages/api/fleet/files.js';
 import { POST as UPLOAD_POST } from '../src/pages/api/fleet/upload.js';
 import { GET as R2_GET } from '../src/pages/r2/[...path].js';
 import { r2PutBody } from '../src/lib/fleetApi.js';
+import { vault } from '../src/lib/document.js';
 
 // El vault exige sesión y el middleware llama a getUserFromRequest: se sustituye
 // la lectura de KV por un getSessionUser fijo (misma forma que el original).
@@ -376,6 +377,26 @@ describe('el cuerpo del put no se carga entero en memoria', () => {
   it('sin ese global (node en los tests) cae a arrayBuffer', async () => {
     const body = await r2PutBody(fakeFile('x.pdf', 'application/pdf', 10));
     expect(body).toBeInstanceOf(ArrayBuffer);
+  });
+});
+
+describe('el vault de documentos no sube shares del dispositivo', () => {
+  it('el cuerpo que llega a R2 no lleva ningún share (x=1 ni x=2)', async () => {
+    const put = vi.fn().mockResolvedValue({});
+    const record = await vault(
+      {
+        instanceId: TENANT,
+        vehicleId: 'VH-1',
+        kind: 'insurance',
+        file: new Uint8Array([1, 2, 3, 4]),
+        fileName: 'soat.pdf',
+      },
+      { r2Binding: { put } },
+    );
+    expect(put).toHaveBeenCalledTimes(1);
+    const cuerpo = JSON.parse(put.mock.calls[0][1] as string);
+    expect(cuerpo.shares).toEqual([]);
+    expect(cuerpo.ciphertext).toBe(record.sealedPack.ciphertext);
   });
 });
 
