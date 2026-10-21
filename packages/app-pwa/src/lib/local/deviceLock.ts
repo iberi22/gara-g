@@ -40,6 +40,9 @@ const LOCK_PING_KEY = 'gara-lock-ping';
 
 let activeDataKey: CryptoKey | null = null;
 let currentMethod: 'pin' | 'passkey' | null = null;
+// Clave cruda solo mientras la sesión viene de un desbloqueo con código de
+// recuperación (permite fijar PIN nuevo sin el viejo); se borra al bloquear.
+let recoveryRawKey: Uint8Array | null = null;
 // Generación del sobre del que salió activeDataKey (M3): ata la clave en
 // memoria al sobre persistido para que una rotación (disable+enable en otra
 // pestaña) no deje una clave obsoleta que cifra filas perdidas.
@@ -60,6 +63,11 @@ let transitionMutex: Promise<void> = Promise.resolve();
 // enableProtection, marcaría la app como inerte y el foco del código de
 // recuperación se perdería. Al terminar, se avisa una vez con el estado final.
 let lockOpsInFlight = 0;
+
+function clearRecoveryRawKey(): void {
+  recoveryRawKey?.fill(0);
+  recoveryRawKey = null;
+}
 
 async function withTransitionMutex<T>(fn: () => Promise<T>): Promise<T> {
   const previous = transitionMutex;
@@ -619,6 +627,7 @@ function clearStaleMemoryKey(): void {
   activeDataKey = null;
   activeDataKeyGen = null;
   currentMethod = null;
+  clearRecoveryRawKey();
   try {
     vaultClientInstance?.lock();
   } catch {
@@ -866,6 +875,7 @@ async function resumeTransition(env: DeviceLockStore, key: CryptoKey): Promise<v
   activeDataKey = key;
   activeDataKeyGen = envelopeGeneration(env);
   currentMethod = method;
+  clearRecoveryRawKey();
 }
 
 // Devuelve código de recuperación de alta entropía (16 bytes en hex) al habilitar
@@ -988,6 +998,7 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
       activeDataKey = newActiveDataKey;
       activeDataKeyGen = envelopeGeneration(envelopeStore);
       currentMethod = method;
+      clearRecoveryRawKey();
 
       return code;
     } catch (err) {
@@ -1132,6 +1143,7 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
 
     activeDataKey = key;
     activeDataKeyGen = envelopeGeneration(env);
+    recoveryRawKey = method === 'recovery' ? rawKey : null;
     if (method === 'recovery') {
       currentMethod = env.targetMethod && env.targetMethod !== 'off' ? env.targetMethod : (env.pinEnvelope ? 'pin' : 'passkey');
     } else {
@@ -1144,6 +1156,7 @@ export function lock(): void {
   activeDataKey = null;
   activeDataKeyGen = null;
   currentMethod = null;
+  clearRecoveryRawKey();
   if (vaultClientInstance) vaultClientInstance.lock();
   // B1: la puerta y la tarjeta de ajustes se enteran del bloqueo hecho aquí
   // (si hay una operación en curso, su final avisa con el estado definitivo).
@@ -1198,7 +1211,43 @@ export async function disableProtection(): Promise<void> {
     activeDataKey = null;
     activeDataKeyGen = null;
     currentMethod = null;
+    clearRecoveryRawKey();
     if (vaultClientInstance) vaultClientInstance.lock();
+  });
+}
+
+/**
+ * Fija un PIN nuevo tras un desbloqueo con código de recuperación, sin pedir
+ * el PIN viejo (olvidado). Reenvuelve la clave activa en memoria con el PIN
+ * nuevo. Sin sobre de PIN (solo passkey) no hace nada.
+ */
+export async function resetPinAfterRecovery(newPin: string): Promise<void> {
+  return withTransitionMutex(async () => {
+    if (!activeDataKey || !recoveryRawKey) {
+      throw new Error('Solo se puede fijar un PIN nuevo justo después de desbloquear con el código de recuperación');
+    }
+    if (!PIN_PATTERN.test(newPin)) throw new Error('El nuevo PIN debe tener exactamente 6 dígitos');
+
+    const vc = getVaultClient();
+    const env = await getEnvelope();
+    if (env === 'unreadable' || !env || env.state !== 'active') throw new Error('No hay protección activa');
+    if (!env.pinEnvelope) {
+      clearRecoveryRawKey();
+      return;
+    }
+    if (envelopeGeneration(env) !== activeDataKeyGen) throw new StaleTicketError(PROTECTION_CHANGED_MSG);
+
+    const rawKey = recoveryRawKey;
+    await vc.unlock({ passphrase: newPin });
+    const newEnvelope = await vc.wrapKey(rawKey);
+
+    const won = await casMutateEnvelope(env, (cur) => {
+      cur.pinEnvelope = newEnvelope;
+    });
+    if (!won) throw new StaleTicketError(PROTECTION_CHANGED_MSG);
+    activeDataKeyGen = envelopeGeneration({ ...env, pinEnvelope: newEnvelope });
+    broadcastLockChange();
+    clearRecoveryRawKey();
   });
 }
 

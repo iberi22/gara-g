@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { getLockSnapshot, subscribeLockChanges, unlock } from '../../lib/local/deviceLock';
+  import { getLockSnapshot, resetPinAfterRecovery, subscribeLockChanges, unlock } from '../../lib/local/deviceLock';
   import { RecoveryKitError } from '../../lib/vaultRecoveryKit';
   import type { LockState } from '../../lib/local/deviceLock';
   import { VaultError } from '@swal/vault/web';
@@ -27,8 +27,13 @@
   // Canje del código de recuperación (sin PIN): acceso secundario, mismo lockout que el PIN.
   let recoveryOpen = $state(false);
   let recoveryCode = $state('');
+  // Tras canjear el código hay que fijar un PIN nuevo antes de abrir la app.
+  let newPinPhase = $state(false);
+  let newPin = $state('');
+  let newPin2 = $state('');
+  let newPinInput = $state<HTMLInputElement | null>(null);
 
-  const blocking = $derived(loading || state === 'locked' || state === 'transition' || state === 'error');
+  const blocking = $derived(loading || newPinPhase || state === 'locked' || state === 'transition' || state === 'error');
   const showForm = $derived(!loading && (state === 'locked' || state === 'transition'));
 
   async function refresh() {
@@ -108,7 +113,9 @@
     unlocking = true;
     try {
       await unlock('recovery', recoveryCode.trim());
-      state = 'unlocked';
+      // Desbloqueado en memoria, pero la puerta sigue cerrada hasta fijar un PIN nuevo.
+      newPinPhase = true;
+      recoveryOpen = false;
     } catch (err: unknown) {
       if (err instanceof RecoveryKitError) {
         errorMsg = 'El código de recuperación no es válido.';
@@ -122,6 +129,32 @@
       recoveryCode = '';
       await tick();
       recoveryInput?.focus();
+    }
+  }
+
+  async function handleNewPin() {
+    errorMsg = null;
+    if (!/^[0-9]{6}$/.test(newPin)) {
+      errorMsg = 'El PIN nuevo debe tener exactamente 6 dígitos.';
+      return;
+    }
+    if (newPin !== newPin2) {
+      errorMsg = 'Los PIN no coinciden.';
+      return;
+    }
+    unlocking = true;
+    try {
+      await resetPinAfterRecovery(newPin);
+      newPinPhase = false;
+      state = 'unlocked';
+    } catch (err: unknown) {
+      errorMsg = err instanceof Error ? err.message : 'No se pudo fijar el PIN nuevo';
+    } finally {
+      unlocking = false;
+      newPin = '';
+      newPin2 = '';
+      await tick();
+      newPinInput?.focus();
     }
   }
 
@@ -150,6 +183,10 @@
   });
 
   // Al abrir el formulario de recuperación, el foco va a su input.
+  $effect(() => {
+    if (newPinPhase) void tick().then(() => newPinInput?.focus());
+  });
+
   $effect(() => {
     if (recoveryOpen) void tick().then(() => recoveryInput?.focus());
   });
@@ -191,6 +228,25 @@
             <button type="button" class="btn on" onclick={() => location.reload()}>Recargar</button>
           </div>
         {:else}
+          {#if newPinPhase}
+            <p class="hint">Código de recuperación aceptado. Elige un PIN nuevo de 6 dígitos para volver a entrar.</p>
+            <form id="lock-gate-newpin-form" class="st" onsubmit={(e) => { e.preventDefault(); void handleNewPin(); }}>
+              <label class="sr-only" for="lock-gate-new-pin">PIN nuevo de 6 dígitos</label>
+              <input id="lock-gate-new-pin" type="password" inputmode="numeric" pattern={'[0-9]{6}'} maxlength="6"
+                bind:this={newPinInput} bind:value={newPin} placeholder="PIN nuevo de 6 dígitos" class="input-pin"
+                disabled={unlocking} required autocomplete="new-password"
+                aria-invalid={errorMsg ? 'true' : 'false'} aria-describedby={errorMsg ? 'lock-gate-error' : undefined} />
+              <label class="sr-only" for="lock-gate-new-pin2">Repite el PIN nuevo</label>
+              <input id="lock-gate-new-pin2" type="password" inputmode="numeric" pattern={'[0-9]{6}'} maxlength="6"
+                bind:value={newPin2} placeholder="Repite el PIN nuevo" class="input-pin"
+                disabled={unlocking} required autocomplete="new-password" />
+              <div class="btns">
+                <button type="submit" class="btn on" disabled={unlocking || newPin.length !== 6 || newPin2.length !== 6}>
+                  {unlocking ? 'Guardando...' : 'Guardar PIN nuevo'}
+                </button>
+              </div>
+            </form>
+          {:else}
           {#if state === 'transition'}
             <p class="hint" id="lock-gate-desc">Una modificación anterior de la protección fue interrumpida. Desbloquea el dispositivo para terminarla.</p>
           {/if}
@@ -223,8 +279,8 @@
                   Usar passkey
                 </button>
               {/if}
-              <button type="button" class="btn" aria-expanded={recoveryOpen} aria-controls="lock-gate-recovery-form" disabled={unlocking} onclick={() => (recoveryOpen = !recoveryOpen)}>
-                {recoveryOpen ? 'Ocultar código de recuperación' : 'Usar código de recuperación'}
+              <button type="button" class="btn" aria-expanded={recoveryOpen} aria-controls="lock-gate-recovery-form" data-testid="lock-gate-forgot-pin" disabled={unlocking} onclick={() => (recoveryOpen = !recoveryOpen)}>
+                {recoveryOpen ? 'Ocultar código de recuperación' : 'Olvidé mi PIN'}
               </button>
             </div>
           </form>
@@ -253,6 +309,7 @@
                 </button>
               </div>
             </form>
+          {/if}
           {/if}
 
           {#if errorMsg}
