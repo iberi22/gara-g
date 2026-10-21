@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { getLockSnapshot, changePin, subscribeLockChanges, unlock } from '../../lib/local/deviceLock';
+  import { getLockSnapshot, resetPinAfterRecovery, subscribeLockChanges, unlock } from '../../lib/local/deviceLock';
   import { RecoveryKitError } from '../../lib/vaultRecoveryKit';
   import type { LockState } from '../../lib/local/deviceLock';
   import { VaultError } from '@swal/vault/web';
@@ -144,7 +144,7 @@
     }
     unlocking = true;
     try {
-      await changePin('', newPin);
+      await resetPinAfterRecovery(newPin);
       newPinPhase = false;
       state = 'unlocked';
     } catch (err: unknown) {

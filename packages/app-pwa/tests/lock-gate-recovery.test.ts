@@ -4,14 +4,14 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 
 const mocks = vi.hoisted(() => ({
   unlock: vi.fn(),
-  changePin: vi.fn()
+  resetPinAfterRecovery: vi.fn()
 }));
 
 vi.mock('../src/lib/local/deviceLock', () => ({
   getLockSnapshot: vi.fn(async () => ({ state: 'locked', hasPasskey: false })),
   subscribeLockChanges: vi.fn(() => () => {}),
   unlock: mocks.unlock,
-  changePin: mocks.changePin
+  resetPinAfterRecovery: mocks.resetPinAfterRecovery
 }));
 
 import LockGate from '../src/components/prefs/LockGate.svelte';
@@ -38,7 +38,7 @@ describe('LockGate: recuperar PIN olvidado', () => {
   let cmp: ReturnType<typeof mount>;
   beforeEach(async () => {
     mocks.unlock.mockReset().mockResolvedValue(undefined);
-    mocks.changePin.mockReset().mockResolvedValue(undefined);
+    mocks.resetPinAfterRecovery.mockReset().mockResolvedValue(undefined);
     cmp = mount(LockGate, { target: document.body });
     await settle();
   });
@@ -68,11 +68,11 @@ describe('LockGate: recuperar PIN olvidado', () => {
     await type(q<HTMLInputElement>('#lock-gate-new-pin')!, '123456');
     await type(q<HTMLInputElement>('#lock-gate-new-pin2')!, '123456');
     await submit('#lock-gate-newpin-form');
-    expect(mocks.changePin).toHaveBeenCalledWith('', '123456');
+    expect(mocks.resetPinAfterRecovery).toHaveBeenCalledWith('123456');
     expect(q('[data-testid="lock-gate"]')).toBeNull();
   });
 
-  it('rechaza PIN nuevo que no coincide sin llamar a changePin', async () => {
+  it('rechaza PIN nuevo que no coincide sin llamar a resetPinAfterRecovery', async () => {
     q<HTMLButtonElement>('[data-testid="lock-gate-forgot-pin"]')!.click();
     await settle();
     await type(q<HTMLInputElement>('#lock-gate-recovery')!, 'abc');
@@ -80,7 +80,7 @@ describe('LockGate: recuperar PIN olvidado', () => {
     await type(q<HTMLInputElement>('#lock-gate-new-pin')!, '123456');
     await type(q<HTMLInputElement>('#lock-gate-new-pin2')!, '654321');
     await submit('#lock-gate-newpin-form');
-    expect(mocks.changePin).not.toHaveBeenCalled();
+    expect(mocks.resetPinAfterRecovery).not.toHaveBeenCalled();
     expect(q('[role="alert"]')?.textContent).toContain('no coinciden');
     expect(q('[data-testid="lock-gate"]')).not.toBeNull();
   });
