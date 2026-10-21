@@ -8,6 +8,8 @@
  * Presupuesto de CPU (Workers Free, 10 ms): una importKey + tres deriveBits de HKDF son
  * microsegundos. No hay PBKDF2 ni nada iterado: el secreto ya es de alta entropia.
  */
+import { env } from 'cloudflare:workers';
+
 const enc = new TextEncoder();
 
 /** Duracion de una epoca de clave: una semana. */
@@ -66,7 +68,23 @@ export interface RoomKeys {
  * Tenants distintos, o epocas distintas, dan claves independientes; la clave no revela el roomId
  * ni al reves (info y salt distintos).
  */
+function isProduction(): boolean {
+  if ((import.meta as { env?: { PROD?: boolean } }).env?.PROD === true) return true;
+  let e: string | undefined;
+  try {
+    e = (env as unknown as { ENVIRONMENT?: string }).ENVIRONMENT;
+  } catch {
+    /* sin env */
+  }
+  if (e === undefined && typeof process !== 'undefined') e = process.env.ENVIRONMENT;
+  return e === 'production';
+}
+
 export async function deriveRoomKeys(secret: string, instanceId: string, now: number = Date.now()): Promise<RoomKeys> {
+  // Fail closed: el secreto de dev esta publicado, jamas debe derivar claves en produccion.
+  if (secret === DEV_MESH_ROOM_SECRET && isProduction()) {
+    throw new Error('DEV mesh room secret refused in production: configure MESH_ROOM_SECRET');
+  }
   const base = await crypto.subtle.importKey('raw', enc.encode(secret), 'HKDF', false, ['deriveBits']);
   const epoch = epochAt(now);
   const [roomId, key, prev] = await Promise.all([

@@ -252,6 +252,20 @@ describe('/api/mesh/room-key', () => {
     expect((await get('tok-a1')).body.roomId).not.toBe(dev.body.roomId);
   });
 
+  it('produccion con el secreto de dev publicado como si fuera real falla cerrado (nunca entrega clave)', async () => {
+    envMock.ENVIRONMENT = 'production';
+    await expect(deriveRoomKeys(DEV_MESH_ROOM_SECRET, 'tenant-a')).rejects.toThrow(/dev/i);
+    envMock.MESH_ROOM_SECRET = DEV_MESH_ROOM_SECRET;
+    const res = await GET(ctx('tok-a1')).catch(() => null);
+    if (res) {
+      expect(res.status).toBeGreaterThanOrEqual(500);
+      expect(await res.text()).not.toContain('"key"');
+    }
+    // Fuera de produccion el secreto de dev sigue funcionando.
+    envMock.ENVIRONMENT = 'development';
+    await expect(deriveRoomKeys(DEV_MESH_ROOM_SECRET, 'tenant-a')).resolves.toHaveProperty('key');
+  });
+
   it('es barato: derivar los tres valores cabe de sobra en el presupuesto de CPU', async () => {
     const t = performance.now();
     for (let i = 0; i < 20; i++) await deriveRoomKeys(FIXTURE_ROOM_SECRET, 'tenant-a');
