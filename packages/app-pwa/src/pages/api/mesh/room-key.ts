@@ -22,9 +22,9 @@
  *
  * SECRETO (binding del Worker): MESH_ROOM_SECRET. Hay que crearlo ANTES del primer despliegue:
  *     openssl rand -base64 48 | wrangler secret put MESH_ROOM_SECRET
- *   - En produccion (ENVIRONMENT === 'production') sin secreto, o con menos de 32 caracteres,
+ *   - Fuera de dev explicito (ver garage/devEnvironment.ts) sin secreto, o con menos de 32 caracteres,
  *     el endpoint responde 503 y la grafica queda en modo local: nunca cae a una sala sin cifrar.
- *   - Fuera de produccion usa un secreto de desarrollo PUBLICADO en el repo (no protege nada).
+ *   - En dev explicito usa un secreto de desarrollo PUBLICADO en el repo (no protege nada).
  *   - Rotarlo cambia todas las salas y claves: los dispositivos abiertos pierden la malla hasta
  *     recargar. El build no puede comprobar secretos; es un paso manual del despliegue.
  *   - Los tipos del binding estan en src/env.d.ts (Cloudflare.Env).
@@ -35,6 +35,7 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { sessionInstanceId } from '../../../garage/domain/tenant';
+import { isExplicitDev } from '../../../garage/devEnvironment';
 import { getAuthUser } from '../fleetApi/auth';
 import { DEV_MESH_ROOM_SECRET, MIN_SECRET_LENGTH, deriveRoomKeys } from './_roomKey';
 import { isRoomOwner } from './_roomOwner';
@@ -47,22 +48,13 @@ function reply(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: HEADERS });
 }
 
-function environment(): string | undefined {
-  let e: string | undefined;
-  try {
-    e = (env as unknown as { ENVIRONMENT?: string }).ENVIRONMENT;
-  } catch {
-    /* sin env */
-  }
-  if (e === undefined && typeof process !== 'undefined') e = process.env.ENVIRONMENT;
-  return e;
-}
-
-/** `null` = no hay secreto utilizable (solo en produccion). */
+/** `null` = no hay secreto utilizable. Fuera de dev explicito: >= 32 caracteres y distinto del de dev. */
 function resolveSecret(): string | null {
   const configured = (env as unknown as { MESH_ROOM_SECRET?: unknown }).MESH_ROOM_SECRET;
-  if (environment() === 'production') {
-    return typeof configured === 'string' && configured.length >= MIN_SECRET_LENGTH ? configured : null;
+  if (!isExplicitDev()) {
+    return typeof configured === 'string' && configured.length >= MIN_SECRET_LENGTH && configured !== DEV_MESH_ROOM_SECRET
+      ? configured
+      : null;
   }
   return typeof configured === 'string' && configured.length > 0 ? configured : DEV_MESH_ROOM_SECRET;
 }
