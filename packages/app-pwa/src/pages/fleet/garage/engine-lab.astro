@@ -123,6 +123,7 @@ export const prerender = false;
     <script>
       import type { QualityTier, PartState, StageTheme, ViewMode, VehicleSpec, DimensionAnchors } from '../../../garage/contracts';
       import { createGarageEngine } from '../../../garage/engine';
+      import { getTemplateById } from '../../../garage/templates/registry';
       import { DEBUG_TEMPLATE } from '../../../garage/templates/common/debugTemplate';
 
       async function main() {
@@ -164,8 +165,10 @@ export const prerender = false;
         engine.setTheme(theme);
         await engine.mount(canvas);
 
+        const templateId = params.get('template');
+        const chosen = templateId ? getTemplateById(templateId) : undefined;
         const spec: VehicleSpec = {
-          ...DEBUG_TEMPLATE.defaults,
+          ...(chosen ?? DEBUG_TEMPLATE).defaults,
           paint: {
             baseColor: token('--swal-accent'),
             finish: 'metallic',
