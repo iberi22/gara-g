@@ -25,6 +25,7 @@ import type {
   PartSlotId,
   ScreenPoint,
   StageTheme,
+  VehicleSpec,
   ViewMode,
 } from '../../garage/contracts';
 import { detectSwipe } from './swipe';
@@ -406,6 +407,15 @@ function handleTouchEnd(e: TouchEvent) {
 
 export function setPaint(paint: Parameters<GarageEngineApi['setPaint']>[0]): void {
   engine?.setPaint(paint);
+}
+
+export function updateVehicle(spec: VehicleSpec): void {
+  if (!engine) return;
+  engine.updateVehicle(spec);
+  if (vehicle) {
+    engine.setPartStates(vehicle.parts);
+    engine.setViewMode(viewMode);
+  }
 }
 
 export function setTheme(next: StageTheme): void {
