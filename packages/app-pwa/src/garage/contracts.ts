@@ -532,6 +532,8 @@ export interface GarageEngineApi {
   mount(canvas: HTMLCanvasElement): Promise<{ backend: RenderBackend }>;
   /** Cambia el vehiculo en el tornamesa. direction: 1 = siguiente (entra por la derecha). */
   showVehicle(spec: VehicleSpec, opts?: { direction?: 1 | -1 }): Promise<void>;
+  /** Reconstruye el vehiculo actual in situ con otra spec (camara intacta). No-op sin vehiculo. */
+  updateVehicle(spec: VehicleSpec): void;
   setPartStates(states: PartState[]): void;
   setViewMode(mode: ViewMode): void;
   /** Encuadra la camara en una pieza; null vuelve a la vista general. */

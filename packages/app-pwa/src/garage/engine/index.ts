@@ -286,6 +286,39 @@ export function createGarageEngine(opts: GarageEngineOptions = {}): GarageEngine
     notifyViewChangeIfNeeded();
   }
 
+  function rebuildInPlace(spec: VehicleSpec): void {
+    if (!currentVehicle) return;
+    currentSpec = spec;
+    ++vehicleSeq;
+
+    const tpl = getTemplate(spec.body, spec.family);
+    const lod = governor.getTier() === 'low' ? 'low' : 'high';
+    const nextVehicle = tpl.build(spec, { materials: kit, lod });
+    nextVehicle.root.userData.isVehicle = true;
+
+    const localBox = getVehicleLocalBox(nextVehicle);
+
+    applyViewMode(nextVehicle, currentViewMode, partStatesMap, viewModeMaterials);
+
+    const oldVehicle = currentVehicle;
+    sceneMgr.scene.remove(oldVehicle.root);
+    disposeVehicleGeometries(oldVehicle.root);
+
+    sceneMgr.scene.add(nextVehicle.root);
+    currentVehicle = nextVehicle;
+    pickingMgr.setVehicle(nextVehicle);
+
+    sceneMgr.updateContactShadow(localBox, nextVehicle.root.rotation.y);
+
+    // Conservar camara: immediate = false refresca bounds internos sin moverla
+    cameraMgr?.fitToVehicle(nextVehicle, false);
+
+    sceneMgr.requestShadowUpdate();
+    markViewChanged();
+    scheduleTurntableActivation();
+    wakeLoop();
+  }
+
   const api: GarageEngineInternalApi = {
     setTheme(theme: StageTheme): void {
       currentTheme = theme;
@@ -496,36 +529,12 @@ export function createGarageEngine(opts: GarageEngineOptions = {}): GarageEngine
     },
 
     setPaint(paint: PaintSpec): void {
-      if (!currentSpec || !currentVehicle) return;
-      currentSpec = { ...currentSpec, paint };
-      ++vehicleSeq;
+      if (!currentSpec) return;
+      rebuildInPlace({ ...currentSpec, paint });
+    },
 
-      const tpl = getTemplate(currentSpec.body, currentSpec.family);
-      const lod = governor.getTier() === 'low' ? 'low' : 'high';
-      const nextVehicle = tpl.build(currentSpec, { materials: kit, lod });
-      nextVehicle.root.userData.isVehicle = true;
-
-      const localBox = getVehicleLocalBox(nextVehicle);
-
-      applyViewMode(nextVehicle, currentViewMode, partStatesMap, viewModeMaterials);
-
-      const oldVehicle = currentVehicle;
-      sceneMgr.scene.remove(oldVehicle.root);
-      disposeVehicleGeometries(oldVehicle.root);
-
-      sceneMgr.scene.add(nextVehicle.root);
-      currentVehicle = nextVehicle;
-      pickingMgr.setVehicle(nextVehicle);
-
-      sceneMgr.updateContactShadow(localBox, nextVehicle.root.rotation.y);
-
-      // Conservar camara: immediate = false refresca bounds internos sin moverla
-      cameraMgr?.fitToVehicle(nextVehicle, false);
-
-      sceneMgr.requestShadowUpdate();
-      markViewChanged();
-      scheduleTurntableActivation();
-      wakeLoop();
+    updateVehicle(spec: VehicleSpec): void {
+      rebuildInPlace(spec);
     },
 
     resize(): void {
