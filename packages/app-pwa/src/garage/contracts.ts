@@ -101,6 +101,17 @@ export interface ModelSpecEntry {
   sources: string[];
 }
 
+/** Armado 3D por vehiculo (se guarda en la fila del vehiculo; se sanea antes de usarse). */
+export interface VehicleBuild3d {
+  v: 1;
+  body?: BodyType;
+  dims?: Partial<VehicleDimensions>;
+  tireFront?: TireSize;
+  tireRear?: TireSize;
+  shape?: Record<string, number>;
+  variants?: Record<PartSlotId, string>;
+}
+
 // ---------------------------------------------------------------------------
 // Piezas
 // ---------------------------------------------------------------------------

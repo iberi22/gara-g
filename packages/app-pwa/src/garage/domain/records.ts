@@ -38,6 +38,8 @@ export interface VehicleRow extends Record<string, unknown> {
   /** Pintura elegida por el usuario (#rrggbb). */
   color?: string;
   paint?: string;
+  /** Armado 3D del usuario (VehicleBuild3d); sin sanear, ver build3d.ts. */
+  build3d?: unknown;
 }
 
 export interface MaintenanceRow extends Record<string, unknown> {
