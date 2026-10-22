@@ -1,11 +1,14 @@
 import { createVaultClient, type PasskeyPrfProvider, VaultError } from '@swal/vault/web';
 import { LockedError, TransitionInProgressError } from './recordCrypto';
+import { LOCAL_INSTANCE_ID } from '../appMode';
+import { type RecoveryKitV1, generateRecoveryKitCode, sealRecoveryKit, openRecoveryKit } from '../vaultRecoveryKit';
 
 export type LockState = 'off' | 'locked' | 'unlocked' | 'transition' | 'error';
 
 export interface DeviceLockStore {
   pinEnvelope?: string;
   passkeyEnvelope?: string;
+  recoveryKit?: RecoveryKitV1;
   state?: 'transition' | 'active';
   targetMethod?: 'pin' | 'passkey' | 'off';
   failedAttempts?: number;
@@ -24,6 +27,10 @@ export class StaleTicketError extends Error {
 
 export function isLockRetryable(err: unknown): boolean {
   return err instanceof StaleTicketError || err instanceof TransitionInProgressError;
+}
+
+function toBase64Std(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
 }
 
 const STORE_NAME = 'gara-lock';
@@ -915,6 +922,13 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
       // 3. Mark as active (vallado: el sobre sigue siendo nuestro).
       envelopeStore.state = 'active';
       envelopeStore.targetMethod = undefined;
+      const code = await generateRecoveryKitCode();
+      envelopeStore.recoveryKit = await sealRecoveryKit(
+        'gara-g',
+        LOCAL_INSTANCE_ID,
+        [{ entity: 'device-lock', id: 'data-key', share: { index: 2, value: toBase64Std(rawKey) } }],
+        code
+      );
       if (!(await casWriteEnvelopeIfMarker(markerId, envelopeStore))) {
         throw new StaleTicketError(
           'La protección cambió en otra pestaña durante la habilitación; operación cancelada sin modificar tus datos.'
@@ -927,9 +941,7 @@ export async function enableProtection(method: 'pin' | 'passkey', secret?: strin
       activeDataKeyGen = envelopeGeneration(envelopeStore);
       currentMethod = method;
 
-      // TODO: recovery flow must go through the vault recovery kit of PR #35
-      // and the same phone's biometrics/pattern. For now return dummy
-      return '00000000000000000000000000000000';
+      return code;
     } catch (err) {
       // Sin clave a medio publicar: la transición queda pendiente y reanudable.
       activeDataKey = null;
@@ -969,7 +981,7 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
     throw new VaultError('LOCKED', 'Demasiados intentos. Inténtalo más tarde.');
   }
   // Validación neutra: un método o formato inválido nunca cuenta como intento.
-  if (method !== 'pin' && method !== 'passkey') {
+  if (method !== 'pin' && method !== 'passkey' && method !== 'recovery') {
     throw new Error('Método desconocido');
   }
   if (method === 'pin' && (!secret || !PIN_PATTERN.test(secret))) {
@@ -999,7 +1011,20 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
     let rawKey: Uint8Array;
 
     try {
-      if (method === 'pin') {
+      if (method === 'recovery') {
+        if (!env.recoveryKit) throw new Error('No hay código de recuperación configurado');
+        const entries = await openRecoveryKit(env.recoveryKit, secret ?? '', {
+          appId: 'gara-g',
+          instanceId: LOCAL_INSTANCE_ID
+        });
+        const entry = entries[0];
+        const b64 = (entry.share as { value: string }).value;
+        const binString = atob(b64);
+        rawKey = new Uint8Array(binString.length);
+        for (let i = 0; i < binString.length; i++) {
+          rawKey[i] = binString.charCodeAt(i);
+        }
+      } else if (method === 'pin') {
         if (!env.pinEnvelope) throw new Error('No hay PIN configurado');
         await vc.unlock({ passphrase: secret as string });
         rawKey = await vc.unwrapKey(env.pinEnvelope);
@@ -1054,7 +1079,11 @@ export async function unlock(method: 'pin' | 'passkey' | 'recovery', secret?: st
 
     activeDataKey = key;
     activeDataKeyGen = envelopeGeneration(env);
-    currentMethod = method === 'passkey' ? 'passkey' : 'pin';
+    if (method === 'recovery') {
+      currentMethod = env.targetMethod && env.targetMethod !== 'off' ? env.targetMethod : (env.pinEnvelope ? 'pin' : 'passkey');
+    } else {
+      currentMethod = method === 'passkey' ? 'passkey' : 'pin';
+    }
   });
 }
 
